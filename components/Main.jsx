@@ -12,11 +12,11 @@ export function Main() {
   const [IsLogged, setIsLogged] = useState(false);
   
 
-  const loginUrl = "https://api-forms.sfisas.com.co/auth/token";
+  const loginUrl = "https://4c1c-179-33-13-68.ngrok-free.app/auth/token";
   const loginData = {
     grant_type: "password",
-    username: "maumopita12@gmail.com", // Reemplaza con el nombre de usuario
-    password: "Maurox101299", // Reemplaza con la contraseña
+    username: "cgomez@sfisas.com", // Reemplaza con el nombre de usuario
+    password: "12345678", // Reemplaza con la contraseña
   };
 
   const formBody = Object.keys(loginData)
@@ -40,7 +40,7 @@ export function Main() {
         if (!response.ok) {
           throw new Error(`HTTP error! Status: ${response.status}`);
         }
-
+        setIsLogged(true)
         const data = await response.json();
         console.log("Access Token:", data.access_token); // Muestra el token de acceso
 
@@ -55,19 +55,19 @@ export function Main() {
     Auth_Login();
   }, [isConnected]);
 
-  useEffect(() => {
-    const getforms = async () => {
-      if (isConnected) {
-        try {
-          const data = await getFormsToAPI();
-          setForms(data);
-        } catch (error) {
-          console.error(`Error obtaining forms:`, error);
-        }
-      }
-    };
-    getforms();
-  }, [isConnected]);
+  // useEffect(() => {
+  //   const getforms = async () => {
+  //     if (isConnected) {
+  //       try {
+  //         const data = await getFormsToAPI();
+  //         setForms(data);
+  //       } catch (error) {
+  //         console.error(`Error obtaining forms:`, error);
+  //       }
+  //     }
+  //   };
+  //   getforms();
+  // }, [isConnected]);
 
   return (
      IsLogged == true ? 

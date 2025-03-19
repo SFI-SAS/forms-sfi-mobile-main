@@ -9,7 +9,7 @@ import {
 } from "react-native";
 import MatrixBackground from "./MatrixBackground";
 
-const PUBLIC_API = "https://9868-179-33-13-68.ngrok-free.app";
+const PUBLIC_API = "http://127.0.0.1:8000";
 
 export function Login() {
   const [username, setUsername] = useState("");
@@ -22,13 +22,14 @@ export function Login() {
       formData.append("password", password);
       formData.append("grant_type", "password");
 
-      const response = await fetch(`${PUBLIC_API}/auth/token`, {
+      const response = await fetch(`https://4c1c-179-33-13-68.ngrok-free.app/auth/token`, {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
         },
         body: new URLSearchParams(formData).toString(),
       });
+
 
       const text = await response.text();
       console.log("Response Status:", response.status);

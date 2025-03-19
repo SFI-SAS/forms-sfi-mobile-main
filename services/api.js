@@ -7,7 +7,7 @@ export const sendResponsesToAPI = async (formId, responses) => {
   responses.forEach((response, index) => {
     formData.append(
       "token",
-      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJtYXVtb3BpdGExMkBnbWFpbC5jb20iLCJleHAiOjE3MzAyMTcwOTl9.BJsvJj8amQxOLcGDWxC_tABGQbdOokN26rJAgl2XCw0"
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjZ29tZXpAc2Zpc2FzLmNvbSIsImV4cCI6MTc0MjQ3MjM2OH0.1NY0oc1vYVcqwziMMa8vmoF41XgpqIr-Rh0Cf6PMI-c"
     );
     formData.append("id_form", formId);
     formData.append("reference", "000321");
@@ -28,7 +28,7 @@ export const sendResponsesToAPI = async (formId, responses) => {
 
   try {
     const response = await fetch(
-      `https://api-forms.sfisas.com.co/response_user/submit_data`,
+      `https://4c1c-179-33-13-68.ngrok-free.app/response_user/submit_data`,
       {
         method: "POST",
         headers: {
@@ -55,35 +55,35 @@ export const sendResponsesToAPI = async (formId, responses) => {
   }
 };
 
-export const getFormsToAPI = async (accessToken) => {
-  accessToken =
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJtYXVtb3BpdGExMkBnbWFpbC5jb20iLCJleHAiOjE3MzAyMTcwOTl9.BJsvJj8amQxOLcGDWxC_tABGQbdOokN26rJAgl2XCw0";
-  try {
-    const response = await fetch(
-      `https://api-forms.sfisas.com.co/forms/?skip=0&limit=10`,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      }
-    );
-    const json = await response.json();
-    if (!response.ok) {
-      throw new Error("Failed to sync responses with the API");
-    }
-    return json;
-  } catch (error) {
-    console.error("API error:", error);
-    throw error;
-  }
-};
+// export const getFormsToAPI = async (accessToken) => {
+//   accessToken =
+//     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjZ29tZXpAc2Zpc2FzLmNvbSIsImV4cCI6MTc0MjQ3MjM2OH0.1NY0oc1vYVcqwziMMa8vmoF41XgpqIr-Rh0Cf6PMI-c";
+//   try {
+//     const response = await fetch(
+//       `https://api-forms.sfisas.com.co/forms/?skip=0&limit=10`,
+//       {
+//         headers: {
+//           Authorization: `Bearer ${accessToken}`,
+//         },
+//       }
+//     );
+//     const json = await response.json();
+//     if (!response.ok) {
+//       throw new Error("Failed to sync responses with the API");
+//     }
+//     return json;
+//   } catch (error) {
+//     console.error("API error:", error);
+//     throw error;
+//   }
+// };
 
 export const getFormToAPI = async (form_id, accessToken) => {
   accessToken =
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJtYXVtb3BpdGExMkBnbWFpbC5jb20iLCJleHAiOjE3MzAyMTcwOTl9.BJsvJj8amQxOLcGDWxC_tABGQbdOokN26rJAgl2XCw0";
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjZ29tZXpAc2Zpc2FzLmNvbSIsImV4cCI6MTc0MjQ3MjM2OH0.1NY0oc1vYVcqwziMMa8vmoF41XgpqIr-Rh0Cf6PMI-c";
   try {
     const response = await fetch(
-      `https://api-forms.sfisas.com.co/forms/${form_id}`,
+      `https://4c1c-179-33-13-68.ngrok-free.app/forms/${form_id}`,
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
