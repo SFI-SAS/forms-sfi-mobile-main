@@ -1,13 +1,13 @@
-import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, Dimensions, Animated } from 'react-native';
+import React, { useEffect } from "react";
+import { View, Text, StyleSheet, Dimensions, Animated } from "react-native";
 
-const { width, height } = Dimensions.get('window');
-const matrixCharacters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+const { width, height } = Dimensions.get("window");
+const matrixCharacters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@+-*/°=&%$#!¡¿?";
 const matrixColumns = Math.floor(width / 20); // Número de columnas de letras
 
 const MatrixBackground = () => {
-  const animations = Array.from({ length: matrixColumns }).map(() =>
-    new Animated.Value(0)
+  const animations = Array.from({ length: matrixColumns }).map(
+    () => new Animated.Value(0)
   );
 
   useEffect(() => {
@@ -44,7 +44,9 @@ const MatrixBackground = () => {
             },
           ]}
         >
-          {matrixCharacters.charAt(Math.floor(Math.random() * matrixCharacters.length))}
+          {matrixCharacters.charAt(
+            Math.floor(Math.random() * matrixCharacters.length)
+          )}
         </Animated.Text>
       ))}
     </View>
@@ -53,10 +55,11 @@ const MatrixBackground = () => {
 
 const styles = StyleSheet.create({
   matrixText: {
-    position: 'absolute',
-    color: '#2563eb', // Color azul para el estilo Matrix
+    position: "absolute",
+    color: "#2563eb", // Color azul para el estilo Matrix
     fontSize: 18,
-    fontWeight: 'bold',
+    fontFamily: "Lucida console",
+    fontWeight: "bold",
     opacity: 0.5,
   },
 });

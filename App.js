@@ -4,7 +4,7 @@ import { StyleSheet, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Main } from "./components/Main";
 import SyncManager from "./components/SyncManager";
-import { Login } from "./components/Login";
+
 
 
 
