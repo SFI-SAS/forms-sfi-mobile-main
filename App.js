@@ -1,31 +1,33 @@
-import React, { useState } from "react";
-import { StatusBar } from "expo-status-bar";
-import { StyleSheet, View } from "react-native";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+import React from "react";
+import { NavigationContainer } from "@react-navigation/native";
+import { createStackNavigator } from "@react-navigation/stack";
+
 import { Main } from "./components/Main";
-import SyncManager from "./components/SyncManager";
+import Home from "./components/Home";
+import FormatScreen from "./components/FormatScreen";
 
-
-
+const Stack = createStackNavigator();
 
 export default function App() {
   return (
-    <SafeAreaProvider>
-        <View style={styles.container}>
-          {/* <StatusBar style="light" /> */}
-          <SyncManager />
-          <Main />
-        </View>
-    </SafeAreaProvider>
+    <NavigationContainer>
+      <Stack.Navigator initialRouteName="Main">
+        <Stack.Screen
+          name="Main"
+          component={Main} // Ensure Main is registered here
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="Home"
+          component={Home} // Ensure Home is registered here
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="FormatScreen"
+          component={FormatScreen}
+          options={{ title: "Format Details" }}
+        />
+      </Stack.Navigator>
+    </NavigationContainer>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#000",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 12,
-  },
-});

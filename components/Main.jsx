@@ -1,3 +1,4 @@
+// Main.jsx
 import { useEffect, useState } from "react";
 import {
   View,
@@ -8,13 +9,23 @@ import {
   Alert,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import NetInfo from "@react-native-community/netinfo"; // 📶 Verificar conexión a internet
+import NetInfo from "@react-native-community/netinfo";
 import MatrixBackground from "./MatrixBackground";
 import { Screen } from "./Screen";
-import { Home } from "./Home";
+import { useRouter } from "expo-router";
+
+// Función auxiliar para construir la cadena x-www-form-urlencoded
+function encodeFormData(data) {
+  return Object.keys(data)
+    .map(
+      (key) =>
+        encodeURIComponent(key) + "=" + encodeURIComponent(data[key] ?? "")
+    )
+    .join("&");
+}
 
 export function Main() {
-  const [isLogged, setIsLogged] = useState(false);
+  const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [isOffline, setIsOffline] = useState(false);
@@ -29,7 +40,7 @@ export function Main() {
         console.log("🚪 Estado de sesión:", isLoggedOut);
 
         if (savedToken && isLoggedOut !== "true") {
-          setIsLogged(true);
+          router.push("/home"); // Navigate to Home
         } else {
           console.warn("⚠️ No hay token guardado o usuario cerró sesión.");
         }
@@ -38,83 +49,110 @@ export function Main() {
       }
     };
 
-    // Detectar conexión a internet y actualizar el estado en tiempo real
-    NetInfo.fetch().then((state) => setIsOffline(!state.isConnected));
-
-    const unsubscribe = NetInfo.addEventListener((state) => {
+    const handleNetworkChange = async (state) => {
+      const wasOffline = isOffline;
       setIsOffline(!state.isConnected);
-    });
+
+      if (state.isConnected && wasOffline) {
+        Alert.alert("Internet Restored", "Synchronizing data...");
+        console.log("🔄 Synchronizing data...");
+        // Add synchronization logic here if needed
+      }
+    };
+
+    NetInfo.fetch().then((state) => setIsOffline(!state.isConnected));
+    const unsubscribe = NetInfo.addEventListener(handleNetworkChange);
 
     checkToken();
-
     return () => unsubscribe();
-  }, []);
+  }, [router, isOffline]);
 
   const handleLogin = async () => {
     try {
-      // Si no hay internet, permitir acceso con el token guardado
       if (isOffline) {
         const offlineToken = await AsyncStorage.getItem("authToken");
-        if (offlineToken) {
-          setIsLogged(true);
+        const offlineForms = await AsyncStorage.getItem("offline_forms");
+        if (offlineToken && offlineForms) {
           Alert.alert("Modo Offline", "Iniciaste sesión sin conexión.");
+          await AsyncStorage.setItem("isLoggedOut", "false"); // Mark the session as logged in
+          router.push("/home"); // Navigate to Home
           return;
         } else {
           Alert.alert(
             "Error",
-            "No tienes un token guardado para acceder sin internet."
+            "No tienes un token guardado o datos guardados para acceder sin internet."
           );
           return;
         }
       }
 
-      // Si hay internet, realizar login normal
-      const formData = new FormData();
-      formData.append("username", username);
-      formData.append("password", password);
-      formData.append("grant_type", "password");
+      // Construir la cadena de parámetros manualmente
+      const params = encodeFormData({
+        username: username,
+        password: password,
+        grant_type: "password",
+      });
 
+      // Primera petición: obtener token
       const response = await fetch(
-        `https://1a67-179-33-13-68.ngrok-free.app/auth/token`,
+        `https://d1b1-179-33-13-68.ngrok-free.app/auth/token`,
         {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams(formData).toString(),
+          body: params,
         }
       );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText);
+      }
 
       const text = await response.text();
-      const json = JSON.parse(text);
+
+      if (text.trim().startsWith("<!DOCTYPE html>")) {
+        console.error("Respuesta HTML recibida:", text);
+        throw new Error(
+          "Error de conexión con el servidor. Por favor, inténtalo más tarde."
+        );
+      }
+
+      let json;
+      try {
+        json = JSON.parse(text);
+      } catch (parseError) {
+        console.error("Error parseando JSON, respuesta recibida:", text);
+        throw new Error("La respuesta del servidor no es un JSON válido.");
+      }
 
       const token = json.access_token;
-      await AsyncStorage.setItem("authToken", token);
-      const formDataUser = new FormData();
-      formDataUser.append("token", token);
+      await AsyncStorage.setItem("authToken", token); // Save token for offline access
 
+      // Validar el token usando GET
       const responseUser = await fetch(
-        `https://1a67-179-33-13-68.ngrok-free.app/auth/validate-token`,
+        `https://d1b1-179-33-13-68.ngrok-free.app/auth/validate-token`,
         {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams(formDataUser).toString(),
+          method: "GET",
+          headers: { Authorization: `Bearer ${token}` },
         }
       );
-      if (!response.ok && !responseUser.ok)
-        throw new Error(json.detail || "Error en la autenticación");
 
-      await AsyncStorage.removeItem("isLoggedOut"); // Asegurar que no está marcado como cerrado
+      if (!responseUser.ok) {
+        const errorUserText = await responseUser.text();
+        throw new Error(errorUserText);
+      }
 
+      await AsyncStorage.setItem("isLoggedOut", "false"); // Mark the session as logged in
       console.log("✅ Token guardado correctamente.");
-      setIsLogged(true);
+      console.log("✅ Navigating to Home");
+      router.push("/home"); // Navigate to Home
     } catch (error) {
       console.error("❌ API error:", error);
       Alert.alert("Error", error.message);
     }
   };
 
-  return isLogged ? (
-    <Home setIsLogged={setIsLogged} isOffline={isOffline} />
-  ) : (
+  return (
     <Screen>
       <View style={styles.container}>
         <MatrixBackground />
@@ -129,7 +167,6 @@ export function Main() {
               style={styles.input}
             />
           </View>
-
           <View style={{ marginBottom: 16 }}>
             <Text style={styles.label}>Contraseña</Text>
             <TextInput
@@ -140,7 +177,6 @@ export function Main() {
               style={styles.input}
             />
           </View>
-
           <TouchableOpacity onPress={handleLogin} style={styles.button}>
             <Text style={styles.buttonText}>
               {isOffline ? "Iniciar en Modo Offline" : "Iniciar Sesión"}

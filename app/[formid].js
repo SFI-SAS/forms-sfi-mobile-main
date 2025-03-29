@@ -36,7 +36,7 @@ export default function Detail() {
   };
 
   const handleSubmit = () => {
-    console.log("Datos del formulario:", formData);
+    console.log("Datos del formato:", formData);
   };
 
   return (
