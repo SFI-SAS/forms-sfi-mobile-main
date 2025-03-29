@@ -7,12 +7,16 @@ import {
   TextInput,
   TouchableOpacity,
   Alert,
+  Dimensions,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 import MatrixBackground from "./MatrixBackground";
 import { Screen } from "./Screen";
 import { useRouter } from "expo-router";
+
+// Obtener dimensiones de la pantalla
+const { width, height } = Dimensions.get("window");
 
 // Función auxiliar para construir la cadena x-www-form-urlencoded
 function encodeFormData(data) {
@@ -29,6 +33,7 @@ export function Main() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [isOffline, setIsOffline] = useState(false);
+  const [userData, setUserData] = useState(null); // Estado para guardar los datos del usuario
 
   useEffect(() => {
     const checkToken = async () => {
@@ -40,7 +45,25 @@ export function Main() {
         console.log("🚪 Estado de sesión:", isLoggedOut);
 
         if (savedToken && isLoggedOut !== "true") {
-          router.push("/home"); // Navigate to Home
+          const responseUser = await fetch(
+            `https://d1b1-179-33-13-68.ngrok-free.app/auth/validate-token`,
+            {
+              method: "GET",
+              headers: { Authorization: `Bearer ${savedToken}` },
+            }
+          );
+
+          if (!responseUser.ok) {
+            const errorUserText = await responseUser.text();
+            throw new Error(errorUserText);
+          }
+
+          const userData = await responseUser.json();
+          setUserData(userData); // Guardar los datos del usuario
+          router.push({
+            pathname: "/home",
+            params: { name: userData.name, email: userData.email }, // Pasar datos como props
+          });
         } else {
           console.warn("⚠️ No hay token guardado o usuario cerró sesión.");
         }
@@ -54,7 +77,7 @@ export function Main() {
       setIsOffline(!state.isConnected);
 
       if (state.isConnected && wasOffline) {
-        Alert.alert("Internet Restored", "Synchronizing data...");
+        Alert.alert("Internet Changes", "Synchronizing data...");
         console.log("🔄 Synchronizing data...");
         // Add synchronization logic here if needed
       }
@@ -142,10 +165,15 @@ export function Main() {
         throw new Error(errorUserText);
       }
 
+      const userData = await responseUser.json();
+      setUserData(userData);
       await AsyncStorage.setItem("isLoggedOut", "false"); // Mark the session as logged in
       console.log("✅ Token guardado correctamente.");
       console.log("✅ Navigating to Home");
-      router.push("/home"); // Navigate to Home
+      router.push({
+        pathname: "/home",
+        params: { name: userData.name, email: userData.email },
+      }); // Navigate to Home
     } catch (error) {
       console.error("❌ API error:", error);
       Alert.alert("Error", error.message);
@@ -156,8 +184,9 @@ export function Main() {
     <Screen>
       <View style={styles.container}>
         <MatrixBackground />
-        <View style={{ padding: 20 }}>
-          <View style={{ marginBottom: 16 }}>
+        <View style={styles.formContainer}>
+          <Text style={styles.title}>Bienvenido</Text>
+          <View style={styles.inputContainer}>
             <Text style={styles.label}>Email</Text>
             <TextInput
               onChangeText={setUsername}
@@ -167,7 +196,7 @@ export function Main() {
               style={styles.input}
             />
           </View>
-          <View style={{ marginBottom: 16 }}>
+          <View style={styles.inputContainer}>
             <Text style={styles.label}>Contraseña</Text>
             <TextInput
               onChangeText={setPassword}
@@ -194,31 +223,52 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 10,
   },
-  label: {
-    fontSize: 14,
+  formContainer: {
+    width: width * 0.9, // 90% del ancho de la pantalla
+    padding: 20,
+    backgroundColor: "#ffffff",
+    borderRadius: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  title: {
+    fontSize: width * 0.08, // Tamaño de fuente dinámico (8% del ancho de la pantalla)
     fontWeight: "bold",
     color: "#1f2937",
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  inputContainer: {
+    marginBottom: 16,
+  },
+  label: {
+    fontSize: width * 0.04, // Tamaño de fuente dinámico (4% del ancho de la pantalla)
+    fontWeight: "bold",
+    color: "#1f2937",
+    marginBottom: 4,
   },
   input: {
     backgroundColor: "#f3f4f6",
     borderColor: "#d1d5db",
-    color: "#1f2937",
+    borderWidth: 1,
     borderRadius: 8,
     padding: 10,
-    marginTop: 4,
+    fontSize: width * 0.04, // Tamaño de fuente dinámico
   },
   button: {
     backgroundColor: "#2563eb",
-    paddingVertical: 12,
+    paddingVertical: height * 0.02, // Altura dinámica (2% de la altura de la pantalla)
     borderRadius: 8,
     alignItems: "center",
-    marginBottom: 16,
+    marginTop: 16,
   },
   buttonText: {
     color: "#ffffff",
-    fontSize: 16,
+    fontSize: width * 0.045, // Tamaño de fuente dinámico (4.5% del ancho de la pantalla)
     fontWeight: "bold",
   },
 });

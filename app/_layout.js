@@ -8,7 +8,7 @@ export default function Layout() {
       <Stack
         screenOptions={{
           headerStyle: { backgroundColor: "white" },
-          headerTintColor: "black",
+          headerTintColor: "blue",
           headerTitle: "FORMULARIOS SFI",
           headerTitleAlign:'center',
           headerLeft: () => <Logo />,

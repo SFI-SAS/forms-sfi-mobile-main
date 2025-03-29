@@ -7,22 +7,21 @@ import {
   StyleSheet,
   Alert,
   ScrollView,
-  Picker,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import * as DocumentPicker from "expo-document-picker"; // Importar DocumentPicker
 
 export default function FormatScreen() {
   const router = useRouter();
-  const { id, created_at } = useLocalSearchParams(); // Use useLocalSearchParams to access route parameters
+  const { id, created_at } = useLocalSearchParams();
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [loading, setLoading] = useState(true);
 
-  // Fetch questions for the selected form
   const handleQuestionsByIdForm = async (formId) => {
     try {
-      const token = await AsyncStorage.getItem("authToken"); // Retrieve the token from AsyncStorage
+      const token = await AsyncStorage.getItem("authToken");
       if (!token) throw new Error("No authentication token found");
 
       const response = await fetch(
@@ -30,7 +29,7 @@ export default function FormatScreen() {
         {
           method: "GET",
           headers: {
-            Authorization: `Bearer ${token}`, // Include the token in the Authorization header
+            Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
         }
@@ -40,25 +39,23 @@ export default function FormatScreen() {
       if (!response.ok)
         throw new Error(data.detail || "Error fetching questions");
 
-      setQuestions(data.questions); // Assuming the API returns a 'questions' field
+      setQuestions(data.questions);
       await AsyncStorage.setItem(
         `questions_form_${formId}`,
         JSON.stringify(data.questions)
-      ); // Save questions to AsyncStorage for offline access
-      console.log("Questions fetched and saved:", data.questions);
+      );
     } catch (error) {
       console.error("Error fetching questions:", error.message);
       Alert.alert(
         "Error",
         "Failed to fetch questions. Loading offline data..."
       );
-      loadQuestionsOffline(formId); // Load questions from AsyncStorage if offline
+      loadQuestionsOffline(formId);
     } finally {
       setLoading(false);
     }
   };
 
-  // Load questions from AsyncStorage for offline access
   const loadQuestionsOffline = async (formId) => {
     try {
       const storedQuestions = await AsyncStorage.getItem(
@@ -66,42 +63,92 @@ export default function FormatScreen() {
       );
       if (storedQuestions) {
         setQuestions(JSON.parse(storedQuestions));
-        console.log("Loaded questions from offline storage:", storedQuestions);
-      } else {
-        console.log("No offline questions available for this form.");
       }
     } catch (error) {
       console.error("Error loading offline questions:", error.message);
     }
   };
 
-  // Handle input changes for answers
   const handleAnswerChange = (questionId, value) => {
     setAnswers((prev) => ({ ...prev, [questionId]: value }));
   };
 
+  const handleFileUpload = async (questionId) => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: "*/*", // Permitir cualquier tipo de archivo
+        copyToCacheDirectory: true,
+      });
+
+      if (result.type === "success") {
+        console.log("Archivo seleccionado:", result);
+        handleAnswerChange(questionId, result.uri); // Guardar la URI del archivo en las respuestas
+        Alert.alert("Archivo seleccionado", `Nombre: ${result.name}`);
+      } else {
+        console.log("Selección de archivo cancelada.");
+      }
+    } catch (error) {
+      console.error("Error seleccionando archivo:", error);
+      Alert.alert("Error", "No se pudo seleccionar el archivo.");
+    }
+  };
+
+  const handleSubmitForm = async () => {
+    try {
+      const timestamp = new Date().toISOString();
+      const isOnline = !isOffline ? "Online" : "Offline";
+
+      const completedForm = {
+        id,
+        title: `Formulario ${id}`,
+        created_at: timestamp,
+        status: isOnline,
+        questions: questions.map((q) => ({
+          question_text: q.question_text,
+          answer: answers[q.id] || "Sin respuesta",
+        })),
+      };
+
+      const storedForms = await AsyncStorage.getItem("completed_forms");
+      const forms = storedForms ? JSON.parse(storedForms) : [];
+      forms.push(completedForm);
+
+      await AsyncStorage.setItem("completed_forms", JSON.stringify(forms));
+      Alert.alert("Formulario guardado", "El formulario se guardó correctamente.");
+      router.back();
+    } catch (error) {
+      console.error("Error guardando el formulario:", error);
+      Alert.alert("Error", "No se pudo guardar el formulario.");
+    }
+  };
+
   useEffect(() => {
     if (id) {
-      handleQuestionsByIdForm(id); // Fetch questions when the component mounts
+      handleQuestionsByIdForm(id);
     }
   }, [id]);
 
   return (
     <ScrollView style={styles.container}>
-      <Text style={styles.header}>Form Details</Text>
-      <Text>ID: {id}</Text>
-      <Text>Created At: {created_at}</Text>
-      <Text style={styles.subHeader}>Questions</Text>
+      <Text style={styles.header}>Formulario</Text>
+      <Text>ID: 00{id}</Text>
+      <Text>Creado el: {created_at}</Text>
+      <Text style={styles.subHeader}>Preguntas</Text>
       {loading ? (
-        <Text>Loading questions...</Text>
+        <Text>Cargando preguntas...</Text>
       ) : (
         questions.map((question) => (
           <View key={question.id} style={styles.questionContainer}>
-            <Text style={styles.questionLabel}>{question.question_text}</Text>
+            <Text style={styles.questionLabel}>
+              {question.question_text}
+              {question.required && (
+                <Text style={styles.requiredText}> Obligatorio *</Text>
+              )}
+            </Text>
             {question.question_type === "text" && (
               <TextInput
                 style={styles.input}
-                placeholder={question.placeholder || "Enter your answer"}
+                placeholder="Escribe tu respuesta"
                 value={answers[question.id] || ""}
                 onChangeText={(value) => handleAnswerChange(question.id, value)}
               />
@@ -109,10 +156,20 @@ export default function FormatScreen() {
             {question.question_type === "number" && (
               <TextInput
                 style={styles.input}
-                placeholder={question.placeholder || "Enter a number"}
+                placeholder="Escribe un número"
                 keyboardType="numeric"
                 value={answers[question.id] || ""}
                 onChangeText={(value) => handleAnswerChange(question.id, value)}
+              />
+            )}
+            {question.question_type === "date" && (
+              <DateTimePicker
+                value={answers[question.id] || new Date()}
+                mode="date"
+                display="default"
+                onChange={(event, selectedDate) =>
+                  handleAnswerChange(question.id, selectedDate)
+                }
               />
             )}
             {question.question_type === "select" && question.options && (
@@ -123,49 +180,103 @@ export default function FormatScreen() {
                 }
                 style={styles.picker}
               >
-                <Picker.Item label="Select an option" value="" />
-                {question.options.map((option) => (
-                  <Picker.Item key={option} label={option} value={option} />
+                <Picker.Item label="Selecciona una opción" value="" />
+                {question.options.map((option, index) => (
+                  <Picker.Item
+                    key={index}
+                    label={option.option_text}
+                    value={option.option_text}
+                  />
                 ))}
               </Picker>
             )}
-            {question.question_type === "multiple" && question.options && (
-              <View>
-                {question.options.map((option) => (
-                  <TouchableOpacity
-                    key={option}
-                    style={styles.optionContainer}
-                    onPress={() =>
-                      handleAnswerChange(question.id, [
-                        ...(answers[question.id] || []),
-                        option,
-                      ])
-                    }
-                  >
-                    <Text style={styles.optionText}>{option}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+            {question.question_type === "single_choice" &&
+              question.options && (
+                <View style={styles.radioGroup}>
+                  {question.options.map((option, index) => (
+                    <TouchableOpacity
+                      key={index}
+                      style={[
+                        styles.radioOption,
+                        answers[question.id] === option.option_text &&
+                          styles.radioOptionSelected,
+                      ]}
+                      onPress={() =>
+                        handleAnswerChange(question.id, option.option_text)
+                      }
+                    >
+                      <Text
+                        style={[
+                          styles.radioText,
+                          answers[question.id] === option.option_text &&
+                            styles.radioTextSelected,
+                        ]}
+                      >
+                        {option.option_text}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            {question.question_type === "multiple_choice" &&
+              question.options && (
+                <View style={styles.radioGroup}>
+                  {question.options.map((option, index) => (
+                    <TouchableOpacity
+                      key={index}
+                      style={[
+                        styles.radioOption,
+                        answers[question.id] === option.option_text &&
+                          styles.radioOptionSelected,
+                      ]}
+                      onPress={() =>
+                        handleAnswerChange(question.id, option.option_text)
+                      }
+                    >
+                      <Text
+                        style={[
+                          styles.radioText,
+                          answers[question.id] === option.option_text &&
+                            styles.radioTextSelected,
+                        ]}
+                      >
+                        {option.option_text}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            {question.question_type === "file" && (
+              <TouchableOpacity
+                style={styles.fileButton}
+                onPress={() => handleFileUpload(question.id)}
+              >
+                <Text style={styles.fileButtonText}>Subir archivo</Text>
+              </TouchableOpacity>
             )}
           </View>
         ))
       )}
+      <TouchableOpacity style={styles.submitButton} onPress={handleSubmitForm}>
+        <Text style={styles.submitButtonText}>Guardar Formulario</Text>
+      </TouchableOpacity>
       <TouchableOpacity
         style={styles.backButton}
-        onPress={() => router.back()} // Navigate back to Home
+        onPress={() => router.back()}
       >
-        <Text style={styles.backButtonText}>Back to Home</Text>
+        <Text style={styles.backButtonText}>Volver</Text>
       </TouchableOpacity>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, backgroundColor: "white" },
+  container: { flex: 1, padding: 20, backgroundColor: "#ffffff" },
   header: { fontSize: 20, fontWeight: "bold", marginBottom: 10 },
   subHeader: { fontSize: 18, fontWeight: "bold", marginTop: 20 },
   questionContainer: { marginBottom: 20 },
   questionLabel: { fontSize: 16, fontWeight: "bold", marginBottom: 5 },
+  requiredText: { color: "red", fontWeight: "bold" },
   input: {
     borderWidth: 1,
     borderColor: "#ccc",
@@ -173,19 +284,38 @@ const styles = StyleSheet.create({
     padding: 10,
     backgroundColor: "#f9f9f9",
   },
-  picker: {
-    borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 5,
-    backgroundColor: "#f9f9f9",
+  radioGroup: {
+    flexDirection: "column",
+    marginTop: 10,
   },
-  optionContainer: {
+  radioOption: {
     padding: 10,
     marginVertical: 5,
     backgroundColor: "#f0f0f0",
     borderRadius: 5,
+    alignItems: "center",
   },
-  optionText: { fontSize: 14, color: "#333" },
+  radioOptionSelected: {
+    backgroundColor: "#2563eb",
+  },
+  radioText: { fontSize: 14, color: "#333" },
+  radioTextSelected: { color: "white", fontWeight: "bold" },
+  fileButton: {
+    backgroundColor: "#2563eb",
+    padding: 10,
+    borderRadius: 5,
+    alignItems: "center",
+    marginTop: 10,
+  },
+  fileButtonText: { color: "white", fontWeight: "bold" },
+  submitButton: {
+    marginTop: 20,
+    padding: 10,
+    backgroundColor: "green",
+    borderRadius: 5,
+    alignItems: "center",
+  },
+  submitButtonText: { color: "white", fontWeight: "bold" },
   backButton: {
     marginTop: 20,
     padding: 10,
