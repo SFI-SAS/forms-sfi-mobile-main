@@ -25,7 +25,7 @@ export default function FormatScreen() {
       if (!token) throw new Error("No authentication token found");
 
       const response = await fetch(
-        `https://d1b1-179-33-13-68.ngrok-free.app/forms/${formId}`,
+        `https://583d-179-33-13-68.ngrok-free.app/forms/${formId}`,
         {
           method: "GET",
           headers: {
@@ -114,7 +114,10 @@ export default function FormatScreen() {
       forms.push(completedForm);
 
       await AsyncStorage.setItem("completed_forms", JSON.stringify(forms));
-      Alert.alert("Formulario guardado", "El formulario se guardó correctamente.");
+      Alert.alert(
+        "Formulario guardado",
+        "El formulario se guardó correctamente."
+      );
       router.back();
     } catch (error) {
       console.error("Error guardando el formulario:", error);
@@ -190,34 +193,33 @@ export default function FormatScreen() {
                 ))}
               </Picker>
             )}
-            {question.question_type === "single_choice" &&
-              question.options && (
-                <View style={styles.radioGroup}>
-                  {question.options.map((option, index) => (
-                    <TouchableOpacity
-                      key={index}
+            {question.question_type === "single_choice" && question.options && (
+              <View style={styles.radioGroup}>
+                {question.options.map((option, index) => (
+                  <TouchableOpacity
+                    key={index}
+                    style={[
+                      styles.radioOption,
+                      answers[question.id] === option.option_text &&
+                        styles.radioOptionSelected,
+                    ]}
+                    onPress={() =>
+                      handleAnswerChange(question.id, option.option_text)
+                    }
+                  >
+                    <Text
                       style={[
-                        styles.radioOption,
+                        styles.radioText,
                         answers[question.id] === option.option_text &&
-                          styles.radioOptionSelected,
+                          styles.radioTextSelected,
                       ]}
-                      onPress={() =>
-                        handleAnswerChange(question.id, option.option_text)
-                      }
                     >
-                      <Text
-                        style={[
-                          styles.radioText,
-                          answers[question.id] === option.option_text &&
-                            styles.radioTextSelected,
-                        ]}
-                      >
-                        {option.option_text}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
+                      {option.option_text}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
             {question.question_type === "multiple_choice" &&
               question.options && (
                 <View style={styles.radioGroup}>
@@ -260,10 +262,7 @@ export default function FormatScreen() {
       <TouchableOpacity style={styles.submitButton} onPress={handleSubmitForm}>
         <Text style={styles.submitButtonText}>Guardar Formulario</Text>
       </TouchableOpacity>
-      <TouchableOpacity
-        style={styles.backButton}
-        onPress={() => router.back()}
-      >
+      <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
         <Text style={styles.backButtonText}>Volver</Text>
       </TouchableOpacity>
     </ScrollView>
