@@ -14,7 +14,7 @@ import * as DocumentPicker from "expo-document-picker"; // Importar DocumentPick
 
 export default function FormatScreen() {
   const router = useRouter();
-  const { id, created_at, projectName, costCenter } = useLocalSearchParams(); // Recibir datos del proyecto como parámetros
+  const { id, created_at, predefinedInfo } = useLocalSearchParams(); // Recibir información predeterminada como parámetro
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [loading, setLoading] = useState(true);
@@ -36,41 +36,17 @@ export default function FormatScreen() {
       );
 
       const data = await response.json();
+      console.log(data)
       if (!response.ok)
         throw new Error(data.detail || "Error fetching questions");
 
-      // Combinar preguntas predeterminadas con las preguntas del formulario
-      const predefinedAnswers = [
-        {
-          id: "projectName",
-          question_text: "Nombre del Proyecto",
-          answer: projectName,
-          editable: false,
-        },
-        {
-          id: "costCenter",
-          question_text: "Centro de Costos",
-          answer: costCenter,
-          editable: false,
-        },
-      ];
+      // Filtrar preguntas para excluir las predeterminadas (default: true)
+      const filteredQuestions = data.questions.filter((q) => !q.default);
 
-      // Filtrar preguntas del formulario para evitar duplicados
-      const filteredQuestions = data.questions.filter(
-        (q) =>
-          !predefinedAnswers.some(
-            (predefined) =>
-              predefined.question_text.toLowerCase() ===
-              q.question_text.toLowerCase()
-          )
-      );
-
-      const combinedQuestions = [...predefinedAnswers, ...filteredQuestions];
-
-      setQuestions(combinedQuestions);
+      setQuestions(filteredQuestions);
       await AsyncStorage.setItem(
         `questions_form_${formId}`,
-        JSON.stringify(combinedQuestions)
+        JSON.stringify(filteredQuestions)
       );
     } catch (error) {
       console.error("Error fetching questions:", error.message);
@@ -104,16 +80,13 @@ export default function FormatScreen() {
   const handleFileUpload = async (questionId) => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: "*/*", // Permitir cualquier tipo de archivo
+        type: "*/*",
         copyToCacheDirectory: true,
       });
 
       if (result.type === "success") {
-        console.log("Archivo seleccionado:", result);
-        handleAnswerChange(questionId, result.uri); // Guardar la URI del archivo en las respuestas
+        handleAnswerChange(questionId, result.uri);
         Alert.alert("Archivo seleccionado", `Nombre: ${result.name}`);
-      } else {
-        console.log("Selección de archivo cancelada.");
       }
     } catch (error) {
       console.error("Error seleccionando archivo:", error);
@@ -135,10 +108,6 @@ export default function FormatScreen() {
           question_text: q.question_text,
           answer: answers[q.id] || "Sin respuesta",
         })),
-        predefinedAnswers: {
-          projectName: answers.projectName,
-          costCenter: answers.costCenter,
-        },
       };
 
       const storedForms = await AsyncStorage.getItem("completed_forms");
@@ -163,141 +132,140 @@ export default function FormatScreen() {
     }
   }, [id]);
 
+  const predefinedInfoObject = JSON.parse(predefinedInfo || "{}"); // Parsear información predeterminada
+
   return (
     <ScrollView style={styles.container}>
       <Text style={styles.header}>Formulario</Text>
       <Text>ID: 00{id}</Text>
       <Text>Creado el: {created_at}</Text>
+      <View style={styles.projectInfo}>
+        {Object.entries(predefinedInfoObject).map(([key, value]) => (
+          <Text key={key} style={styles.projectInfoText}>
+            <Text style={styles.projectInfoLabel}>{key}:</Text> {value}
+          </Text>
+        ))}
+      </View>
       <Text style={styles.subHeader}>Preguntas</Text>
       {loading ? (
         <Text>Cargando preguntas...</Text>
       ) : (
-        questions.map((question) => (
-          <View key={question.id} style={styles.questionContainer}>
+        questions.map((question, index) => (
+          <View
+            key={question.id || `question-${index}`}
+            style={styles.questionContainer}
+          >
             {question.required && (
               <Text style={styles.requiredText}>* Obligatorio</Text>
             )}
             <Text style={styles.questionLabel}>{question.question_text}</Text>
-            {question.editable ? (
-              <>
-                {question.question_type === "text" && (
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Escribe tu respuesta"
-                    value={answers[question.id] || ""}
-                    onChangeText={(value) =>
-                      handleAnswerChange(question.id, value)
-                    }
+            {question.question_type === "text" && (
+              <TextInput
+                style={styles.input}
+                placeholder="Escribe tu respuesta"
+                value={answers[question.id] || ""}
+                onChangeText={(value) => handleAnswerChange(question.id, value)}
+              />
+            )}
+            {question.question_type === "number" && (
+              <TextInput
+                style={styles.input}
+                placeholder="Escribe un número"
+                keyboardType="numeric"
+                value={answers[question.id] || ""}
+                onChangeText={(value) => handleAnswerChange(question.id, value)}
+              />
+            )}
+            {question.question_type === "date" && (
+              <DateTimePicker
+                value={answers[question.id] || new Date()}
+                mode="date"
+                display="default"
+                onChange={(event, selectedDate) =>
+                  handleAnswerChange(question.id, selectedDate)
+                }
+              />
+            )}
+            {question.question_type === "select" && question.options && (
+              <Picker
+                selectedValue={answers[question.id] || ""}
+                onValueChange={(value) =>
+                  handleAnswerChange(question.id, value)
+                }
+                style={styles.picker}
+              >
+                <Picker.Item label="Selecciona una opción" value="" />
+                {question.options.map((option, index) => (
+                  <Picker.Item
+                    key={index}
+                    label={option.option_text}
+                    value={option.option_text}
                   />
-                )}
-                {question.question_type === "number" && (
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Escribe un número"
-                    keyboardType="numeric"
-                    value={answers[question.id] || ""}
-                    onChangeText={(value) =>
-                      handleAnswerChange(question.id, value)
-                    }
-                  />
-                )}
-                {question.question_type === "date" && (
-                  <DateTimePicker
-                    value={answers[question.id] || new Date()}
-                    mode="date"
-                    display="default"
-                    onChange={(event, selectedDate) =>
-                      handleAnswerChange(question.id, selectedDate)
-                    }
-                  />
-                )}
-                {question.question_type === "select" && question.options && (
-                  <Picker
-                    selectedValue={answers[question.id] || ""}
-                    onValueChange={(value) =>
-                      handleAnswerChange(question.id, value)
-                    }
-                    style={styles.picker}
-                  >
-                    <Picker.Item label="Selecciona una opción" value="" />
-                    {question.options.map((option, index) => (
-                      <Picker.Item
-                        key={index}
-                        label={option.option_text}
-                        value={option.option_text}
-                      />
-                    ))}
-                  </Picker>
-                )}
-                {question.question_type === "single_choice" &&
-                  question.options && (
-                    <View style={styles.radioGroup}>
-                      {question.options.map((option, index) => (
-                        <TouchableOpacity
-                          key={index}
-                          style={[
-                            styles.radioOption,
-                            answers[question.id] === option.option_text &&
-                              styles.radioOptionSelected,
-                          ]}
-                          onPress={() =>
-                            handleAnswerChange(question.id, option.option_text)
-                          }
-                        >
-                          <Text
-                            style={[
-                              styles.radioText,
-                              answers[question.id] === option.option_text &&
-                                styles.radioTextSelected,
-                            ]}
-                          >
-                            {option.option_text}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  )}
-                {question.question_type === "multiple_choice" &&
-                  question.options && (
-                    <View style={styles.radioGroup}>
-                      {question.options.map((option, index) => (
-                        <TouchableOpacity
-                          key={index}
-                          style={[
-                            styles.radioOption,
-                            answers[question.id] === option.option_text &&
-                              styles.radioOptionSelected,
-                          ]}
-                          onPress={() =>
-                            handleAnswerChange(question.id, option.option_text)
-                          }
-                        >
-                          <Text
-                            style={[
-                              styles.radioText,
-                              answers[question.id] === option.option_text &&
-                                styles.radioTextSelected,
-                            ]}
-                          >
-                            {option.option_text}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  )}
-                {question.question_type === "file" && (
+                ))}
+              </Picker>
+            )}
+            {question.question_type === "single_choice" && question.options && (
+              <View style={styles.radioGroup}>
+                {question.options.map((option, index) => (
                   <TouchableOpacity
-                    style={styles.fileButton}
-                    onPress={() => handleFileUpload(question.id)}
+                    key={index}
+                    style={[
+                      styles.radioOption,
+                      answers[question.id] === option.option_text &&
+                        styles.radioOptionSelected,
+                    ]}
+                    onPress={() =>
+                      handleAnswerChange(question.id, option.option_text)
+                    }
                   >
-                    <Text style={styles.fileButtonText}>Subir archivo</Text>
+                    <Text
+                      style={[
+                        styles.radioText,
+                        answers[question.id] === option.option_text &&
+                          styles.radioTextSelected,
+                      ]}
+                    >
+                      {option.option_text}
+                    </Text>
                   </TouchableOpacity>
-                )}
-              </>
-            ) : (
-              <Text style={styles.nonEditableValue}>
-                {question.answer || "Sin respuesta"}
-              </Text>
+                ))}
+              </View>
+            )}
+            {question.question_type === "multiple_choice" &&
+              question.options && (
+                <View style={styles.radioGroup}>
+                  {question.options.map((option, optionIndex) => (
+                    <TouchableOpacity
+                      key={`${question.id}-option-${optionIndex}`}
+                      style={[
+                        styles.radioOption,
+                        answers[question.id] === option.option_text &&
+                          styles.radioOptionSelected,
+                      ]}
+                      onPress={() =>
+                        handleAnswerChange(question.id, option.option_text)
+                      }
+                    >
+                      <Text
+                        style={[
+                          styles.radioText,
+                          answers[question.id] === option.option_text &&
+                            styles.radioTextSelected,
+                        ]}
+                      >
+                        {option.option_text}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            {question.question_type === "file" && (
+              <TouchableOpacity
+                style={styles.fileButton}
+                onPress={() => handleFileUpload(question.id)}
+              >
+                <Text style={styles.fileButtonText}>Subir archivo</Text>
+              </TouchableOpacity>
             )}
           </View>
         ))
@@ -316,6 +284,14 @@ const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, backgroundColor: "#ffffff" },
   header: { fontSize: 20, fontWeight: "bold", marginBottom: 10 },
   subHeader: { fontSize: 18, fontWeight: "bold", marginTop: 20 },
+  projectInfo: {
+    marginBottom: 20,
+    padding: 10,
+    backgroundColor: "#f0f0f0",
+    borderRadius: 5,
+  },
+  projectInfoText: { fontSize: 16, color: "#333", marginBottom: 5 },
+  projectInfoLabel: { fontWeight: "bold", color: "#000" },
   questionContainer: { marginBottom: 20 },
   questionLabel: { fontSize: 16, fontWeight: "bold", marginBottom: 5 },
   requiredText: { color: "red", fontWeight: "bold", marginBottom: 5 },
@@ -326,17 +302,7 @@ const styles = StyleSheet.create({
     padding: 10,
     backgroundColor: "#f9f9f9",
   },
-  nonEditableValue: {
-    fontSize: 16,
-    color: "#333",
-    backgroundColor: "#f0f0f0",
-    padding: 10,
-    borderRadius: 5,
-  },
-  radioGroup: {
-    flexDirection: "column",
-    marginTop: 10,
-  },
+  radioGroup: { flexDirection: "column", marginTop: 10 },
   radioOption: {
     padding: 10,
     marginVertical: 5,
@@ -344,9 +310,7 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     alignItems: "center",
   },
-  radioOptionSelected: {
-    backgroundColor: "#2563eb",
-  },
+  radioOptionSelected: { backgroundColor: "#2563eb" },
   radioText: { fontSize: 14, color: "#333" },
   radioTextSelected: { color: "white", fontWeight: "bold" },
   fileButton: {

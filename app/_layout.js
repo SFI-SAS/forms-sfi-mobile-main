@@ -9,8 +9,8 @@ export default function Layout() {
         screenOptions={{
           headerStyle: { backgroundColor: "white" },
           headerTintColor: "blue",
-          headerTitle: "FORMULARIOS SFI",
-          headerTitleAlign:'center',
+          headerTitle: "ISOMETRIA",
+          headerTitleAlign: "center",
           headerLeft: () => <Logo />,
         }}
       />

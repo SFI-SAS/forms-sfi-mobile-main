@@ -32,6 +32,7 @@ export default function Home() {
       );
 
       const data = await response.json();
+      console.log(data);
       if (!response.ok) throw new Error("Error fetching data");
 
       setDefaultQuestions(data.default_questions || []);
@@ -98,6 +99,7 @@ export default function Home() {
       );
 
       const data = await response.json();
+      console.log(data)
       if (!response.ok) throw new Error("Error fetching project forms");
 
       setProjectForms(data);
@@ -148,20 +150,23 @@ export default function Home() {
   }, []);
 
   const handleFormPress = (form) => {
-    const selectedProjectData = answers.find(
+    // Obtener las respuestas asociadas al proyecto seleccionado
+    const selectedProjectAnswers = answers.find(
       (answer) => answer.id === selectedProject
     );
-    const projectName = selectedProjectData?.text || "Sin nombre";
-    const costCenter =
-      selectedProjectData?.cost_center || "Sin centro de costos";
+
+    // Construir la información predeterminada basada en las respuestas
+    const predefinedInfo = defaultQuestions.reduce((info, question) => {
+      const answer = selectedProjectAnswers?.[question.key] || "Sin respuesta";
+      return { ...info, [question.text]: answer };
+    }, {});
 
     router.push({
       pathname: "/format-screen",
       params: {
         id: form.id,
         created_at: form.created_at,
-        projectName,
-        costCenter,
+        predefinedInfo: JSON.stringify(predefinedInfo), // Pasar información predeterminada como string
       },
     });
   };
