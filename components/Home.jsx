@@ -1,31 +1,27 @@
-// Home.jsx
 import React, { useEffect, useState } from "react";
-import {
-  View,
-  Text,
-  FlatList,
-  TouchableOpacity,
-  Alert,
-  StyleSheet,
-} from "react-native";
+import { View, Text, TouchableOpacity, Alert, StyleSheet } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useRouter } from "expo-router";
+import { Picker } from "@react-native-picker/picker";
 
 export default function Home() {
   const router = useRouter();
-  const { name, email } = useLocalSearchParams(); // Obtener datos del usuario desde las props
-  const [showForms, setShowForms] = useState([]);
+  const [defaultQuestions, setDefaultQuestions] = useState([]);
+  const [answers, setAnswers] = useState([]);
+  const [generalForms, setGeneralForms] = useState([]);
+  const [projectForms, setProjectForms] = useState([]);
+  const [selectedProject, setSelectedProject] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isOffline, setIsOffline] = useState(false);
 
-  const fetchForms = async () => {
+  const fetchData = async () => {
     try {
       const token = await AsyncStorage.getItem("authToken");
       if (!token) throw new Error("No authentication token found");
 
       const response = await fetch(
-        "https://583d-179-33-13-68.ngrok-free.app/forms/users/form_by_user",
+        "https://583d-179-33-13-68.ngrok-free.app/questions/filtered",
         {
           method: "GET",
           headers: {
@@ -36,32 +32,94 @@ export default function Home() {
       );
 
       const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || "Error fetching forms");
+      if (!response.ok) throw new Error("Error fetching data");
 
-      await AsyncStorage.setItem("offline_forms", JSON.stringify(data));
-      setShowForms(data);
+      setDefaultQuestions(data.default_questions || []);
+      const firstKey = Object.keys(data.answers)[0];
+      setAnswers(firstKey ? data.answers[parseInt(firstKey)] : []);
+      setGeneralForms(data.non_root_forms || []);
+
+      await AsyncStorage.setItem(
+        "offline_default_questions",
+        JSON.stringify(data.default_questions)
+      );
+      await AsyncStorage.setItem(
+        "offline_answers",
+        JSON.stringify(data.answers)
+      );
+      await AsyncStorage.setItem(
+        "offline_general_forms",
+        JSON.stringify(data.non_root_forms)
+      );
     } catch (error) {
-      console.error("Error fetching forms:", error.message);
-      Alert.alert("Error", "No se pudieron cargar los formularios online.");
+      Alert.alert("Error", "No se pudieron cargar los datos online.");
     } finally {
       setLoading(false);
     }
   };
 
-  const loadFormsOffline = async () => {
+  const loadOfflineData = async () => {
     try {
-      const storedForms = await AsyncStorage.getItem("offline_forms");
-      if (storedForms) {
-        setShowForms(JSON.parse(storedForms));
-      } else {
-        console.log("No offline forms available");
-        Alert.alert("Modo Offline", "No hay formularios guardados.");
-      }
+      const storedQuestions = await AsyncStorage.getItem(
+        "offline_default_questions"
+      );
+      const storedAnswers = await AsyncStorage.getItem("offline_answers");
+      const storedGeneralForms = await AsyncStorage.getItem(
+        "offline_general_forms"
+      );
+
+      if (storedQuestions) setDefaultQuestions(JSON.parse(storedQuestions));
+      if (storedAnswers)
+        setAnswers(Object.values(JSON.parse(storedAnswers))[0] || []);
+      if (storedGeneralForms) setGeneralForms(JSON.parse(storedGeneralForms));
     } catch (error) {
-      console.error("Error loading offline forms:", error);
-      Alert.alert("Error", "No se pudieron cargar los formularios offline.");
+      Alert.alert("Error", "No se pudieron cargar los datos offline.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleProjectSelect = async (projectId) => {
+    setSelectedProject(projectId);
+    try {
+      const token = await AsyncStorage.getItem("authToken");
+      if (!token) throw new Error("No authentication token found");
+
+      const response = await fetch(
+        "https://583d-179-33-13-68.ngrok-free.app/forms/forms-by-answers/",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify([projectId]),
+        }
+      );
+
+      const data = await response.json();
+      if (!response.ok) throw new Error("Error fetching project forms");
+
+      setProjectForms(data);
+
+      await AsyncStorage.setItem(
+        `offline_project_forms_${projectId}`,
+        JSON.stringify(data)
+      );
+    } catch (error) {
+      Alert.alert(
+        "Error",
+        "No se pudieron cargar los formularios del proyecto."
+      );
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await AsyncStorage.setItem("isLoggedOut", "true");
+      router.push("/");
+    } catch (error) {
+      Alert.alert("Error", "No se pudo cerrar sesión. Inténtalo de nuevo.");
     }
   };
 
@@ -71,76 +129,100 @@ export default function Home() {
       setIsOffline(!state.isConnected);
 
       if (state.isConnected && wasOffline) {
-        console.log("📡 Conexión restaurada: Cargando formularios online...");
-        fetchForms();
+        fetchData();
       } else if (!state.isConnected && !wasOffline) {
-        console.log("📴 Conexión perdida: Cargando formularios offline...");
-        loadFormsOffline();
+        loadOfflineData();
       }
     });
 
-    // Cargar formularios iniciales según el estado de conexión
     NetInfo.fetch().then((state) => {
       setIsOffline(!state.isConnected);
       if (state.isConnected) {
-        fetchForms();
+        fetchData();
       } else {
-        loadFormsOffline();
+        loadOfflineData();
       }
     });
 
-    return () => unsubscribe(); // Limpiar el listener al desmontar el componente
+    return () => unsubscribe();
   }, []);
 
-  const handleFormPress = (item) => {
+  const handleFormPress = (form) => {
+    const selectedProjectData = answers.find(
+      (answer) => answer.id === selectedProject
+    );
+    const projectName = selectedProjectData?.text || "Sin nombre";
+    const costCenter =
+      selectedProjectData?.cost_center || "Sin centro de costos";
+
     router.push({
       pathname: "/format-screen",
-      params: { id: item.id, created_at: item.created_at },
+      params: {
+        id: form.id,
+        created_at: form.created_at,
+        projectName,
+        costCenter,
+      },
     });
-  };
-
-  const handleLogout = async () => {
-    try {
-      await AsyncStorage.setItem("isLoggedOut", "true");
-      router.push("/");
-    } catch (error) {
-      console.error("Error logging out:", error);
-      Alert.alert("Error", "Failed to log out. Please try again.");
-    }
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>Available Forms</Text>
-      {/* <Text style={styles.userInfo}>
-        Usuario: {name} | Email: {email}
-      </Text> */}
+      <Text style={styles.header}>Proyectos y Formularios</Text>
       <Text style={isOffline ? styles.offlineText : styles.onlineText}>
         Status: {isOffline ? "Offline ◉" : "Online ◉"}
       </Text>
       {loading ? (
         <Text>Loading...</Text>
-      ) : showForms.length > 0 ? (
-        <FlatList
-          data={showForms}
-          keyExtractor={(item) => item.id.toString()}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={styles.formItem}
-              onPress={() => handleFormPress(item)}
-            >
-              <Text style={styles.formText}>
-                ID: 00{item.id} | Created: {item.created_at}
-              </Text>
-              <Text style={styles.formAction}>Llenar Formato</Text>
-            </TouchableOpacity>
-          )}
-        />
       ) : (
-        <Text>No hay formularios disponibles.</Text>
+        <View>
+          <Text style={styles.subHeader}>Proyectos</Text>
+          <Picker
+            selectedValue={selectedProject}
+            onValueChange={(value) => handleProjectSelect(value)}
+            style={styles.picker}
+          >
+            <Picker.Item label="Selecciona un proyecto" value={null} />
+            {answers.map((answer) => (
+              <Picker.Item
+                key={answer.id}
+                label={answer.text}
+                value={answer.id}
+              />
+            ))}
+          </Picker>
+
+          {selectedProject && (
+            <View>
+              <Text style={styles.subHeader}>Formularios del Proyecto</Text>
+              {projectForms.map((form) => (
+                <TouchableOpacity
+                  key={form.id}
+                  style={styles.formItem}
+                  onPress={() => handleFormPress(form)}
+                >
+                  <Text style={styles.formText}>{form.title}</Text>
+                  <Text style={styles.formDescription}>{form.description}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          <Text style={styles.subHeader}>Formularios Generales</Text>
+          {generalForms.map((form) => (
+            <TouchableOpacity
+              key={form.id}
+              style={styles.formItem}
+              onPress={() => handleFormPress(form)}
+            >
+              <Text style={styles.formText}>{form.title}</Text>
+              <Text style={styles.formDescription}>{form.description}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       )}
       <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-        <Text style={styles.logoutText}>Log Out</Text>
+        <Text style={styles.logoutText}>Cerrar Sesión</Text>
       </TouchableOpacity>
     </View>
   );
@@ -149,17 +231,24 @@ export default function Home() {
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, backgroundColor: "#ffffff" },
   header: { fontSize: 20, fontWeight: "bold", marginBottom: 10 },
-  userInfo: { fontSize: 16, color: "#555", marginBottom: 10 },
+  subHeader: { fontSize: 18, fontWeight: "bold", marginTop: 20 },
   onlineText: { color: "green", fontWeight: "bold", marginBottom: 10 },
   offlineText: { color: "red", fontWeight: "bold", marginBottom: 10 },
-  formItem: {
-    padding: 15,
-    marginBottom: 10,
-    backgroundColor: "#f0f0f0",
-    borderRadius: 10,
+  picker: {
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 5,
+    backgroundColor: "#f9f9f9",
+    marginBottom: 20,
   },
-  formText: { fontSize: 16, color: "#333" },
-  formAction: { color: "blue", marginTop: 5 },
+  formItem: {
+    padding: 10,
+    backgroundColor: "#f0f0f0",
+    borderRadius: 5,
+    marginBottom: 10,
+  },
+  formText: { fontSize: 16, fontWeight: "bold" },
+  formDescription: { fontSize: 14, color: "#555" },
   logoutButton: {
     marginTop: 20,
     padding: 10,

@@ -1,6 +1,6 @@
 import React from "react";
-import BottomTabBar from "./components/BottomTabBar";
+import { Main } from "./components/Main"; // Importar directamente Main
 
 export default function App() {
-  return <BottomTabBar />;
+  return <Main />; // Renderizar Main directamente
 }
