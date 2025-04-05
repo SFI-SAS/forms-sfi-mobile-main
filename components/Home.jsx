@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, TouchableOpacity, Alert, StyleSheet } from "react-native";
+import { View, Text, TouchableOpacity, Alert, StyleSheet, ScrollView } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 import { useRouter } from "expo-router";
@@ -14,6 +14,8 @@ export default function Home() {
   const [selectedProject, setSelectedProject] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isOffline, setIsOffline] = useState(false);
+  const [isProjectFormsVisible, setIsProjectFormsVisible] = useState(false);
+  const [isGeneralFormsVisible, setIsGeneralFormsVisible] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -32,7 +34,7 @@ export default function Home() {
       );
 
       const data = await response.json();
-      console.log(data);
+      console.log("Data fetched from API:", data); // Log the fetched data fo
       if (!response.ok) throw new Error("Error fetching data");
 
       setDefaultQuestions(data.default_questions || []);
@@ -99,7 +101,7 @@ export default function Home() {
       );
 
       const data = await response.json();
-      console.log(data)
+      
       if (!response.ok) throw new Error("Error fetching project forms");
 
       setProjectForms(data);
@@ -155,11 +157,17 @@ export default function Home() {
       (answer) => answer.id === selectedProject
     );
 
+    // Obtener el nombre del proyecto y el centro de costos
+    const projectName = selectedProjectAnswers?.text || "Sin nombre";
+    const costCenter = defaultQuestions.find(
+      (question) => question.text === "centro de costos"
+    )?.text || "Sin centro de costos";
+
     // Construir la información predeterminada basada en las respuestas
-    const predefinedInfo = defaultQuestions.reduce((info, question) => {
-      const answer = selectedProjectAnswers?.[question.key] || "Sin respuesta";
-      return { ...info, [question.text]: answer };
-    }, {});
+    const predefinedInfo = {
+      "Nombre del proyecto": projectName,
+      "Centro de costos": costCenter,
+    };
 
     router.push({
       pathname: "/format-screen",
@@ -172,7 +180,7 @@ export default function Home() {
   };
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.container}>
       <Text style={styles.header}>Proyectos y Formularios</Text>
       <Text style={isOffline ? styles.offlineText : styles.onlineText}>
         Status: {isOffline ? "Offline ◉" : "Online ◉"}
@@ -199,8 +207,50 @@ export default function Home() {
 
           {selectedProject && (
             <View>
-              <Text style={styles.subHeader}>Formularios del Proyecto</Text>
-              {projectForms.map((form) => (
+              <TouchableOpacity
+                onPress={() =>
+                  setIsProjectFormsVisible(!isProjectFormsVisible)
+                }
+                style={styles.toggleButton}
+              >
+                <Text style={styles.toggleButtonText}>
+                  {isProjectFormsVisible
+                    ? "Ocultar Formularios del Proyecto"
+                    : "Mostrar Formularios del Proyecto"}
+                </Text>
+              </TouchableOpacity>
+              {isProjectFormsVisible && (
+                <ScrollView>
+                  {projectForms.map((form) => (
+                    <TouchableOpacity
+                      key={form.id}
+                      style={styles.formItem}
+                      onPress={() => handleFormPress(form)}
+                    >
+                      <Text style={styles.formText}>{form.title}</Text>
+                      <Text style={styles.formDescription}>
+                        {form.description}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+            </View>
+          )}
+
+          <TouchableOpacity
+            onPress={() => setIsGeneralFormsVisible(!isGeneralFormsVisible)}
+            style={styles.toggleButton}
+          >
+            <Text style={styles.toggleButtonText}>
+              {isGeneralFormsVisible
+                ? "Ocultar Formularios Generales"
+                : "Mostrar Formularios Generales"}
+            </Text>
+          </TouchableOpacity>
+          {isGeneralFormsVisible && (
+            <ScrollView>
+              {generalForms.map((form) => (
                 <TouchableOpacity
                   key={form.id}
                   style={styles.formItem}
@@ -210,26 +260,14 @@ export default function Home() {
                   <Text style={styles.formDescription}>{form.description}</Text>
                 </TouchableOpacity>
               ))}
-            </View>
+            </ScrollView>
           )}
-
-          <Text style={styles.subHeader}>Formularios Generales</Text>
-          {generalForms.map((form) => (
-            <TouchableOpacity
-              key={form.id}
-              style={styles.formItem}
-              onPress={() => handleFormPress(form)}
-            >
-              <Text style={styles.formText}>{form.title}</Text>
-              <Text style={styles.formDescription}>{form.description}</Text>
-            </TouchableOpacity>
-          ))}
         </View>
       )}
       <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
         <Text style={styles.logoutText}>Cerrar Sesión</Text>
       </TouchableOpacity>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -253,7 +291,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   formText: { fontSize: 16, fontWeight: "bold" },
-  formDescription: { fontSize: 14, color: "#555" },
+  formDescription: { fontSize: 15,color: "#555" },
   logoutButton: {
     marginTop: 20,
     padding: 10,
@@ -262,6 +300,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   logoutText: {
+    color: "white",
+    fontWeight: "bold",
+  },
+  toggleButton: {
+    padding: 10,
+    backgroundColor: "#2563eb",
+    borderRadius: 5,
+    marginVertical: 10,
+    alignItems: "center",
+  },
+  toggleButtonText: {
     color: "white",
     fontWeight: "bold",
   },

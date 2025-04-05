@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import * as DocumentPicker from "expo-document-picker"; // Importar DocumentPicker
+import * as DocumentPicker from "expo-document-picker";
 
 export default function FormatScreen() {
   const router = useRouter();
@@ -36,11 +36,10 @@ export default function FormatScreen() {
       );
 
       const data = await response.json();
-      console.log(data)
+      
       if (!response.ok)
         throw new Error(data.detail || "Error fetching questions");
 
-      // Filtrar preguntas para excluir las predeterminadas (default: true)
       const filteredQuestions = data.questions.filter((q) => !q.default);
 
       setQuestions(filteredQuestions);
