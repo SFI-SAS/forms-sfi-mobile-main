@@ -21,6 +21,8 @@ export default function FormatScreen() {
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [loading, setLoading] = useState(true);
+  const [tableAnswers, setTableAnswers] = useState({}); // State to store related answers for table questions
+  const [userFieldSelection, setUserFieldSelection] = useState({}); // State to store selected field for "users" source
 
   const fetchQuestionsByFormId = async (formId) => {
     try {
@@ -109,6 +111,52 @@ export default function FormatScreen() {
     }
   };
 
+  const fetchRelatedAnswers = async (questionId) => {
+    try {
+      const token = await AsyncStorage.getItem("authToken");
+      if (!token) throw new Error("No authentication token found");
+
+      const response = await fetch(
+        `https://54b8-179-33-13-68.ngrok-free.app/questions/question-table-relation/answers/${questionId}`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Error HTTP! Estado: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Handle "pregunta_relacionada" and "usuarios" sources
+      if (data.source === "pregunta_relacionada") {
+        setTableAnswers((prev) => ({
+          ...prev,
+          [questionId]: Array.isArray(data.respuestas)
+            ? data.respuestas.map((item) => item.respuesta) // Extract "respuesta" for display
+            : [],
+        }));
+      } else if (data.source === "usuarios") {
+        setTableAnswers((prev) => ({
+          ...prev,
+          [questionId]: Array.isArray(data.data) ? data.data : [], // Store the full user objects
+        }));
+      }
+
+      console.log("📋 Respuestas relacionadas para pregunta tipo table:", data);
+    } catch (error) {
+      console.error("❌ Error obteniendo respuestas relacionadas:", error);
+      setTableAnswers((prev) => ({
+        ...prev,
+        [questionId]: [], // On error, avoid invalid values
+      }));
+    }
+  };
+
   useEffect(() => {
     if (id) {
       NetInfo.fetch().then((state) => {
@@ -120,6 +168,15 @@ export default function FormatScreen() {
       });
     }
   }, [id]);
+
+  useEffect(() => {
+    // Fetch related answers for table questions
+    questions
+      .filter((question) => question.question_type === "table")
+      .forEach((question) => {
+        fetchRelatedAnswers(question.id);
+      });
+  }, [questions]);
 
   const handleSubmitForm = async () => {
     try {
@@ -204,6 +261,7 @@ export default function FormatScreen() {
                 <Text style={styles.requiredText}> Pregunta obligatoria *</Text>
               )}
             </Text>
+            {/* Render input types based on question type */}
             {question.question_type === "text" && (
               <TextInput
                 style={styles.input}
@@ -243,8 +301,77 @@ export default function FormatScreen() {
                 </Text>
               </TouchableOpacity>
             )}
-            {(question.question_type === "table" ||
-              question.question_type === "multiple_choice" ||
+            {question.question_type === "table" && (
+              <>
+                {/* Handle "usuarios" source */}
+                {Array.isArray(tableAnswers[question.id]) &&
+                  tableAnswers[question.id].length > 0 &&
+                  typeof tableAnswers[question.id][0] === "object" && (
+                    <>
+                      <Picker
+                        selectedValue={userFieldSelection[question.id] || ""}
+                        onValueChange={(value) =>
+                          setUserFieldSelection((prev) => ({
+                            ...prev,
+                            [question.id]: value,
+                          }))
+                        }
+                        style={styles.picker}
+                      >
+                        <Picker.Item label="Selecciona un campo" value="" />
+                        {Object.keys(tableAnswers[question.id][0]).map(
+                          (field, index) => (
+                            <Picker.Item
+                              key={index}
+                              label={field}
+                              value={field}
+                            />
+                          )
+                        )}
+                      </Picker>
+                      {userFieldSelection[question.id] && (
+                        <Picker
+                          selectedValue={answers[question.id] || ""}
+                          onValueChange={(value) =>
+                            handleAnswerChange(question.id, value)
+                          }
+                          style={styles.picker}
+                        >
+                          <Picker.Item label="Selecciona una opción" value="" />
+                          {tableAnswers[question.id].map((user, index) => (
+                            <Picker.Item
+                              key={index}
+                              label={user[userFieldSelection[question.id]]}
+                              value={user[userFieldSelection[question.id]]}
+                            />
+                          ))}
+                        </Picker>
+                      )}
+                    </>
+                  )}
+                {/* Handle "pregunta_relacionada" source */}
+                {Array.isArray(tableAnswers[question.id]) &&
+                  typeof tableAnswers[question.id][0] === "string" && (
+                    <Picker
+                      selectedValue={answers[question.id] || ""}
+                      onValueChange={(value) =>
+                        handleAnswerChange(question.id, value)
+                      }
+                      style={styles.picker}
+                    >
+                      <Picker.Item label="Selecciona una opción" value="" />
+                      {tableAnswers[question.id].map((option, index) => (
+                        <Picker.Item
+                          key={index}
+                          label={option}
+                          value={option}
+                        />
+                      ))}
+                    </Picker>
+                  )}
+              </>
+            )}
+            {(question.question_type === "multiple_choice" ||
               question.question_type === "single_choice") &&
               question.options && (
                 <Picker
