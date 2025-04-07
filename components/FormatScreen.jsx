@@ -11,15 +11,17 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as DocumentPicker from "expo-document-picker";
+import { Picker } from "@react-native-picker/picker";
 
 export default function FormatScreen() {
   const router = useRouter();
-  const { id, created_at, predefinedInfo } = useLocalSearchParams(); // Recibir información predeterminada como parámetro
+  const { id } = useLocalSearchParams(); // Recibir el ID del formulario como parámetro
+  const { title } = useLocalSearchParams(); // Recibir el ID del formulario como parámetro
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [loading, setLoading] = useState(true);
 
-  const handleQuestionsByIdForm = async (formId) => {
+  const fetchQuestionsByFormId = async (formId) => {
     try {
       const token = await AsyncStorage.getItem("authToken");
       if (!token) throw new Error("No authentication token found");
@@ -36,39 +38,17 @@ export default function FormatScreen() {
       );
 
       const data = await response.json();
-      
+      console.log("📋 Respuesta del endpoint para preguntas:", data); // Debugger
+
       if (!response.ok)
         throw new Error(data.detail || "Error fetching questions");
 
-      const filteredQuestions = data.questions.filter((q) => !q.default);
-
-      setQuestions(filteredQuestions);
-      await AsyncStorage.setItem(
-        `questions_form_${formId}`,
-        JSON.stringify(filteredQuestions)
-      );
+      setQuestions(data.questions);
     } catch (error) {
-      console.error("Error fetching questions:", error.message);
-      Alert.alert(
-        "Error",
-        "Failed to fetch questions. Loading offline data..."
-      );
-      loadQuestionsOffline(formId);
+      console.error("❌ Error al obtener las preguntas:", error.message);
+      Alert.alert("Error", "No se pudieron cargar las preguntas.");
     } finally {
       setLoading(false);
-    }
-  };
-
-  const loadQuestionsOffline = async (formId) => {
-    try {
-      const storedQuestions = await AsyncStorage.getItem(
-        `questions_form_${formId}`
-      );
-      if (storedQuestions) {
-        setQuestions(JSON.parse(storedQuestions));
-      }
-    } catch (error) {
-      console.error("Error loading offline questions:", error.message);
     }
   };
 
@@ -88,21 +68,21 @@ export default function FormatScreen() {
         Alert.alert("Archivo seleccionado", `Nombre: ${result.name}`);
       }
     } catch (error) {
-      console.error("Error seleccionando archivo:", error);
+      console.error("❌ Error seleccionando archivo:", error);
       Alert.alert("Error", "No se pudo seleccionar el archivo.");
     }
   };
 
+  useEffect(() => {
+    if (id) {
+      fetchQuestionsByFormId(id);
+    }
+  }, [id]);
+
   const handleSubmitForm = async () => {
     try {
-      const timestamp = new Date().toISOString();
-      const isOnline = !isOffline ? "Online" : "Offline";
-
       const completedForm = {
         id,
-        title: `Formulario ${id}`,
-        created_at: timestamp,
-        status: isOnline,
         questions: questions.map((q) => ({
           question_text: q.question_text,
           answer: answers[q.id] || "Sin respuesta",
@@ -120,43 +100,25 @@ export default function FormatScreen() {
       );
       router.back();
     } catch (error) {
-      console.error("Error guardando el formulario:", error);
+      console.error("❌ Error guardando el formulario:", error);
       Alert.alert("Error", "No se pudo guardar el formulario.");
     }
   };
 
-  useEffect(() => {
-    if (id) {
-      handleQuestionsByIdForm(id);
-    }
-  }, [id]);
-
-  const predefinedInfoObject = JSON.parse(predefinedInfo || "{}"); // Parsear información predeterminada
-
   return (
     <ScrollView style={styles.container}>
-      <Text style={styles.header}>Formulario</Text>
-      <Text>ID: 00{id}</Text>
-      <Text>Creado el: {created_at}</Text>
-      <View style={styles.projectInfo}>
-        {Object.entries(predefinedInfoObject).map(([key, value]) => (
-          <Text key={key} style={styles.projectInfoText}>
-            <Text style={styles.projectInfoLabel}>{key}:</Text> {value}
-          </Text>
-        ))}
-      </View>
-      <Text style={styles.subHeader}>Preguntas</Text>
+      <Text style={styles.header}>Formulario: {title.toLocaleUpperCase()}</Text>
+      <Text style={styles.header}>ID: 00{id}</Text>
+      
+      <Text>Responde las preguntas a continuación:</Text>
+      <Text>Recuerda que puedes subir archivos (si es necesario).</Text>
+      <Text style={styles.subHeader}>Preguntas:</Text>
+      <Text></Text>
       {loading ? (
         <Text>Cargando preguntas...</Text>
       ) : (
-        questions.map((question, index) => (
-          <View
-            key={question.id || `question-${index}`}
-            style={styles.questionContainer}
-          >
-            {question.required && (
-              <Text style={styles.requiredText}>* Obligatorio</Text>
-            )}
+        questions.map((question) => (
+          <View key={question.id} style={styles.questionContainer}>
             <Text style={styles.questionLabel}>{question.question_text}</Text>
             {question.question_type === "text" && (
               <TextInput
@@ -176,96 +138,42 @@ export default function FormatScreen() {
               />
             )}
             {question.question_type === "date" && (
-              <DateTimePicker
-                value={answers[question.id] || new Date()}
-                mode="date"
-                display="default"
-                onChange={(event, selectedDate) =>
-                  handleAnswerChange(question.id, selectedDate)
-                }
-              />
-            )}
-            {question.question_type === "select" && question.options && (
-              <Picker
-                selectedValue={answers[question.id] || ""}
-                onValueChange={(value) =>
-                  handleAnswerChange(question.id, value)
-                }
-                style={styles.picker}
+              <TouchableOpacity
+                style={styles.dateButton}
+                onPress={() => Alert.alert("Seleccionar fecha")}
               >
-                <Picker.Item label="Selecciona una opción" value="" />
-                {question.options.map((option, index) => (
-                  <Picker.Item
-                    key={index}
-                    label={option.option_text}
-                    value={option.option_text}
-                  />
-                ))}
-              </Picker>
+                <Text style={styles.dateButtonText}>
+                  {answers[question.id] || "Seleccionar fecha"}
+                </Text>
+              </TouchableOpacity>
             )}
-            {question.question_type === "single_choice" && question.options && (
-              <View style={styles.radioGroup}>
-                {question.options.map((option, index) => (
-                  <TouchableOpacity
-                    key={index}
-                    style={[
-                      styles.radioOption,
-                      answers[question.id] === option.option_text &&
-                        styles.radioOptionSelected,
-                    ]}
-                    onPress={() =>
-                      handleAnswerChange(question.id, option.option_text)
-                    }
-                  >
-                    <Text
-                      style={[
-                        styles.radioText,
-                        answers[question.id] === option.option_text &&
-                          styles.radioTextSelected,
-                      ]}
-                    >
-                      {option.option_text}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-            {question.question_type === "multiple_choice" &&
-              question.options && (
-                <View style={styles.radioGroup}>
-                  {question.options.map((option, optionIndex) => (
-                    <TouchableOpacity
-                      key={`${question.id}-option-${optionIndex}`}
-                      style={[
-                        styles.radioOption,
-                        answers[question.id] === option.option_text &&
-                          styles.radioOptionSelected,
-                      ]}
-                      onPress={() =>
-                        handleAnswerChange(question.id, option.option_text)
-                      }
-                    >
-                      <Text
-                        style={[
-                          styles.radioText,
-                          answers[question.id] === option.option_text &&
-                            styles.radioTextSelected,
-                        ]}
-                      >
-                        {option.option_text}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
             {question.question_type === "file" && (
               <TouchableOpacity
                 style={styles.fileButton}
                 onPress={() => handleFileUpload(question.id)}
               >
-                <Text style={styles.fileButtonText}>Subir archivo</Text>
+                <Text style={styles.fileButtonText}>
+                  {answers[question.id]
+                    ? "Archivo seleccionado"
+                    : "Subir archivo"}
+                </Text>
               </TouchableOpacity>
             )}
+            {(question.question_type === "table" ||
+              question.question_type === "multiple_choice" ||
+              question.question_type === "single_choice") &&
+              question.options && (
+                <Picker
+                  selectedValue={answers[question.id] || ""}
+                  onValueChange={(value) => handleAnswerChange(question.id, value)}
+                  style={styles.picker}
+                >
+                  <Picker.Item label="Selecciona una opción" value="" />
+                  {question.options.map((option, index) => (
+                    <Picker.Item key={index} label={option} value={option} />
+                  ))}
+                </Picker>
+              )}
           </View>
         ))
       )}
@@ -283,17 +191,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, backgroundColor: "#ffffff" },
   header: { fontSize: 20, fontWeight: "bold", marginBottom: 10 },
   subHeader: { fontSize: 18, fontWeight: "bold", marginTop: 20 },
-  projectInfo: {
-    marginBottom: 20,
-    padding: 10,
-    backgroundColor: "#f0f0f0",
-    borderRadius: 5,
-  },
-  projectInfoText: { fontSize: 16, color: "#333", marginBottom: 5 },
-  projectInfoLabel: { fontWeight: "bold", color: "#000" },
   questionContainer: { marginBottom: 20 },
-  questionLabel: { fontSize: 16, fontWeight: "bold", marginBottom: 5 },
-  requiredText: { color: "red", fontWeight: "bold", marginBottom: 5 },
+  questionLabel: { fontSize: 25, fontWeight: "bold", marginBottom: 5 },
   input: {
     borderWidth: 1,
     borderColor: "#ccc",
@@ -301,17 +200,13 @@ const styles = StyleSheet.create({
     padding: 10,
     backgroundColor: "#f9f9f9",
   },
-  radioGroup: { flexDirection: "column", marginTop: 10 },
-  radioOption: {
-    padding: 10,
-    marginVertical: 5,
-    backgroundColor: "#f0f0f0",
+  picker: {
+    borderWidth: 1,
+    borderColor: "#ccc",
     borderRadius: 5,
-    alignItems: "center",
+    backgroundColor: "#f9f9f9",
+    marginTop: 10,
   },
-  radioOptionSelected: { backgroundColor: "#2563eb" },
-  radioText: { fontSize: 14, color: "#333" },
-  radioTextSelected: { color: "white", fontWeight: "bold" },
   fileButton: {
     backgroundColor: "#2563eb",
     padding: 10,
@@ -320,6 +215,14 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   fileButtonText: { color: "white", fontWeight: "bold" },
+  dateButton: {
+    backgroundColor: "#2563eb",
+    padding: 10,
+    borderRadius: 5,
+    alignItems: "center",
+    marginTop: 10,
+  },
+  dateButtonText: { color: "white", fontWeight: "bold" },
   submitButton: {
     marginTop: 20,
     padding: 10,
