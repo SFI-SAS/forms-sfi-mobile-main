@@ -24,7 +24,7 @@ export default function Home() {
       if (!token) throw new Error("No authentication token found");
 
       const response = await fetch(
-        "https://583d-179-33-13-68.ngrok-free.app/forms/users/form_by_user",
+        "https://54b8-179-33-13-68.ngrok-free.app/forms/users/form_by_user",
         {
           method: "GET",
           headers: {
@@ -42,21 +42,16 @@ export default function Home() {
         throw new Error(data.detail || "Error fetching user forms");
       }
 
-      // Evitar duplicados al guardar formularios
-      const storedForms = await AsyncStorage.getItem("offline_forms");
-      const offlineForms = storedForms ? JSON.parse(storedForms) : [];
-      const uniqueForms = data.filter(
-        (form) => !offlineForms.some((offlineForm) => offlineForm.id === form.id)
-      );
-
-      const updatedForms = [...offlineForms, ...uniqueForms];
-      setUserForms(updatedForms);
+      setUserForms(data);
 
       // Guardar formularios únicos en AsyncStorage
-      await AsyncStorage.setItem("offline_forms", JSON.stringify(updatedForms));
+      await AsyncStorage.setItem("offline_forms", JSON.stringify(data));
     } catch (error) {
       console.error("❌ Error al obtener los formularios del usuario:", error);
-      Alert.alert("Error", "No se pudieron cargar los formularios del usuario.");
+      Alert.alert(
+        "Error",
+        "No se pudieron cargar los formularios del usuario."
+      );
     } finally {
       setLoading(false);
     }
@@ -95,6 +90,7 @@ export default function Home() {
   };
 
   const handleFormPress = (form) => {
+    console.log("📋 Formulario seleccionado:", form); // Log the selected form
     router.push({
       pathname: "/format-screen",
       params: {
@@ -144,20 +140,21 @@ export default function Home() {
         <Text>Cargando...</Text>
       ) : (
         userForms &&
-        userForms.map((form) => (
-          form && ( // Validación para evitar errores si `form` es null o undefined
-            <TouchableOpacity
-              key={form.id}
-              style={styles.formItem}
-              onPress={() => handleFormPress(form)}
-            >
-              <Text style={styles.formText}>Formato: {form.title}</Text>
-              <Text style={styles.formDescription}>
-                Descripción: {form.description}
-              </Text>
-            </TouchableOpacity>
-          )
-        ))
+        userForms.map(
+          (form) =>
+            form && ( // Validación para evitar errores si `form` es null o undefined
+              <TouchableOpacity
+                key={form.id}
+                style={styles.formItem}
+                onPress={() => handleFormPress(form)}
+              >
+                <Text style={styles.formText}>Formato: {form.title}</Text>
+                <Text style={styles.formDescription}>
+                  Descripción: {form.description}
+                </Text>
+              </TouchableOpacity>
+            )
+        )
       )}
       <TouchableOpacity onPress={handleNavigateToMyForms} style={styles.button}>
         <Text style={styles.buttonText}>Ver formularios diligenciados</Text>
@@ -166,7 +163,9 @@ export default function Home() {
         onPress={handleNavigateToPendingForms}
         style={styles.button}
       >
-        <Text style={styles.buttonText}>Ver formularios pendientes de envío</Text>
+        <Text style={styles.buttonText}>
+          Ver formularios pendientes de envío
+        </Text>
       </TouchableOpacity>
       <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
         <Text style={styles.logoutText}>Cerrar Sesión</Text>

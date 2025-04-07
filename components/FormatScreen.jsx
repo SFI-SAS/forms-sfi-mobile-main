@@ -28,7 +28,7 @@ export default function FormatScreen() {
       if (!token) throw new Error("No authentication token found");
 
       const response = await fetch(
-        `https://583d-179-33-13-68.ngrok-free.app/forms/${formId}`,
+        `https://54b8-179-33-13-68.ngrok-free.app/forms/${formId}`,
         {
           method: "GET",
           headers: {
@@ -56,7 +56,10 @@ export default function FormatScreen() {
           title: data.title,
           description: data.description,
         };
-        await AsyncStorage.setItem("offline_forms", JSON.stringify(offlineForms));
+        await AsyncStorage.setItem(
+          "offline_forms",
+          JSON.stringify(offlineForms)
+        );
       }
     } catch (error) {
       console.error("❌ Error al obtener las preguntas:", error.message);
@@ -73,7 +76,10 @@ export default function FormatScreen() {
       if (offlineForms[formId]) {
         setQuestions(offlineForms[formId].questions || []);
       } else {
-        Alert.alert("Modo Offline", "No hay preguntas guardadas para este formulario.");
+        Alert.alert(
+          "Modo Offline",
+          "No hay preguntas guardadas para este formulario."
+        );
       }
     } catch (error) {
       console.error("❌ Error cargando preguntas offline:", error);
@@ -136,7 +142,10 @@ export default function FormatScreen() {
           ? JSON.parse(storedPendingForms)
           : [];
         pendingForms.push({ ...completedForm, mode });
-        await AsyncStorage.setItem("pending_forms", JSON.stringify(pendingForms));
+        await AsyncStorage.setItem(
+          "pending_forms",
+          JSON.stringify(pendingForms)
+        );
         Alert.alert(
           "Formulario guardado",
           "El formulario se guardó en modo offline y será enviado cuando haya conexión."
@@ -145,7 +154,7 @@ export default function FormatScreen() {
         // Enviar formulario al backend
         const token = await AsyncStorage.getItem("authToken");
         const response = await fetch(
-          `https://583d-179-33-13-68.ngrok-free.app/save-response/${id}`,
+          `https://54b8-179-33-13-68.ngrok-free.app/save-response/${id}`,
           {
             method: "POST",
             headers: {
@@ -176,10 +185,10 @@ export default function FormatScreen() {
 
   return (
     <ScrollView style={styles.container}>
-      <Text style={styles.header}>Formulario:  {title.toLocaleUpperCase()}</Text>
+      <Text style={styles.header}>Formulario: {title.toLocaleUpperCase()}</Text>
       <Text></Text>
       <Text style={styles.header}>ID: 00{id}</Text>
-      
+
       <Text>Responde las preguntas a continuación:</Text>
       <Text>Recuerda que puedes subir archivos (si es necesario).</Text>
       <Text style={styles.subHeader}>Preguntas:</Text>
@@ -191,7 +200,7 @@ export default function FormatScreen() {
           <View key={question.id} style={styles.questionContainer}>
             <Text style={styles.questionLabel}>
               {question.question_text}
-              {question.required  && (
+              {question.required && (
                 <Text style={styles.requiredText}> Pregunta obligatoria *</Text>
               )}
             </Text>
@@ -240,7 +249,9 @@ export default function FormatScreen() {
               question.options && (
                 <Picker
                   selectedValue={answers[question.id] || ""}
-                  onValueChange={(value) => handleAnswerChange(question.id, value)}
+                  onValueChange={(value) =>
+                    handleAnswerChange(question.id, value)
+                  }
                   style={styles.picker}
                 >
                   <Picker.Item label="Selecciona una opción" value="" />

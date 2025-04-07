@@ -9,13 +9,15 @@ const SyncManager = () => {
     const syncResponses = async () => {
       if (isConnected) {
         const storedPendingForms = await AsyncStorage.getItem("pending_forms");
-        const pendingForms = storedPendingForms ? JSON.parse(storedPendingForms) : [];
+        const pendingForms = storedPendingForms
+          ? JSON.parse(storedPendingForms)
+          : [];
 
         for (const form of pendingForms) {
           try {
             const token = await AsyncStorage.getItem("authToken");
             const response = await fetch(
-              `https://583d-179-33-13-68.ngrok-free.app/save-response/${form.id}?mode=offline`,
+              `https://54b8-179-33-13-68.ngrok-free.app/save-response/${form.id}?mode=offline`,
               {
                 method: "POST",
                 headers: {
@@ -33,7 +35,10 @@ const SyncManager = () => {
 
             console.log(`✅ Formulario ${form.id} sincronizado correctamente.`);
           } catch (error) {
-            console.error(`❌ Error sincronizando formulario ${form.id}:`, error);
+            console.error(
+              `❌ Error sincronizando formulario ${form.id}:`,
+              error
+            );
           }
         }
 
