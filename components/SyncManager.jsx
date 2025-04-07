@@ -1,9 +1,5 @@
 import { useEffect } from "react";
-import {
-  getOfflineResponses,
-  clearOfflineResponses,
-} from "../services/storage";
-import { sendResponsesToAPI } from "../services/api";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import useNetInfo from "../hooks/useNetInfo";
 
 const SyncManager = () => {
@@ -12,16 +8,36 @@ const SyncManager = () => {
   useEffect(() => {
     const syncResponses = async () => {
       if (isConnected) {
-        const offlineResponses = await getOfflineResponses();
-        for (const [formId, responses] of Object.entries(offlineResponses)) {
+        const storedPendingForms = await AsyncStorage.getItem("pending_forms");
+        const pendingForms = storedPendingForms ? JSON.parse(storedPendingForms) : [];
+
+        for (const form of pendingForms) {
           try {
-            await sendResponsesToAPI(formId, responses);
-            delete offlineResponses[formId];
+            const token = await AsyncStorage.getItem("authToken");
+            const response = await fetch(
+              `https://583d-179-33-13-68.ngrok-free.app/save-response/${form.id}?mode=offline`,
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify(form),
+              }
+            );
+
+            if (!response.ok) {
+              const errorText = await response.text();
+              throw new Error(errorText);
+            }
+
+            console.log(`✅ Formulario ${form.id} sincronizado correctamente.`);
           } catch (error) {
-            console.error(`Error syncing responses for form ${formId}:`, error);
+            console.error(`❌ Error sincronizando formulario ${form.id}:`, error);
           }
         }
-        await clearOfflineResponses();
+
+        await AsyncStorage.removeItem("pending_forms");
       }
     };
 

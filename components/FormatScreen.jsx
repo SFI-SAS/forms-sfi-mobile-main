@@ -12,6 +12,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as DocumentPicker from "expo-document-picker";
 import { Picker } from "@react-native-picker/picker";
+import NetInfo from "@react-native-community/netinfo";
 
 export default function FormatScreen() {
   const router = useRouter();
@@ -38,15 +39,37 @@ export default function FormatScreen() {
       );
 
       const data = await response.json();
-      console.log("📋 Respuesta del endpoint para preguntas:", data); // Debugger
+      console.log("📋 Respuesta del endpoint para preguntas:", data.questions); // Debugger
 
       if (!response.ok)
         throw new Error(data.detail || "Error fetching questions");
 
       setQuestions(data.questions);
+
+      // Guardar preguntas en AsyncStorage para modo offline
+      const storedForms = await AsyncStorage.getItem("offline_forms");
+      const offlineForms = storedForms ? JSON.parse(storedForms) : {};
+      offlineForms[formId] = data.questions;
+      await AsyncStorage.setItem("offline_forms", JSON.stringify(offlineForms));
     } catch (error) {
       console.error("❌ Error al obtener las preguntas:", error.message);
       Alert.alert("Error", "No se pudieron cargar las preguntas.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadOfflineQuestions = async (formId) => {
+    try {
+      const storedForms = await AsyncStorage.getItem("offline_forms");
+      const offlineForms = storedForms ? JSON.parse(storedForms) : {};
+      if (offlineForms[formId]) {
+        setQuestions(offlineForms[formId]);
+      } else {
+        Alert.alert("Modo Offline", "No hay preguntas guardadas para este formulario.");
+      }
+    } catch (error) {
+      console.error("❌ Error cargando preguntas offline:", error);
     } finally {
       setLoading(false);
     }
@@ -75,7 +98,13 @@ export default function FormatScreen() {
 
   useEffect(() => {
     if (id) {
-      fetchQuestionsByFormId(id);
+      NetInfo.fetch().then((state) => {
+        if (state.isConnected) {
+          fetchQuestionsByFormId(id);
+        } else {
+          loadOfflineQuestions(id);
+        }
+      });
     }
   }, [id]);
 
@@ -89,18 +118,51 @@ export default function FormatScreen() {
         })),
       };
 
-      const storedForms = await AsyncStorage.getItem("completed_forms");
-      const forms = storedForms ? JSON.parse(storedForms) : [];
-      forms.push(completedForm);
-
-      await AsyncStorage.setItem("completed_forms", JSON.stringify(forms));
-      Alert.alert(
-        "Formulario guardado",
-        "El formulario se guardó correctamente."
+      const mode = await NetInfo.fetch().then((state) =>
+        state.isConnected ? "online" : "offline"
       );
+
+      if (mode === "offline") {
+        // Guardar formulario en modo offline
+        const storedPendingForms = await AsyncStorage.getItem("pending_forms");
+        const pendingForms = storedPendingForms
+          ? JSON.parse(storedPendingForms)
+          : [];
+        pendingForms.push({ ...completedForm, mode });
+        await AsyncStorage.setItem("pending_forms", JSON.stringify(pendingForms));
+        Alert.alert(
+          "Formulario guardado",
+          "El formulario se guardó en modo offline y será enviado cuando haya conexión."
+        );
+      } else {
+        // Enviar formulario al backend
+        const token = await AsyncStorage.getItem("authToken");
+        const response = await fetch(
+          `https://583d-179-33-13-68.ngrok-free.app/save-response/${id}?mode=${mode}`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(completedForm),
+          }
+        );
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(errorText);
+        }
+
+        Alert.alert(
+          "Formulario enviado",
+          "El formulario se envió correctamente al servidor."
+        );
+      }
+
       router.back();
     } catch (error) {
-      console.error("❌ Error guardando el formulario:", error);
+      console.error("❌ Error al guardar el formulario:", error);
       Alert.alert("Error", "No se pudo guardar el formulario.");
     }
   };
@@ -119,7 +181,12 @@ export default function FormatScreen() {
       ) : (
         questions.map((question) => (
           <View key={question.id} style={styles.questionContainer}>
-            <Text style={styles.questionLabel}>{question.question_text}</Text>
+            <Text style={styles.questionLabel}>
+              {question.question_text}
+              {question.required  && (
+                <Text style={styles.requiredText}> Pregunta obligatoria *</Text>
+              )}
+            </Text>
             {question.question_type === "text" && (
               <TextInput
                 style={styles.input}
@@ -239,4 +306,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   backButtonText: { color: "white", fontWeight: "bold" },
+  requiredText: {
+    color: "red",
+    fontWeight: "bold",
+    marginLeft: 5,
+  },
 });

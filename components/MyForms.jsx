@@ -1,48 +1,55 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, FlatList, StyleSheet, TouchableOpacity } from "react-native";
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  ScrollView,
+  Alert,
+} from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export default function MyForms() {
   const [completedForms, setCompletedForms] = useState([]);
+  const [pendingForms, setPendingForms] = useState([]);
 
-  const loadCompletedForms = async () => {
+  const loadForms = async () => {
     try {
-      const storedForms = await AsyncStorage.getItem("completed_forms");
-      if (storedForms) {
-        setCompletedForms(JSON.parse(storedForms));
-      }
+      const storedCompletedForms = await AsyncStorage.getItem("completed_forms");
+      const storedPendingForms = await AsyncStorage.getItem("pending_forms");
+
+      setCompletedForms(storedCompletedForms ? JSON.parse(storedCompletedForms) : []);
+      setPendingForms(storedPendingForms ? JSON.parse(storedPendingForms) : []);
     } catch (error) {
-      console.error("Error cargando formularios:", error);
+      console.error("❌ Error cargando formularios:", error);
+      Alert.alert("Error", "No se pudieron cargar los formularios.");
     }
   };
 
   useEffect(() => {
-    loadCompletedForms();
+    loadForms();
   }, []);
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.container}>
       <Text style={styles.header}>Formularios Diligenciados</Text>
-      <FlatList
-        data={completedForms}
-        keyExtractor={(item, index) => index.toString()}
-        renderItem={({ item }) => (
-          <View style={styles.formItem}>
-            <Text style={styles.formTitle}>{item.title}</Text>
-            <Text style={styles.formDetails}>
-              Fecha: {new Date(item.created_at).toLocaleString()}
-            </Text>
-            <Text style={styles.formDetails}>Estado: {item.status}</Text>
-            {item.questions.map((q, index) => (
-              <View key={index} style={styles.questionContainer}>
-                <Text style={styles.questionText}>{q.question_text}</Text>
-                <Text style={styles.answerText}>Respuesta: {q.answer}</Text>
-              </View>
-            ))}
-          </View>
-        )}
-      />
-    </View>
+      {completedForms.map((form, index) => (
+        <View key={index} style={styles.formItem}>
+          <Text style={styles.formText}>ID: {form.id}</Text>
+          <Text style={styles.formText}>Preguntas: {form.questions.length}</Text>
+          <Text style={styles.formText}>Estado: Enviado</Text>
+        </View>
+      ))}
+
+      <Text style={styles.header}>Formularios Pendientes de Envío</Text>
+      {pendingForms.map((form, index) => (
+        <View key={index} style={styles.formItem}>
+          <Text style={styles.formText}>ID: {form.id}</Text>
+          <Text style={styles.formText}>Preguntas: {form.questions.length}</Text>
+          <Text style={styles.formText}>Estado: Pendiente de Envío</Text>
+        </View>
+      ))}
+    </ScrollView>
   );
 }
 
@@ -50,14 +57,10 @@ const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, backgroundColor: "#ffffff" },
   header: { fontSize: 20, fontWeight: "bold", marginBottom: 10 },
   formItem: {
-    padding: 15,
-    marginBottom: 10,
+    padding: 10,
     backgroundColor: "#f0f0f0",
-    borderRadius: 10,
+    borderRadius: 5,
+    marginBottom: 10,
   },
-  formTitle: { fontSize: 16, fontWeight: "bold", marginBottom: 5 },
-  formDetails: { fontSize: 14, color: "#555" },
-  questionContainer: { marginTop: 10 },
-  questionText: { fontSize: 14, fontWeight: "bold" },
-  answerText: { fontSize: 14, color: "#333" },
+  formText: { fontSize: 16, fontWeight: "bold" },
 });

@@ -24,7 +24,7 @@ export default function Home() {
       if (!token) throw new Error("No authentication token found");
 
       const response = await fetch(
-        "https://583d-179-33-13-68.ngrok-free.app/forms/users/form_by_user", // URL corregida
+        "https://583d-179-33-13-68.ngrok-free.app/forms/users/form_by_user",
         {
           method: "GET",
           headers: {
@@ -44,7 +44,7 @@ export default function Home() {
 
       setUserForms(data);
 
-      // Guardar datos para acceso offline
+      // Guardar formularios en AsyncStorage para modo offline
       await AsyncStorage.setItem("offline_forms", JSON.stringify(data));
     } catch (error) {
       console.error("❌ Error al obtener los formularios del usuario:", error);
@@ -89,6 +89,14 @@ export default function Home() {
     });
   };
 
+  const handleNavigateToMyForms = () => {
+    router.push("/my-forms");
+  };
+
+  const handleNavigateToPendingForms = () => {
+    router.push("/pending-forms");
+  };
+
   useEffect(() => {
     const checkNetworkStatus = async () => {
       const state = await NetInfo.fetch();
@@ -130,6 +138,15 @@ export default function Home() {
           </TouchableOpacity>
         ))
       )}
+      <TouchableOpacity onPress={handleNavigateToMyForms} style={styles.button}>
+        <Text style={styles.buttonText}>Ver Formularios Diligenciados</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        onPress={handleNavigateToPendingForms}
+        style={styles.button}
+      >
+        <Text style={styles.buttonText}>Ver Formularios Pendientes</Text>
+      </TouchableOpacity>
       <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
         <Text style={styles.logoutText}>Cerrar Sesión</Text>
       </TouchableOpacity>
@@ -150,6 +167,17 @@ const styles = StyleSheet.create({
   },
   formText: { fontSize: 16, fontWeight: "bold" },
   formDescription: { fontSize: 14, color: "#555" },
+  button: {
+    marginTop: 10,
+    padding: 10,
+    backgroundColor: "#2563eb",
+    borderRadius: 5,
+    alignItems: "center",
+  },
+  buttonText: {
+    color: "white",
+    fontWeight: "bold",
+  },
   logoutButton: {
     marginTop: 20,
     padding: 10,
