@@ -17,7 +17,7 @@ import NetInfo from "@react-native-community/netinfo";
 export default function FormatScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams(); // Recibir el ID del formulario como parámetro
-  const { title } = useLocalSearchParams(); // Recibir el ID del formulario como parámetro
+  const { title } = useLocalSearchParams(); // Recibir el título del formulario como parámetro
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [loading, setLoading] = useState(true);
@@ -46,11 +46,18 @@ export default function FormatScreen() {
 
       setQuestions(data.questions);
 
-      // Guardar preguntas en AsyncStorage para modo offline
+      // Guardar preguntas y metadatos del formulario en AsyncStorage para modo offline
       const storedForms = await AsyncStorage.getItem("offline_forms");
       const offlineForms = storedForms ? JSON.parse(storedForms) : {};
-      offlineForms[formId] = data.questions;
-      await AsyncStorage.setItem("offline_forms", JSON.stringify(offlineForms));
+
+      if (!offlineForms[formId]) {
+        offlineForms[formId] = {
+          questions: data.questions,
+          title: data.title,
+          description: data.description,
+        };
+        await AsyncStorage.setItem("offline_forms", JSON.stringify(offlineForms));
+      }
     } catch (error) {
       console.error("❌ Error al obtener las preguntas:", error.message);
       Alert.alert("Error", "No se pudieron cargar las preguntas.");
@@ -64,7 +71,7 @@ export default function FormatScreen() {
       const storedForms = await AsyncStorage.getItem("offline_forms");
       const offlineForms = storedForms ? JSON.parse(storedForms) : {};
       if (offlineForms[formId]) {
-        setQuestions(offlineForms[formId]);
+        setQuestions(offlineForms[formId].questions || []);
       } else {
         Alert.alert("Modo Offline", "No hay preguntas guardadas para este formulario.");
       }
@@ -138,7 +145,7 @@ export default function FormatScreen() {
         // Enviar formulario al backend
         const token = await AsyncStorage.getItem("authToken");
         const response = await fetch(
-          `https://583d-179-33-13-68.ngrok-free.app/save-response/${id}?mode=${mode}`,
+          `https://583d-179-33-13-68.ngrok-free.app/save-response/${id}`,
           {
             method: "POST",
             headers: {
@@ -169,7 +176,8 @@ export default function FormatScreen() {
 
   return (
     <ScrollView style={styles.container}>
-      <Text style={styles.header}>Formulario: {title.toLocaleUpperCase()}</Text>
+      <Text style={styles.header}>Formulario:  {title.toLocaleUpperCase()}</Text>
+      <Text></Text>
       <Text style={styles.header}>ID: 00{id}</Text>
       
       <Text>Responde las preguntas a continuación:</Text>

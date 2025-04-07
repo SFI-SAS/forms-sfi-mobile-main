@@ -42,10 +42,18 @@ export default function Home() {
         throw new Error(data.detail || "Error fetching user forms");
       }
 
-      setUserForms(data);
+      // Evitar duplicados al guardar formularios
+      const storedForms = await AsyncStorage.getItem("offline_forms");
+      const offlineForms = storedForms ? JSON.parse(storedForms) : [];
+      const uniqueForms = data.filter(
+        (form) => !offlineForms.some((offlineForm) => offlineForm.id === form.id)
+      );
 
-      // Guardar formularios en AsyncStorage para modo offline
-      await AsyncStorage.setItem("offline_forms", JSON.stringify(data));
+      const updatedForms = [...offlineForms, ...uniqueForms];
+      setUserForms(updatedForms);
+
+      // Guardar formularios únicos en AsyncStorage
+      await AsyncStorage.setItem("offline_forms", JSON.stringify(updatedForms));
     } catch (error) {
       console.error("❌ Error al obtener los formularios del usuario:", error);
       Alert.alert("Error", "No se pudieron cargar los formularios del usuario.");
@@ -58,7 +66,15 @@ export default function Home() {
     try {
       const storedForms = await AsyncStorage.getItem("offline_forms");
       if (storedForms) {
-        setUserForms(JSON.parse(storedForms));
+        const parsedForms = JSON.parse(storedForms);
+
+        // Filtrar formularios duplicados por ID
+        const uniqueForms = parsedForms.filter(
+          (form, index, self) =>
+            index === self.findIndex((f) => f.id === form.id)
+        );
+
+        setUserForms(uniqueForms);
       } else {
         Alert.alert("Modo Offline", "No hay datos guardados para mostrar.");
       }
@@ -127,25 +143,30 @@ export default function Home() {
       {loading ? (
         <Text>Cargando...</Text>
       ) : (
+        userForms &&
         userForms.map((form) => (
-          <TouchableOpacity
-            key={form.id}
-            style={styles.formItem}
-            onPress={() => handleFormPress(form)}
-          >
-            <Text style={styles.formText}>Formato: {form.title}</Text>
-            <Text style={styles.formDescription}>Descripción: {form.description}</Text>
-          </TouchableOpacity>
+          form && ( // Validación para evitar errores si `form` es null o undefined
+            <TouchableOpacity
+              key={form.id}
+              style={styles.formItem}
+              onPress={() => handleFormPress(form)}
+            >
+              <Text style={styles.formText}>Formato: {form.title}</Text>
+              <Text style={styles.formDescription}>
+                Descripción: {form.description}
+              </Text>
+            </TouchableOpacity>
+          )
         ))
       )}
       <TouchableOpacity onPress={handleNavigateToMyForms} style={styles.button}>
-        <Text style={styles.buttonText}>Ver Formularios Diligenciados</Text>
+        <Text style={styles.buttonText}>Ver formularios diligenciados</Text>
       </TouchableOpacity>
       <TouchableOpacity
         onPress={handleNavigateToPendingForms}
         style={styles.button}
       >
-        <Text style={styles.buttonText}>Ver Formularios Pendientes</Text>
+        <Text style={styles.buttonText}>Ver formularios pendientes de envío</Text>
       </TouchableOpacity>
       <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
         <Text style={styles.logoutText}>Cerrar Sesión</Text>
