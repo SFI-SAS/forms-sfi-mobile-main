@@ -99,14 +99,25 @@ export default function FormatScreen() {
     console.log("📂 Subiendo archivo para pregunta ID:", questionId);
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: "*/*",
+        type: "*/*", // Allow all file types
         copyToCacheDirectory: true,
       });
 
-      if (result.type === "success") {
-        console.log("✅ Archivo seleccionado:", result);
-        handleAnswerChange(questionId, result.uri);
-        Alert.alert("Archivo seleccionado", `Nombre: ${result.name}`);
+      console.log("📄 Resultado del selector de documentos:", result);
+
+      if (result && result.assets && result.assets.length > 0) {
+        const file = result.assets[0]; // Extract the first file from the assets array
+        console.log("✅ Archivo seleccionado:", file);
+
+        handleAnswerChange(questionId, file.uri); // Save the file URI in the answers state
+        Alert.alert("Archivo seleccionado", `Nombre: ${file.name}`);
+      } else if (result && result.canceled) {
+        console.log("⚠️ Selección de archivo cancelada por el usuario.");
+      } else {
+        console.error(
+          "❌ Resultado inesperado del selector de documentos:",
+          result
+        );
       }
     } catch (error) {
       console.error("❌ Error seleccionando archivo:", error);
@@ -253,7 +264,7 @@ export default function FormatScreen() {
                 name: fileUri.split("/").pop(),
                 type: "application/octet-stream",
               });
-
+              console.log(uploadFormData);
               try {
                 const uploadResponse = await fetch(
                   `https://54b8-179-33-13-68.ngrok-free.app/responses/upload-file/`,
@@ -440,7 +451,9 @@ export default function FormatScreen() {
                 onPress={() =>
                   Alert.alert(
                     "Seleccionar fecha",
-                    "Por favor selecciona una fecha usando el selector."
+                    "Por favor selecciona una fecha usando el selector." <
+                      DateTimePicker >
+                      <DateTimePicker />
                   )
                 }
               >
