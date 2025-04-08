@@ -147,6 +147,15 @@ export default function FormatScreen() {
         }));
       }
 
+      // Save related answers to AsyncStorage for offline use
+      const storedAnswers = await AsyncStorage.getItem("offline_answers");
+      const offlineAnswers = storedAnswers ? JSON.parse(storedAnswers) : {};
+      offlineAnswers[questionId] = data;
+      await AsyncStorage.setItem(
+        "offline_answers",
+        JSON.stringify(offlineAnswers)
+      );
+
       console.log("📋 Respuestas relacionadas para pregunta tipo table:", data);
     } catch (error) {
       console.error("❌ Error obteniendo respuestas relacionadas:", error);
@@ -154,6 +163,33 @@ export default function FormatScreen() {
         ...prev,
         [questionId]: [], // On error, avoid invalid values
       }));
+    }
+  };
+
+  const loadOfflineAnswers = async (questionId) => {
+    try {
+      const storedAnswers = await AsyncStorage.getItem("offline_answers");
+      const offlineAnswers = storedAnswers ? JSON.parse(storedAnswers) : {};
+      if (offlineAnswers[questionId]) {
+        const data = offlineAnswers[questionId];
+        if (data.source === "pregunta_relacionada") {
+          setTableAnswers((prev) => ({
+            ...prev,
+            [questionId]: Array.isArray(data.respuestas)
+              ? data.respuestas.map((item) => item.respuesta)
+              : [],
+          }));
+        } else if (data.source === "usuarios") {
+          setTableAnswers((prev) => ({
+            ...prev,
+            [questionId]: Array.isArray(data.data) ? data.data : [],
+          }));
+        }
+      } else {
+        console.warn("⚠️ No hay respuestas guardadas para esta pregunta.");
+      }
+    } catch (error) {
+      console.error("❌ Error cargando respuestas offline:", error);
     }
   };
 
@@ -174,66 +210,172 @@ export default function FormatScreen() {
     questions
       .filter((question) => question.question_type === "table")
       .forEach((question) => {
-        fetchRelatedAnswers(question.id);
+        NetInfo.fetch().then((state) => {
+          if (state.isConnected) {
+            fetchRelatedAnswers(question.id);
+          } else {
+            loadOfflineAnswers(question.id);
+          }
+        });
       });
   }, [questions]);
 
   const handleSubmitForm = async () => {
     try {
-      const completedForm = {
-        id,
-        questions: questions.map((q) => ({
-          question_text: q.question_text,
-          answer: answers[q.id] || "Sin respuesta",
-        })),
-      };
+      const token = await AsyncStorage.getItem("authToken");
+      if (!token) throw new Error("No authentication token found");
+
+      let hasError = false;
+      const newErrors = {}; // Map for errors
+
+      const responses = await Promise.all(
+        questions.map(async (q) => {
+          let responseValue = "";
+          let filePath = "";
+
+          if (q.question_type === "multiple_choice") {
+            const selectedOptions = answers[q.id]?.split(",") || [];
+            responseValue =
+              selectedOptions.length > 0 ? selectedOptions.join(", ") : "";
+          } else if (q.options?.length > 0) {
+            responseValue = answers[q.id] || "";
+          } else if (q.question_type === "file") {
+            const fileUri = answers[q.id];
+            if (fileUri) {
+              const uploadFormData = new FormData();
+              uploadFormData.append("file", {
+                uri: fileUri,
+                name: fileUri.split("/").pop(),
+                type: "application/octet-stream",
+              });
+
+              try {
+                const uploadResponse = await fetch(
+                  `https://54b8-179-33-13-68.ngrok-free.app/responses/upload-file/`,
+                  {
+                    method: "POST",
+                    headers: {
+                      Authorization: `Bearer ${token}`,
+                    },
+                    body: uploadFormData,
+                  }
+                );
+
+                const uploadResult = await uploadResponse.json();
+
+                if (!uploadResponse.ok) {
+                  throw new Error(
+                    uploadResult.detail || "Error al subir el archivo"
+                  );
+                }
+
+                filePath = uploadResult.file_name; // Get the uploaded file name
+              } catch (error) {
+                console.error("Error al subir archivo:", error);
+                newErrors[q.id] = true;
+                hasError = true;
+              }
+            } else if (q.required) {
+              newErrors[q.id] = true;
+              hasError = true;
+            }
+          } else {
+            responseValue = answers[q.id] || "";
+          }
+
+          // Validate required questions
+          if (q.required && responseValue.trim() === "") {
+            newErrors[q.id] = true;
+            hasError = true;
+          }
+
+          return {
+            question_id: q.id,
+            answer_text: responseValue,
+            file_path: filePath,
+          };
+        })
+      );
+
+      if (hasError) {
+        Alert.alert(
+          "Error",
+          "Por favor, responde todas las preguntas obligatorias."
+        );
+        return;
+      }
 
       const mode = await NetInfo.fetch().then((state) =>
         state.isConnected ? "online" : "offline"
       );
 
       if (mode === "offline") {
-        // Guardar formulario en modo offline
+        // Save responses locally for offline mode
         const storedPendingForms = await AsyncStorage.getItem("pending_forms");
         const pendingForms = storedPendingForms
           ? JSON.parse(storedPendingForms)
           : [];
-        pendingForms.push({ ...completedForm, mode });
+        pendingForms.push({ id, responses, mode });
         await AsyncStorage.setItem(
           "pending_forms",
           JSON.stringify(pendingForms)
         );
         Alert.alert(
-          "Formulario guardado",
+          "Guardado Offline",
           "El formulario se guardó en modo offline y será enviado cuando haya conexión."
         );
-      } else {
-        // Enviar formulario al backend
-        const token = await AsyncStorage.getItem("authToken");
-        const response = await fetch(
-          `https://54b8-179-33-13-68.ngrok-free.app/save-response/${id}`,
+        router.back();
+        return;
+      }
+
+      const requestOptions = {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      };
+
+      try {
+        // 1. Save the responses with the response_id and mode
+        const saveResponseRes = await fetch(
+          `https://54b8-179-33-13-68.ngrok-free.app/responses/save-response/${id}`,
           {
             method: "POST",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(completedForm),
+            headers: requestOptions.headers,
+            body: JSON.stringify({ mode }),
           }
         );
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText);
+        const saveResponseData = await saveResponseRes.json();
+        const responseId = saveResponseData.response_id;
+
+        // 2. Save each answer in the correct endpoint
+        for (const response of responses) {
+          try {
+            await fetch(
+              `https://54b8-179-33-13-68.ngrok-free.app/response/answers`,
+              {
+                method: "POST",
+                headers: requestOptions.headers,
+                body: JSON.stringify({
+                  response_id: responseId,
+                  question_id: response.question_id,
+                  answer_text: response.answer_text,
+                  file_path: response.file_path,
+                }),
+              }
+            );
+          } catch (error) {
+            console.error("Error en la solicitud:", error);
+          }
         }
 
-        Alert.alert(
-          "Formulario enviado",
-          "El formulario se envió correctamente al servidor."
-        );
+        Alert.alert("Éxito", "Respuestas enviadas correctamente.");
+        router.back();
+      } catch (err) {
+        console.error("Error al enviar respuestas:", err);
+        Alert.alert("Error", "Error al enviar respuestas.");
       }
-
-      router.back();
     } catch (error) {
       console.error("❌ Error al guardar el formulario:", error);
       Alert.alert("Error", "No se pudo guardar el formulario.");

@@ -13,6 +13,7 @@ import { useRouter } from "expo-router";
 
 export default function Home() {
   const router = useRouter();
+
   const [userForms, setUserForms] = useState([]);
   const [isOffline, setIsOffline] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -116,6 +117,69 @@ export default function Home() {
 
       if (state.isConnected) {
         fetchUserForms();
+
+        // Synchronize pending forms when back online
+        const storedPendingForms = await AsyncStorage.getItem("pending_forms");
+        const pendingForms = storedPendingForms
+          ? JSON.parse(storedPendingForms)
+          : [];
+        for (const form of pendingForms) {
+          try {
+            const token = await AsyncStorage.getItem("authToken");
+            if (!token) throw new Error("No authentication token found");
+
+            const requestOptions = {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+            };
+
+            // Submit the form
+            const saveResponseRes = await fetch(
+              `https://54b8-179-33-13-68.ngrok-free.app/responses/save-response/${form.id}`,
+              {
+                method: "POST",
+                headers: requestOptions.headers,
+                body: JSON.stringify({ mode: "offline" }),
+              }
+            );
+
+            const saveResponseData = await saveResponseRes.json();
+            const responseId = saveResponseData.response_id;
+
+            // Submit each answer
+            for (const response of form.responses) {
+              await fetch(
+                `https://54b8-179-33-13-68.ngrok-free.app/response/answers`,
+                {
+                  method: "POST",
+                  headers: requestOptions.headers,
+                  body: JSON.stringify({
+                    response_id: responseId,
+                    question_id: response.question_id,
+                    answer_text: response.answer_text,
+                    file_path: response.file_path,
+                  }),
+                }
+              );
+            }
+
+            // Remove the form from pending forms
+            const updatedPendingForms = pendingForms.filter(
+              (f) => f.id !== form.id
+            );
+            await AsyncStorage.setItem(
+              "pending_forms",
+              JSON.stringify(updatedPendingForms)
+            );
+          } catch (error) {
+            console.error(
+              "❌ Error al sincronizar formulario pendiente:",
+              error
+            );
+          }
+        }
       } else {
         loadOfflineForms();
       }
@@ -132,7 +196,7 @@ export default function Home() {
 
   return (
     <ScrollView style={styles.container}>
-      <Text style={styles.header}>Formularios Asignados</Text>
+      <Text style={styles.header}>Formatos Asignados</Text>
       <Text style={isOffline ? styles.offlineText : styles.onlineText}>
         Estado: {isOffline ? "Offline ◉" : "Online ◉"}
       </Text>

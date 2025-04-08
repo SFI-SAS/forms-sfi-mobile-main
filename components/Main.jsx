@@ -174,6 +174,8 @@ export function Main() {
         pathname: "/home",
         params: { name: userData.name, email: userData.email },
       }); // Navigate to Home
+
+      console.log(userData)
     } catch (error) {
       console.error("❌ API error:", error);
       Alert.alert("Error", error.message);
