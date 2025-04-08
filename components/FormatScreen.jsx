@@ -248,7 +248,7 @@ export default function FormatScreen() {
                 name: fileUri.split("/").pop(),
                 type: "application/octet-stream",
               });
-
+              console.log(uploadFormData.fileUri)
               try {
                 const uploadResponse = await fetch(
                   `https://54b8-179-33-13-68.ngrok-free.app/responses/upload-file/`,
@@ -262,7 +262,7 @@ export default function FormatScreen() {
                 );
 
                 const uploadResult = await uploadResponse.json();
-
+                console.log(uploadResult);
                 if (!uploadResponse.ok) {
                   throw new Error(
                     uploadResult.detail || "Error al subir el archivo"
@@ -353,7 +353,7 @@ export default function FormatScreen() {
         for (const response of responses) {
           try {
             await fetch(
-              `https://54b8-179-33-13-68.ngrok-free.app/response/answers`,
+              `https://54b8-179-33-13-68.ngrok-free.app/responses/save-answers`,
               {
                 method: "POST",
                 headers: requestOptions.headers,

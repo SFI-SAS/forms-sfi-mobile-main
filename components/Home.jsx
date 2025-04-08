@@ -151,7 +151,7 @@ export default function Home() {
             // Submit each answer
             for (const response of form.responses) {
               await fetch(
-                `https://54b8-179-33-13-68.ngrok-free.app/response/answers`,
+                `https://54b8-179-33-13-68.ngrok-free.app/responses/save-answers`,
                 {
                   method: "POST",
                   headers: requestOptions.headers,

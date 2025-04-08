@@ -20,7 +20,6 @@ export default function PendingForms() {
       setPendingForms(storedPendingForms ? JSON.parse(storedPendingForms) : []);
     };
 
-   
     const checkNetworkStatus = async () => {
       const state = await NetInfo.fetch();
       setIsOnline(state.isConnected);
@@ -65,7 +64,7 @@ export default function PendingForms() {
       // Submit each answer
       for (const response of form.responses) {
         await fetch(
-          `https://54b8-179-33-13-68.ngrok-free.app/response/answers`,
+          `https://54b8-179-33-13-68.ngrok-free.app/responses/save-answers`,
           {
             method: "POST",
             headers: requestOptions.headers,
