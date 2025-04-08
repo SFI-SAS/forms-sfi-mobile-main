@@ -15,8 +15,11 @@ export default function MyForms() {
   useEffect(() => {
     const fetchSubmittedForms = async () => {
       try {
-        const storedSubmittedForms = await AsyncStorage.getItem("submitted_forms");
-        setSubmittedForms(storedSubmittedForms ? JSON.parse(storedSubmittedForms) : []);
+        const storedSubmittedForms =
+          await AsyncStorage.getItem("submitted_forms");
+        setSubmittedForms(
+          storedSubmittedForms ? JSON.parse(storedSubmittedForms) : []
+        );
       } catch (error) {
         console.error("❌ Error al cargar formularios enviados:", error);
         Alert.alert("Error", "No se pudieron cargar los formularios enviados.");
