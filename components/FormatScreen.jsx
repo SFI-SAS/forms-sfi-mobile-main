@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Alert,
   ScrollView,
+  BackHandler,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -14,6 +15,7 @@ import * as DocumentPicker from "expo-document-picker";
 import { Picker } from "@react-native-picker/picker";
 import NetInfo from "@react-native-community/netinfo";
 import DateTimePicker from "@react-native-community/datetimepicker"; // Import DateTimePicker
+import { useFocusEffect } from "@react-navigation/native";
 
 export default function FormatScreen() {
   const router = useRouter();
@@ -24,6 +26,17 @@ export default function FormatScreen() {
   const [loading, setLoading] = useState(true);
   const [tableAnswers, setTableAnswers] = useState({}); // State to store related answers for table questions
   const [userFieldSelection, setUserFieldSelection] = useState({}); // State to store selected field for "users" source
+
+  useFocusEffect(
+    React.useCallback(() => {
+      const disableBack = () => true; // Disable hardware back button
+      BackHandler.addEventListener("hardwareBackPress", disableBack);
+
+      return () => {
+        BackHandler.removeEventListener("hardwareBackPress", disableBack);
+      };
+    }, [])
+  );
 
   const fetchQuestionsByFormId = async (formId) => {
     try {
@@ -48,7 +61,7 @@ export default function FormatScreen() {
         throw new Error(data.detail || "Error fetching questions");
 
       setQuestions(data.questions);
-
+      console.log(data.questions.map((question) => question.options)); // Debugger para verificar las preguntas
       // Guardar preguntas y metadatos del formulario en AsyncStorage para modo offline
       const storedForms = await AsyncStorage.getItem("offline_forms");
       const offlineForms = storedForms ? JSON.parse(storedForms) : {};
@@ -563,14 +576,37 @@ export default function FormatScreen() {
                   ))}
                 </Picker>
               )}
+            {question.question_type === "one_choice" && question.options && (
+              <Picker
+                selectedValue={answers[question.id] || ""}
+                onValueChange={(value) =>
+                  handleAnswerChange(question.id, value)
+                }
+                style={styles.picker}
+              >
+                <Picker.Item label="Selecciona una opción" value="" />
+                {question.options
+                  .filter((option) => option && option.option_text) // Include only valid options
+                  .map((option, index) => (
+                    <Picker.Item
+                      key={index}
+                      label={option.option_text}
+                      value={option.option_text}
+                    />
+                  ))}
+              </Picker>
+            )}
           </View>
         ))
       )}
       <TouchableOpacity style={styles.submitButton} onPress={handleSubmitForm}>
         <Text style={styles.submitButtonText}>Guardar Formulario</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-        <Text style={styles.backButtonText}>Volver</Text>
+      <TouchableOpacity
+        style={styles.backButton}
+        onPress={() => router.push("/home")}
+      >
+        <Text style={styles.backButtonText}>Volver al Home</Text>
       </TouchableOpacity>
     </ScrollView>
   );

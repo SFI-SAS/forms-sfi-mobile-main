@@ -1,5 +1,5 @@
 // Main.jsx
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -8,12 +8,14 @@ import {
   TouchableOpacity,
   Alert,
   Dimensions,
+  BackHandler,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 import MatrixBackground from "./MatrixBackground";
 import { Screen } from "./Screen";
 import { useRouter } from "expo-router";
+import { useFocusEffect } from "@react-navigation/native";
 
 // Obtener dimensiones de la pantalla
 const { width, height } = Dimensions.get("window");
@@ -34,6 +36,17 @@ export function Main() {
   const [password, setPassword] = useState("");
   const [isOffline, setIsOffline] = useState(false);
   const [userData, setUserData] = useState(null); // Estado para guardar los datos del usuario
+
+  useFocusEffect(
+    useCallback(() => {
+      const disableBack = () => true; // Disable hardware back button
+      BackHandler.addEventListener("hardwareBackPress", disableBack);
+
+      return () => {
+        BackHandler.removeEventListener("hardwareBackPress", disableBack);
+      };
+    }, [])
+  );
 
   useEffect(() => {
     const checkToken = async () => {
@@ -175,7 +188,7 @@ export function Main() {
         params: { name: userData.name, email: userData.email },
       }); // Navigate to Home
 
-      console.log(userData)
+      console.log(userData);
     } catch (error) {
       console.error("❌ API error:", error);
       Alert.alert("Error", error.message);

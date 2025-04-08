@@ -6,13 +6,27 @@ import {
   StyleSheet,
   Alert,
   ScrollView,
+  BackHandler,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
+import { useFocusEffect } from "@react-navigation/native";
 
 export default function PendingForms() {
   const [pendingForms, setPendingForms] = useState([]);
   const [isOnline, setIsOnline] = useState(false);
+  const router = useRouter();
+
+  useFocusEffect(
+    React.useCallback(() => {
+      const disableBack = () => true; // Disable hardware back button
+      BackHandler.addEventListener("hardwareBackPress", disableBack);
+
+      return () => {
+        BackHandler.removeEventListener("hardwareBackPress", disableBack);
+      };
+    }, [])
+  );
 
   useEffect(() => {
     const fetchPendingForms = async () => {
@@ -116,6 +130,12 @@ export default function PendingForms() {
           </View>
         ))
       )}
+      <TouchableOpacity
+        style={styles.backButton}
+        onPress={() => router.push("/home")}
+      >
+        <Text style={styles.backButtonText}>Volver al Home</Text>
+      </TouchableOpacity>
     </ScrollView>
   );
 }
@@ -139,4 +159,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   submitButtonText: { color: "white", fontWeight: "bold" },
+  backButton: {
+    marginTop: 20,
+    padding: 10,
+    backgroundColor: "blue",
+    borderRadius: 5,
+    alignItems: "center",
+  },
+  backButtonText: {
+    color: "white",
+    fontWeight: "bold",
+  },
 });
