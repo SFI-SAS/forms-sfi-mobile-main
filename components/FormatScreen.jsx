@@ -13,6 +13,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import * as DocumentPicker from "expo-document-picker";
 import { Picker } from "@react-native-picker/picker";
 import NetInfo from "@react-native-community/netinfo";
+import DateTimePicker from "@react-native-community/datetimepicker"; // Import DateTimePicker
 
 export default function FormatScreen() {
   const router = useRouter();
@@ -95,6 +96,7 @@ export default function FormatScreen() {
   };
 
   const handleFileUpload = async (questionId) => {
+    console.log("📂 Subiendo archivo para pregunta ID:", questionId);
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: "*/*",
@@ -102,6 +104,7 @@ export default function FormatScreen() {
       });
 
       if (result.type === "success") {
+        console.log("✅ Archivo seleccionado:", result);
         handleAnswerChange(questionId, result.uri);
         Alert.alert("Archivo seleccionado", `Nombre: ${result.name}`);
       }
@@ -221,8 +224,10 @@ export default function FormatScreen() {
   }, [questions]);
 
   const handleSubmitForm = async () => {
+    console.log("📤 Enviando formulario ID:", id);
     try {
       const token = await AsyncStorage.getItem("authToken");
+      console.log("🔑 Token recuperado:", token);
       if (!token) throw new Error("No authentication token found");
 
       let hasError = false;
@@ -248,7 +253,7 @@ export default function FormatScreen() {
                 name: fileUri.split("/").pop(),
                 type: "application/octet-stream",
               });
-              console.log(uploadFormData.fileUri)
+
               try {
                 const uploadResponse = await fetch(
                   `https://54b8-179-33-13-68.ngrok-free.app/responses/upload-file/`,
@@ -262,7 +267,8 @@ export default function FormatScreen() {
                 );
 
                 const uploadResult = await uploadResponse.json();
-                console.log(uploadResult);
+                console.log("✅ Archivo subido:", uploadResult);
+
                 if (!uploadResponse.ok) {
                   throw new Error(
                     uploadResult.detail || "Error al subir el archivo"
@@ -271,7 +277,7 @@ export default function FormatScreen() {
 
                 filePath = uploadResult.file_name; // Get the uploaded file name
               } catch (error) {
-                console.error("Error al subir archivo:", error);
+                console.error("❌ Error al subir archivo:", error);
                 newErrors[q.id] = true;
                 hasError = true;
               }
@@ -279,6 +285,8 @@ export default function FormatScreen() {
               newErrors[q.id] = true;
               hasError = true;
             }
+          } else if (q.question_type === "date") {
+            responseValue = answers[q.id] || "";
           } else {
             responseValue = answers[q.id] || "";
           }
@@ -298,6 +306,7 @@ export default function FormatScreen() {
       );
 
       if (hasError) {
+        console.warn("⚠️ Hay errores en las respuestas:", newErrors);
         Alert.alert(
           "Error",
           "Por favor, responde todas las preguntas obligatorias."
@@ -308,6 +317,7 @@ export default function FormatScreen() {
       const mode = await NetInfo.fetch().then((state) =>
         state.isConnected ? "online" : "offline"
       );
+      console.log("🌐 Modo de conexión:", mode);
 
       if (mode === "offline") {
         // Save responses locally for offline mode
@@ -320,6 +330,7 @@ export default function FormatScreen() {
           "pending_forms",
           JSON.stringify(pendingForms)
         );
+        console.log("✅ Formulario guardado en modo offline.");
         Alert.alert(
           "Guardado Offline",
           "El formulario se guardó en modo offline y será enviado cuando haya conexión."
@@ -347,12 +358,13 @@ export default function FormatScreen() {
         );
 
         const saveResponseData = await saveResponseRes.json();
+        console.log("✅ Respuesta guardada:", saveResponseData);
         const responseId = saveResponseData.response_id;
 
         // 2. Save each answer in the correct endpoint
         for (const response of responses) {
           try {
-            await fetch(
+            const res = await fetch(
               `https://54b8-179-33-13-68.ngrok-free.app/responses/save-answers`,
               {
                 method: "POST",
@@ -365,15 +377,16 @@ export default function FormatScreen() {
                 }),
               }
             );
+            console.log("✅ Respuesta enviada:", await res.json());
           } catch (error) {
-            console.error("Error en la solicitud:", error);
+            console.error("❌ Error en la solicitud:", error);
           }
         }
 
         Alert.alert("Éxito", "Respuestas enviadas correctamente.");
         router.back();
       } catch (err) {
-        console.error("Error al enviar respuestas:", err);
+        console.error("❌ Error al enviar respuestas:", err);
         Alert.alert("Error", "Error al enviar respuestas.");
       }
     } catch (error) {
@@ -424,7 +437,12 @@ export default function FormatScreen() {
             {question.question_type === "date" && (
               <TouchableOpacity
                 style={styles.dateButton}
-                onPress={() => Alert.alert("Seleccionar fecha")}
+                onPress={() =>
+                  Alert.alert(
+                    "Seleccionar fecha",
+                    "Por favor selecciona una fecha usando el selector."
+                  )
+                }
               >
                 <Text style={styles.dateButtonText}>
                   {answers[question.id] || "Seleccionar fecha"}
@@ -433,7 +451,10 @@ export default function FormatScreen() {
             )}
             {question.question_type === "file" && (
               <TouchableOpacity
-                style={styles.fileButton}
+                style={[
+                  styles.fileButton,
+                  answers[question.id] && { backgroundColor: "red" },
+                ]}
                 onPress={() => handleFileUpload(question.id)}
               >
                 <Text style={styles.fileButtonText}>
