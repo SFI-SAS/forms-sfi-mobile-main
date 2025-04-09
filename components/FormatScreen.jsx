@@ -78,20 +78,28 @@ export default function FormatScreen() {
       setQuestions(adjustedQuestions);
 
       // Save questions and metadata for offline use
+      const storedQuestions = await AsyncStorage.getItem("offline_questions");
+      const offlineQuestions = storedQuestions
+        ? JSON.parse(storedQuestions)
+        : {};
+
+      offlineQuestions[formId] = adjustedQuestions;
+      await AsyncStorage.setItem(
+        "offline_questions",
+        JSON.stringify(offlineQuestions)
+      );
+
+      // Save form metadata separately
       const storedForms = await AsyncStorage.getItem("offline_forms");
       const offlineForms = storedForms ? JSON.parse(storedForms) : {};
 
-      if (!offlineForms[formId]) {
-        offlineForms[formId] = {
-          questions: adjustedQuestions,
-          title: data.title,
-          description: data.description,
-        };
-        await AsyncStorage.setItem(
-          "offline_forms",
-          JSON.stringify(offlineForms)
-        );
-      }
+      offlineForms[formId] = {
+        title: data.title,
+        description: data.description,
+      };
+      await AsyncStorage.setItem("offline_forms", JSON.stringify(offlineForms));
+
+      console.log("✅ Preguntas y metadatos guardados en AsyncStorage.");
     } catch (error) {
       console.error("❌ Error al obtener las preguntas:", error.message);
       Alert.alert("Error", "No se pudieron cargar las preguntas.");
@@ -102,10 +110,17 @@ export default function FormatScreen() {
 
   const loadOfflineQuestions = async (formId) => {
     try {
-      const storedForms = await AsyncStorage.getItem("offline_forms");
-      const offlineForms = storedForms ? JSON.parse(storedForms) : {};
-      if (offlineForms[formId]) {
-        setQuestions(offlineForms[formId].questions || []);
+      const storedQuestions = await AsyncStorage.getItem("offline_questions");
+      const offlineQuestions = storedQuestions
+        ? JSON.parse(storedQuestions)
+        : {};
+      console.log(
+        "📂 Preguntas cargadas desde AsyncStorage:",
+        offlineQuestions
+      );
+
+      if (offlineQuestions[formId]) {
+        setQuestions(offlineQuestions[formId]);
       } else {
         Alert.alert(
           "Modo Offline",
@@ -121,6 +136,20 @@ export default function FormatScreen() {
 
   const handleAnswerChange = (questionId, value) => {
     setAnswers((prev) => ({ ...prev, [questionId]: value }));
+
+    // Save answers to AsyncStorage
+    AsyncStorage.getItem("offline_answers")
+      .then((storedAnswers) => {
+        const offlineAnswers = storedAnswers ? JSON.parse(storedAnswers) : {};
+        offlineAnswers[questionId] = value;
+        return AsyncStorage.setItem(
+          "offline_answers",
+          JSON.stringify(offlineAnswers)
+        );
+      })
+      .catch((error) =>
+        console.error("❌ Error guardando respuestas en AsyncStorage:", error)
+      );
   };
 
   const handleFileUpload = async (questionId) => {
@@ -242,6 +271,7 @@ export default function FormatScreen() {
           fetchQuestionsByFormId(id);
         } else {
           loadOfflineQuestions(id);
+          loadOfflineAnswers();
         }
       });
     }
@@ -266,7 +296,6 @@ export default function FormatScreen() {
     console.log("📤 Enviando formulario ID:", id);
     try {
       const token = await AsyncStorage.getItem("authToken");
-      console.log("🔑 Token recuperado:", token);
       if (!token) throw new Error("No authentication token found");
 
       let hasError = false;
@@ -278,7 +307,7 @@ export default function FormatScreen() {
           let filePath = "";
 
           if (q.question_type === "multiple_choice") {
-            const selectedOptions = answers[q.id] || []; // Ensure `answers[q.id]` is an array
+            const selectedOptions = answers[q.id] || [];
             responseValue =
               selectedOptions.length > 0 ? selectedOptions.join(", ") : "";
           } else if (q.options?.length > 0) {
@@ -292,7 +321,6 @@ export default function FormatScreen() {
                 name: fileUri.split("/").pop(),
                 type: "application/octet-stream",
               });
-              console.log(uploadFormData);
               try {
                 const uploadResponse = await fetch(
                   `https://54b8-179-33-13-68.ngrok-free.app/responses/upload-file/`,
@@ -306,15 +334,13 @@ export default function FormatScreen() {
                 );
 
                 const uploadResult = await uploadResponse.json();
-                console.log("✅ Archivo subido:", uploadResult);
-
                 if (!uploadResponse.ok) {
                   throw new Error(
                     uploadResult.detail || "Error al subir el archivo"
                   );
                 }
 
-                filePath = uploadResult.file_name; // Get the uploaded file name
+                filePath = uploadResult.file_name;
               } catch (error) {
                 console.error("❌ Error al subir archivo:", error);
                 newErrors[q.id] = true;
@@ -330,7 +356,6 @@ export default function FormatScreen() {
             responseValue = answers[q.id] || "";
           }
 
-          // Validate required questions
           if (q.required && responseValue.trim() === "") {
             newErrors[q.id] = true;
             hasError = true;
@@ -345,7 +370,6 @@ export default function FormatScreen() {
       );
 
       if (hasError) {
-        console.warn("⚠️ Hay errores en las respuestas:", newErrors);
         Alert.alert(
           "Error",
           "Por favor, responde todas las preguntas obligatorias."
@@ -356,20 +380,17 @@ export default function FormatScreen() {
       const mode = await NetInfo.fetch().then((state) =>
         state.isConnected ? "online" : "offline"
       );
-      console.log("🌐 Modo de conexión:", mode);
 
       if (mode === "offline") {
-        // Save responses locally for offline mode
         const storedPendingForms = await AsyncStorage.getItem("pending_forms");
         const pendingForms = storedPendingForms
           ? JSON.parse(storedPendingForms)
           : [];
-        pendingForms.push({ id, responses, mode });
+        pendingForms.push({ id, responses, mode: "offline" }); // Explicitly set mode to offline
         await AsyncStorage.setItem(
           "pending_forms",
           JSON.stringify(pendingForms)
         );
-        console.log("✅ Formulario guardado en modo offline.");
         Alert.alert(
           "Guardado Offline",
           "El formulario se guardó en modo offline y será enviado cuando haya conexión."

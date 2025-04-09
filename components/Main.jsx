@@ -188,6 +188,10 @@ export function Main() {
         params: { name: userData.name, email: userData.email },
       }); // Navigate to Home
 
+      // Cache user credentials for offline login
+      await AsyncStorage.setItem("username", username);
+      await AsyncStorage.setItem("password", password);
+
       console.log(userData);
     } catch (error) {
       console.error("❌ API error:", error);

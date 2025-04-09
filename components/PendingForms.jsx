@@ -65,11 +65,10 @@ export default function PendingForms() {
 
       // Submit the form
       const saveResponseRes = await fetch(
-        `https://54b8-179-33-13-68.ngrok-free.app/responses/save-response/${form.id}`,
+        `https://54b8-179-33-13-68.ngrok-free.app/responses/save-response/${form.id}?mode=offline`,
         {
           method: "POST",
           headers: requestOptions.headers,
-          body: JSON.stringify({ mode: "offline" }),
         }
       );
 

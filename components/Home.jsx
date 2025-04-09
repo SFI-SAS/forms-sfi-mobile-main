@@ -34,7 +34,6 @@ export default function Home() {
   const fetchUserForms = async () => {
     try {
       const token = await AsyncStorage.getItem("authToken");
-      console.log("🔑 Token recuperado:", token); // Debugger para verificar el token
       if (!token) throw new Error("No authentication token found");
 
       const response = await fetch(
@@ -49,16 +48,13 @@ export default function Home() {
       );
 
       const data = await response.json();
-      console.log("📋 Respuesta completa del servidor:", data); // Debugger para verificar la respuesta completa
-
       if (!response.ok) {
-        console.error("❌ Error en la respuesta del servidor:", data.detail);
         throw new Error(data.detail || "Error fetching user forms");
       }
 
       setUserForms(data);
 
-      // Guardar formularios únicos en AsyncStorage
+      // Cache forms for offline access
       await AsyncStorage.setItem("offline_forms", JSON.stringify(data));
     } catch (error) {
       console.error("❌ Error al obtener los formularios del usuario:", error);
@@ -75,15 +71,7 @@ export default function Home() {
     try {
       const storedForms = await AsyncStorage.getItem("offline_forms");
       if (storedForms) {
-        const parsedForms = JSON.parse(storedForms);
-
-        // Filtrar formularios duplicados por ID
-        const uniqueForms = parsedForms.filter(
-          (form, index, self) =>
-            index === self.findIndex((f) => f.id === form.id)
-        );
-
-        setUserForms(uniqueForms);
+        setUserForms(JSON.parse(storedForms));
       } else {
         Alert.alert("Modo Offline", "No hay datos guardados para mostrar.");
       }
