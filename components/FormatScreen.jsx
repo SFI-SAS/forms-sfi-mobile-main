@@ -8,6 +8,7 @@ import {
   Alert,
   ScrollView,
   BackHandler,
+  Dimensions, // Import Dimensions
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -16,6 +17,8 @@ import { Picker } from "@react-native-picker/picker";
 import NetInfo from "@react-native-community/netinfo";
 import DateTimePicker from "@react-native-community/datetimepicker"; // Import DateTimePicker
 import { useFocusEffect } from "@react-navigation/native";
+
+const { width, height } = Dimensions.get("window"); // Get screen dimensions
 
 export default function FormatScreen() {
   const router = useRouter();
@@ -479,139 +482,175 @@ export default function FormatScreen() {
   };
 
   return (
-    <ScrollView style={styles.container}>
+    <View style={styles.container}>
       <Text style={styles.header}>Formulario: {title.toLocaleUpperCase()}</Text>
-      <Text></Text>
-      <Text style={styles.header}>ID: 00{id}</Text>
-
-      <Text>Responde las preguntas a continuación:</Text>
-      <Text>Recuerda que puedes subir archivos (si es necesario).</Text>
-      <Text style={styles.subHeader}>Preguntas:</Text>
-      <Text></Text>
-      {loading ? (
-        <Text>Cargando preguntas...</Text>
-      ) : (
-        questions.map((question) => (
-          <View key={question.id} style={styles.questionContainer}>
-            <Text style={styles.questionLabel}>
-              {question.question_text}
-              {question.required && (
-                <Text style={styles.requiredText}> Pregunta obligatoria *</Text>
-              )}
-            </Text>
-            {/* Render input types based on question type */}
-            {question.question_type === "text" && (
-              <TextInput
-                style={styles.input}
-                placeholder="Escribe tu respuesta"
-                value={answers[question.id] || ""}
-                onChangeText={(value) => handleAnswerChange(question.id, value)}
-              />
-            )}
-            {(question.question_type === "multiple_choice" ||
-              question.question_type === "one_choice") &&
-              question.options && (
-                <View>
-                  {question.options.map((option, index) => (
-                    <View key={index} style={styles.checkboxContainer}>
-                      <TouchableOpacity
-                        style={[
-                          styles.checkbox,
-                          question.question_type === "multiple_choice" &&
-                            answers[question.id]?.includes(option) &&
-                            styles.checkboxSelected,
-                          question.question_type === "one_choice" &&
-                            answers[question.id] === option &&
-                            styles.checkboxSelected,
-                        ]}
-                        onPress={() =>
-                          question.question_type === "multiple_choice"
-                            ? handleMultipleChoiceChange(question.id, option)
-                            : handleOneChoiceChange(question.id, option)
-                        }
-                      >
-                        {(question.question_type === "multiple_choice" &&
-                          answers[question.id]?.includes(option)) ||
-                        (question.question_type === "one_choice" &&
-                          answers[question.id] === option) ? (
-                          <Text style={styles.checkboxCheckmark}>✔</Text>
-                        ) : null}
-                      </TouchableOpacity>
-                      <Text style={styles.checkboxLabel}>{option}</Text>
+      <Text style={styles.subHeader}>ID: 00{id}</Text>
+      <Text style={styles.instructions}>
+        Responde las preguntas a continuación:
+      </Text>
+      <Text style={styles.instructions}>
+        Recuerda que puedes subir archivos (si es necesario).
+      </Text>
+      <View style={styles.questionsContainer}>
+        <ScrollView>
+          {loading ? (
+            <Text style={styles.loadingText}>Cargando preguntas...</Text>
+          ) : (
+            questions.map((question) => (
+              <View key={question.id} style={styles.questionContainer}>
+                <Text style={styles.questionLabel}>
+                  {question.question_text}
+                  {question.required && (
+                    <Text style={styles.requiredText}> *</Text>
+                  )}
+                </Text>
+                {/* Render input types based on question type */}
+                {question.question_type === "text" && (
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Escribe tu respuesta"
+                    value={answers[question.id] || ""}
+                    onChangeText={(value) =>
+                      handleAnswerChange(question.id, value)
+                    }
+                  />
+                )}
+                {(question.question_type === "multiple_choice" ||
+                  question.question_type === "one_choice") &&
+                  question.options && (
+                    <View>
+                      {question.options.map((option, index) => (
+                        <View key={index} style={styles.checkboxContainer}>
+                          <TouchableOpacity
+                            style={[
+                              styles.checkbox,
+                              question.question_type === "multiple_choice" &&
+                                answers[question.id]?.includes(option) &&
+                                styles.checkboxSelected,
+                              question.question_type === "one_choice" &&
+                                answers[question.id] === option &&
+                                styles.checkboxSelected,
+                            ]}
+                            onPress={() =>
+                              question.question_type === "multiple_choice"
+                                ? handleMultipleChoiceChange(
+                                    question.id,
+                                    option
+                                  )
+                                : handleOneChoiceChange(question.id, option)
+                            }
+                          >
+                            {(question.question_type === "multiple_choice" &&
+                              answers[question.id]?.includes(option)) ||
+                            (question.question_type === "one_choice" &&
+                              answers[question.id] === option) ? (
+                              <Text style={styles.checkboxCheckmark}>✔</Text>
+                            ) : null}
+                          </TouchableOpacity>
+                          <Text style={styles.checkboxLabel}>{option}</Text>
+                        </View>
+                      ))}
                     </View>
-                  ))}
-                </View>
-              )}
-            {question.question_type === "number" && (
-              <TextInput
-                style={styles.input}
-                placeholder="Escribe un número"
-                keyboardType="numeric"
-                value={answers[question.id] || ""}
-                onChangeText={(value) => handleAnswerChange(question.id, value)}
-              />
-            )}
-            {question.question_type === "date" && (
-              <TouchableOpacity
-                style={styles.dateButton}
-                onPress={() =>
-                  Alert.alert(
-                    "Seleccionar fecha",
-                    "Por favor selecciona una fecha usando el selector." <
-                      DateTimePicker >
-                      <DateTimePicker />
-                  )
-                }
-              >
-                <Text style={styles.dateButtonText}>
-                  {answers[question.id] || "Seleccionar fecha"}
-                </Text>
-              </TouchableOpacity>
-            )}
-            {question.question_type === "file" && (
-              <TouchableOpacity
-                style={[
-                  styles.fileButton,
-                  answers[question.id] && { backgroundColor: "red" },
-                ]}
-                onPress={() => handleFileUpload(question.id)}
-              >
-                <Text style={styles.fileButtonText}>
-                  {answers[question.id]
-                    ? "Archivo seleccionado"
-                    : "Subir archivo"}
-                </Text>
-              </TouchableOpacity>
-            )}
-            {question.question_type === "table" && (
-              <>
-                {/* Handle "usuarios" source */}
-                {Array.isArray(tableAnswers[question.id]) &&
-                  tableAnswers[question.id].length > 0 &&
-                  typeof tableAnswers[question.id][0] === "object" && (
-                    <>
-                      <Picker
-                        selectedValue={userFieldSelection[question.id] || ""}
-                        onValueChange={(value) =>
-                          setUserFieldSelection((prev) => ({
-                            ...prev,
-                            [question.id]: value,
-                          }))
-                        }
-                        style={styles.picker}
-                      >
-                        <Picker.Item label="Selecciona un campo" value="" />
-                        {Object.keys(tableAnswers[question.id][0]).map(
-                          (field, index) => (
-                            <Picker.Item
-                              key={index}
-                              label={field}
-                              value={field}
-                            />
-                          )
-                        )}
-                      </Picker>
-                      {userFieldSelection[question.id] && (
+                  )}
+                {question.question_type === "number" && (
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Escribe un número"
+                    keyboardType="numeric"
+                    value={answers[question.id] || ""}
+                    onChangeText={(value) =>
+                      handleAnswerChange(question.id, value)
+                    }
+                  />
+                )}
+                {question.question_type === "date" && (
+                  <TouchableOpacity
+                    style={styles.dateButton}
+                    onPress={() =>
+                      Alert.alert(
+                        "Seleccionar fecha",
+                        "Por favor selecciona una fecha usando el selector." <
+                          DateTimePicker >
+                          <DateTimePicker />
+                      )
+                    }
+                  >
+                    <Text style={styles.dateButtonText}>
+                      {answers[question.id] || "Seleccionar fecha"}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+                {question.question_type === "file" && (
+                  <TouchableOpacity
+                    style={[
+                      styles.fileButton,
+                      answers[question.id] && { backgroundColor: "red" },
+                    ]}
+                    onPress={() => handleFileUpload(question.id)}
+                  >
+                    <Text style={styles.fileButtonText}>
+                      {answers[question.id]
+                        ? "Archivo seleccionado"
+                        : "Subir archivo"}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+                {question.question_type === "table" && (
+                  <>
+                    {/* Handle "usuarios" source */}
+                    {Array.isArray(tableAnswers[question.id]) &&
+                      tableAnswers[question.id].length > 0 &&
+                      typeof tableAnswers[question.id][0] === "object" && (
+                        <>
+                          <Picker
+                            selectedValue={
+                              userFieldSelection[question.id] || ""
+                            }
+                            onValueChange={(value) =>
+                              setUserFieldSelection((prev) => ({
+                                ...prev,
+                                [question.id]: value,
+                              }))
+                            }
+                            style={styles.picker}
+                          >
+                            <Picker.Item label="Selecciona un campo" value="" />
+                            {Object.keys(tableAnswers[question.id][0]).map(
+                              (field, index) => (
+                                <Picker.Item
+                                  key={index}
+                                  label={field}
+                                  value={field}
+                                />
+                              )
+                            )}
+                          </Picker>
+                          {userFieldSelection[question.id] && (
+                            <Picker
+                              selectedValue={answers[question.id] || ""}
+                              onValueChange={(value) =>
+                                handleAnswerChange(question.id, value)
+                              }
+                              style={styles.picker}
+                            >
+                              <Picker.Item
+                                label="Selecciona una opción"
+                                value=""
+                              />
+                              {tableAnswers[question.id].map((user, index) => (
+                                <Picker.Item
+                                  key={index}
+                                  label={user[userFieldSelection[question.id]]}
+                                  value={user[userFieldSelection[question.id]]}
+                                />
+                              ))}
+                            </Picker>
+                          )}
+                        </>
+                      )}
+                    {/* Handle "pregunta_relacionada" source */}
+                    {Array.isArray(tableAnswers[question.id]) &&
+                      typeof tableAnswers[question.id][0] === "string" && (
                         <Picker
                           selectedValue={answers[question.id] || ""}
                           onValueChange={(value) =>
@@ -620,42 +659,22 @@ export default function FormatScreen() {
                           style={styles.picker}
                         >
                           <Picker.Item label="Selecciona una opción" value="" />
-                          {tableAnswers[question.id].map((user, index) => (
+                          {tableAnswers[question.id].map((option, index) => (
                             <Picker.Item
                               key={index}
-                              label={user[userFieldSelection[question.id]]}
-                              value={user[userFieldSelection[question.id]]}
+                              label={option}
+                              value={option}
                             />
                           ))}
                         </Picker>
                       )}
-                    </>
-                  )}
-                {/* Handle "pregunta_relacionada" source */}
-                {Array.isArray(tableAnswers[question.id]) &&
-                  typeof tableAnswers[question.id][0] === "string" && (
-                    <Picker
-                      selectedValue={answers[question.id] || ""}
-                      onValueChange={(value) =>
-                        handleAnswerChange(question.id, value)
-                      }
-                      style={styles.picker}
-                    >
-                      <Picker.Item label="Selecciona una opción" value="" />
-                      {tableAnswers[question.id].map((option, index) => (
-                        <Picker.Item
-                          key={index}
-                          label={option}
-                          value={option}
-                        />
-                      ))}
-                    </Picker>
-                  )}
-              </>
-            )}
-          </View>
-        ))
-      )}
+                  </>
+                )}
+              </View>
+            ))
+          )}
+        </ScrollView>
+      </View>
       <TouchableOpacity style={styles.submitButton} onPress={handleSubmitForm}>
         <Text style={styles.submitButtonText}>Guardar Formulario</Text>
       </TouchableOpacity>
@@ -665,92 +684,142 @@ export default function FormatScreen() {
       >
         <Text style={styles.backButtonText}>Volver al Home</Text>
       </TouchableOpacity>
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, backgroundColor: "#ffffff" },
-  header: { fontSize: 20, fontWeight: "bold", marginBottom: 10 },
-  subHeader: { fontSize: 18, fontWeight: "bold", marginTop: 20 },
-  questionContainer: { marginBottom: 20 },
-  questionLabel: { fontSize: 25, fontWeight: "bold", marginBottom: 5 },
+  container: { flex: 1, padding: width * 0.05, backgroundColor: "#ffffff" },
+  header: {
+    fontSize: width * 0.06,
+    fontWeight: "bold",
+    marginBottom: height * 0.02,
+  },
+  subHeader: {
+    fontSize: width * 0.05,
+    fontWeight: "bold",
+    marginBottom: height * 0.02,
+  },
+  instructions: {
+    fontSize: width * 0.045,
+    marginBottom: height * 0.01,
+  },
+  questionsContainer: {
+    maxHeight: height * 0.5,
+    backgroundColor: "#FFFFFFFF", // Limit height to 60% of the screen
+    color: "white",
+    marginBottom: height * 0.02,
+    padding: 10,
+  },
+  loadingText: {
+    fontSize: width * 0.05,
+    textAlign: "center",
+    marginVertical: height * 0.02,
+  },
+  questionContainer: { marginBottom: height * 0.02 },
+  questionLabel: {
+    fontSize: width * 0.05,
+    fontWeight: "bold",
+    marginBottom: height * 0.01,
+  },
+  requiredText: {
+    color: "red",
+    fontWeight: "bold",
+  },
+  submitButton: {
+    marginTop: height * 0.03,
+    padding: height * 0.02,
+    backgroundColor: "green",
+    borderRadius: width * 0.02,
+    alignItems: "center",
+  },
+  submitButtonText: {
+    color: "white",
+    fontWeight: "bold",
+    fontSize: width * 0.045,
+  },
+  backButton: {
+    marginTop: height * 0.02,
+    padding: height * 0.02,
+    backgroundColor: "blue",
+    borderRadius: width * 0.02,
+    alignItems: "center",
+  },
+  backButtonText: {
+    color: "white",
+    fontWeight: "bold",
+    fontSize: width * 0.045,
+  },
   input: {
     borderWidth: 1,
     borderColor: "#ccc",
-    borderRadius: 5,
-    padding: 10,
+    borderRadius: width * 0.02, // Dynamic border radius
+    padding: height * 0.015, // Dynamic padding
     backgroundColor: "#f9f9f9",
+    fontSize: width * 0.045, // Dynamic font size
   },
   picker: {
     borderWidth: 1,
     borderColor: "#ccc",
-    borderRadius: 5,
+    borderRadius: width * 0.02, // Dynamic border radius
     backgroundColor: "#f9f9f9",
-    marginTop: 10,
+    marginTop: height * 0.01,
   },
   fileButton: {
-    backgroundColor: "#2563eb",
-    padding: 10,
-    borderRadius: 5,
+    backgroundColor: "#9225EBFF",
+    padding: height * 0.02, // Dynamic padding
+    borderRadius: width * 0.02, // Dynamic border radius
     alignItems: "center",
-    marginTop: 10,
+    marginTop: height * 0.02,
   },
-  fileButtonText: { color: "white", fontWeight: "bold" },
+  fileButtonText: {
+    color: "white",
+    fontWeight: "bold",
+    fontSize: width * 0.045, // Dynamic font size
+  },
   dateButton: {
-    backgroundColor: "#2563eb",
-    padding: 10,
-    borderRadius: 5,
+    backgroundColor: "#EB9525FF",
+    padding: height * 0.02, // Dynamic padding
+    borderRadius: width * 0.02, // Dynamic border radius
     alignItems: "center",
-    marginTop: 10,
+    marginTop: height * 0.02,
   },
-  dateButtonText: { color: "white", fontWeight: "bold" },
-  submitButton: {
-    marginTop: 20,
-    padding: 10,
-    backgroundColor: "green",
-    borderRadius: 5,
-    alignItems: "center",
+  dateButtonText: {
+    color: "white",
+    fontWeight: "bold",
+    fontSize: width * 0.045, // Dynamic font size
   },
-  submitButtonText: { color: "white", fontWeight: "bold" },
-  backButton: {
-    marginTop: 20,
-    padding: 10,
-    backgroundColor: "blue",
-    borderRadius: 5,
-    alignItems: "center",
-  },
-  backButtonText: { color: "white", fontWeight: "bold" },
   requiredText: {
     color: "red",
     fontWeight: "bold",
-    marginLeft: 5,
+    marginLeft: width * 0.01, // Dynamic margin
   },
   checkboxContainer: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 10,
+    marginBottom: height * 0.01,
   },
   checkbox: {
-    width: 20,
-    height: 20,
-    borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 3,
+    width: width * 0.08, // Dynamic size
+    height: width * 0.08, // Dynamic size
+    borderWidth: 3,
+    borderColor: "#242424FF",
+    borderRadius: width * 0.01, // Dynamic border radius
     justifyContent: "center",
     alignItems: "center",
-    marginRight: 10,
+    marginRight: width * 0.02, // Dynamic margin
   },
   checkboxSelected: {
     backgroundColor: "#2563eb",
-    borderColor: "#2563eb",
+    borderColor: "#020202FF",
   },
   checkboxCheckmark: {
     color: "white",
     fontWeight: "bold",
+    fontSize: width * 0.04, // Dynamic font size
   },
   checkboxLabel: {
-    fontSize: 16,
+    fontSize: width * 0.045, // Dynamic font size
     color: "#333",
   },
 });

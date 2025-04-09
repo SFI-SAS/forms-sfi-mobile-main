@@ -7,11 +7,14 @@ import {
   Alert,
   ScrollView,
   BackHandler,
+  Dimensions, // Import Dimensions
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router"; // Add this import
+
+const { width, height } = Dimensions.get("window"); // Get screen dimensions
 
 export default function PendingForms() {
   const [pendingForms, setPendingForms] = useState([]);
@@ -141,33 +144,46 @@ export default function PendingForms() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, backgroundColor: "#ffffff" },
-  header: { fontSize: 20, fontWeight: "bold", marginBottom: 10 },
-  noPendingText: { fontSize: 16, color: "#555", textAlign: "center" },
-  formItem: {
-    padding: 10,
-    backgroundColor: "#f0f0f0",
-    borderRadius: 5,
-    marginBottom: 10,
+  container: { flex: 1, padding: width * 0.05, backgroundColor: "#ffffff" },
+  header: {
+    fontSize: width * 0.06,
+    fontWeight: "bold",
+    marginBottom: height * 0.02,
   },
-  formText: { fontSize: 16, fontWeight: "bold" },
+  noPendingText: {
+    fontSize: width * 0.045,
+    color: "#555",
+    textAlign: "center",
+  },
+  formItem: {
+    padding: width * 0.04,
+    backgroundColor: "#f0f0f0",
+    borderRadius: width * 0.02,
+    marginBottom: height * 0.02,
+  },
+  formText: { fontSize: width * 0.05, fontWeight: "bold" },
   submitButton: {
-    marginTop: 10,
-    padding: 10,
+    marginTop: height * 0.01,
+    padding: height * 0.02,
     backgroundColor: "#2563eb",
-    borderRadius: 5,
+    borderRadius: width * 0.02,
     alignItems: "center",
   },
-  submitButtonText: { color: "white", fontWeight: "bold" },
+  submitButtonText: {
+    color: "white",
+    fontWeight: "bold",
+    fontSize: width * 0.045,
+  },
   backButton: {
-    marginTop: 20,
-    padding: 10,
+    marginTop: height * 0.03,
+    padding: height * 0.02,
     backgroundColor: "blue",
-    borderRadius: 5,
+    borderRadius: width * 0.02,
     alignItems: "center",
   },
   backButtonText: {
     color: "white",
     fontWeight: "bold",
+    fontSize: width * 0.045,
   },
 });

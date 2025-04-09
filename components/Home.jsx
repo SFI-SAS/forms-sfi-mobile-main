@@ -7,11 +7,14 @@ import {
   StyleSheet,
   ScrollView,
   BackHandler,
+  Dimensions, // Import Dimensions
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 import { useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
+
+const { width, height } = Dimensions.get("window"); // Get screen dimensions
 
 export default function Home() {
   const router = useRouter();
@@ -138,11 +141,10 @@ export default function Home() {
 
             // Submit the form
             const saveResponseRes = await fetch(
-              `https://54b8-179-33-13-68.ngrok-free.app/responses/save-response/${form.id}`,
+              `https://54b8-179-33-13-68.ngrok-free.app/responses/save-response/${form.id}?mode=offline`,
               {
                 method: "POST",
                 headers: requestOptions.headers,
-                body: JSON.stringify({ mode: "offline" }),
               }
             );
 
@@ -202,24 +204,28 @@ export default function Home() {
         Estado: {isOffline ? "Offline ◉" : "Online ◉"}
       </Text>
       {loading ? (
-        <Text>Cargando...</Text>
+        <Text style={styles.loadingText}>Cargando...</Text>
       ) : (
-        userForms &&
-        userForms.map(
-          (form) =>
-            form && ( // Validación para evitar errores si `form` es null o undefined
-              <TouchableOpacity
-                key={form.id}
-                style={styles.formItem}
-                onPress={() => handleFormPress(form)}
-              >
-                <Text style={styles.formText}>Formato: {form.title}</Text>
-                <Text style={styles.formDescription}>
-                  Descripción: {form.description}
-                </Text>
-              </TouchableOpacity>
-            )
-        )
+        <View style={styles.formsContainer}>
+          <ScrollView>
+            {userForms &&
+              userForms.map(
+                (form) =>
+                  form && ( // Validación para evitar errores si `form` es null o undefined
+                    <TouchableOpacity
+                      key={form.id}
+                      style={styles.formItem}
+                      onPress={() => handleFormPress(form)}
+                    >
+                      <Text style={styles.formText}>Formato: {form.title}</Text>
+                      <Text style={styles.formDescription}>
+                        Descripción: {form.description}
+                      </Text>
+                    </TouchableOpacity>
+                  )
+              )}
+          </ScrollView>
+        </View>
       )}
       <TouchableOpacity onPress={handleNavigateToMyForms} style={styles.button}>
         <Text style={styles.buttonText}>Ver formularios diligenciados</Text>
@@ -240,38 +246,53 @@ export default function Home() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, backgroundColor: "#ffffff" },
-  header: { fontSize: 20, fontWeight: "bold", marginBottom: 10 },
-  onlineText: { color: "green", fontWeight: "bold", marginBottom: 10 },
-  offlineText: { color: "red", fontWeight: "bold", marginBottom: 10 },
+  container: { flex: 1, padding: width * 0.05, backgroundColor: "#ffffff" },
+  header: {
+    fontSize: width * 0.06,
+    fontWeight: "bold",
+    marginBottom: height * 0.02,
+  },
+  onlineText: {
+    color: "green",
+    fontWeight: "bold",
+    marginBottom: height * 0.01,
+  },
+  offlineText: {
+    color: "red",
+    fontWeight: "bold",
+    marginBottom: height * 0.01,
+  },
+  loadingText: {
+    fontSize: width * 0.05,
+    textAlign: "center",
+    marginVertical: height * 0.02,
+  },
+  formsContainer: {
+    maxHeight: height * 0.5, // Limit height to half the screen
+    marginBottom: height * 0.02,
+  },
   formItem: {
-    padding: 10,
+    padding: width * 0.04,
     backgroundColor: "#f0f0f0",
-    borderRadius: 5,
-    marginBottom: 10,
+    borderRadius: width * 0.02,
+    marginBottom: height * 0.02,
   },
-  formText: { fontSize: 16, fontWeight: "bold" },
-  formDescription: { fontSize: 14, color: "#555" },
+  formText: { fontSize: width * 0.05, fontWeight: "bold" },
+  formDescription: { fontSize: width * 0.04, color: "#555" },
   button: {
-    marginTop: 10,
-    padding: 10,
+    marginTop: height * 0.02,
+    padding: height * 0.02,
     backgroundColor: "#2563eb",
-    borderRadius: 5,
+    borderRadius: width * 0.02,
     alignItems: "center",
   },
-  buttonText: {
-    color: "white",
-    fontWeight: "bold",
-  },
+  buttonText: { color: "white", fontWeight: "bold", fontSize: width * 0.045 },
   logoutButton: {
-    marginTop: 20,
-    padding: 10,
+    marginTop: height * 0.03,
+    padding: height * 0.02,
     backgroundColor: "red",
-    borderRadius: 5,
+    borderRadius: width * 0.02,
     alignItems: "center",
   },
-  logoutText: {
-    color: "white",
-    fontWeight: "bold",
-  },
+  logoutText: { color: "white", fontWeight: "bold", fontSize: width * 0.045 },
 });
