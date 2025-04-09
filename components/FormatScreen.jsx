@@ -60,15 +60,30 @@ export default function FormatScreen() {
       if (!response.ok)
         throw new Error(data.detail || "Error fetching questions");
 
-      setQuestions(data.questions);
-      console.log(data.questions.map((question) => question.options)); // Debugger para verificar las preguntas
-      // Guardar preguntas y metadatos del formulario en AsyncStorage para modo offline
+      // Adjust options for `multiple_choice` and `one_choice` question types
+      const adjustedQuestions = data.questions.map((question) => {
+        if (
+          (question.question_type === "multiple_choice" ||
+            question.question_type === "one_choice") &&
+          Array.isArray(question.options)
+        ) {
+          return {
+            ...question,
+            options: question.options.map((option) => option.option_text), // Extract `option_text`
+          };
+        }
+        return question;
+      });
+
+      setQuestions(adjustedQuestions);
+
+      // Save questions and metadata for offline use
       const storedForms = await AsyncStorage.getItem("offline_forms");
       const offlineForms = storedForms ? JSON.parse(storedForms) : {};
 
       if (!offlineForms[formId]) {
         offlineForms[formId] = {
-          questions: data.questions,
+          questions: adjustedQuestions,
           title: data.title,
           description: data.description,
         };
@@ -263,7 +278,7 @@ export default function FormatScreen() {
           let filePath = "";
 
           if (q.question_type === "multiple_choice") {
-            const selectedOptions = answers[q.id]?.split(",") || [];
+            const selectedOptions = answers[q.id] || []; // Ensure `answers[q.id]` is an array
             responseValue =
               selectedOptions.length > 0 ? selectedOptions.join(", ") : "";
           } else if (q.options?.length > 0) {
@@ -419,6 +434,29 @@ export default function FormatScreen() {
     }
   };
 
+  const handleMultipleChoiceChange = (questionId, option) => {
+    setAnswers((prev) => {
+      const currentAnswers = prev[questionId] || [];
+      if (currentAnswers.includes(option)) {
+        // Remove the option if it's already selected
+        return {
+          ...prev,
+          [questionId]: currentAnswers.filter((o) => o !== option),
+        };
+      } else {
+        // Add the option if it's not selected
+        return { ...prev, [questionId]: [...currentAnswers, option] };
+      }
+    });
+  };
+
+  const handleOneChoiceChange = (questionId, option) => {
+    setAnswers((prev) => ({
+      ...prev,
+      [questionId]: option, // Replace the current selection with the new one
+    }));
+  };
+
   return (
     <ScrollView style={styles.container}>
       <Text style={styles.header}>Formulario: {title.toLocaleUpperCase()}</Text>
@@ -449,6 +487,40 @@ export default function FormatScreen() {
                 onChangeText={(value) => handleAnswerChange(question.id, value)}
               />
             )}
+            {(question.question_type === "multiple_choice" ||
+              question.question_type === "one_choice") &&
+              question.options && (
+                <View>
+                  {question.options.map((option, index) => (
+                    <View key={index} style={styles.checkboxContainer}>
+                      <TouchableOpacity
+                        style={[
+                          styles.checkbox,
+                          question.question_type === "multiple_choice" &&
+                            answers[question.id]?.includes(option) &&
+                            styles.checkboxSelected,
+                          question.question_type === "one_choice" &&
+                            answers[question.id] === option &&
+                            styles.checkboxSelected,
+                        ]}
+                        onPress={() =>
+                          question.question_type === "multiple_choice"
+                            ? handleMultipleChoiceChange(question.id, option)
+                            : handleOneChoiceChange(question.id, option)
+                        }
+                      >
+                        {(question.question_type === "multiple_choice" &&
+                          answers[question.id]?.includes(option)) ||
+                        (question.question_type === "one_choice" &&
+                          answers[question.id] === option) ? (
+                          <Text style={styles.checkboxCheckmark}>✔</Text>
+                        ) : null}
+                      </TouchableOpacity>
+                      <Text style={styles.checkboxLabel}>{option}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
             {question.question_type === "number" && (
               <TextInput
                 style={styles.input}
@@ -560,42 +632,6 @@ export default function FormatScreen() {
                   )}
               </>
             )}
-            {(question.question_type === "multiple_choice" ||
-              question.question_type === "single_choice") &&
-              question.options && (
-                <Picker
-                  selectedValue={answers[question.id] || ""}
-                  onValueChange={(value) =>
-                    handleAnswerChange(question.id, value)
-                  }
-                  style={styles.picker}
-                >
-                  <Picker.Item label="Selecciona una opción" value="" />
-                  {question.options.map((option, index) => (
-                    <Picker.Item key={index} label={option} value={option} />
-                  ))}
-                </Picker>
-              )}
-            {question.question_type === "one_choice" && question.options && (
-              <Picker
-                selectedValue={answers[question.id] || ""}
-                onValueChange={(value) =>
-                  handleAnswerChange(question.id, value)
-                }
-                style={styles.picker}
-              >
-                <Picker.Item label="Selecciona una opción" value="" />
-                {question.options
-                  .filter((option) => option && option.option_text) // Include only valid options
-                  .map((option, index) => (
-                    <Picker.Item
-                      key={index}
-                      label={option.option_text}
-                      value={option.option_text}
-                    />
-                  ))}
-              </Picker>
-            )}
           </View>
         ))
       )}
@@ -668,5 +704,32 @@ const styles = StyleSheet.create({
     color: "red",
     fontWeight: "bold",
     marginLeft: 5,
+  },
+  checkboxContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 3,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 10,
+  },
+  checkboxSelected: {
+    backgroundColor: "#2563eb",
+    borderColor: "#2563eb",
+  },
+  checkboxCheckmark: {
+    color: "white",
+    fontWeight: "bold",
+  },
+  checkboxLabel: {
+    fontSize: 16,
+    color: "#333",
   },
 });
