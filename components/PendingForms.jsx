@@ -38,21 +38,39 @@ export default function PendingForms() {
       setPendingForms(storedPendingForms ? JSON.parse(storedPendingForms) : []);
     };
 
-    const checkNetworkStatus = async () => {
-      const state = await NetInfo.fetch();
-      setIsOnline(state.isConnected);
+    const synchronizePendingForms = async () => {
+      if (!isOnline) return;
 
-      if (state.isConnected) {
-        // Synchronize pending forms
-        for (const form of pendingForms) {
-          handleSubmitPendingForm(form);
+      const storedPendingForms = await AsyncStorage.getItem("pending_forms");
+      const pendingForms = storedPendingForms
+        ? JSON.parse(storedPendingForms)
+        : [];
+
+      const successfullySentForms = [];
+
+      for (const form of pendingForms) {
+        try {
+          await handleSubmitPendingForm(form);
+          successfullySentForms.push(form.id); // Track successfully sent forms
+        } catch (error) {
+          console.error("❌ Error al sincronizar formulario pendiente:", error);
         }
       }
+
+      // Remove successfully sent forms from the pending list
+      const updatedPendingForms = pendingForms.filter(
+        (form) => !successfullySentForms.includes(form.id)
+      );
+      setPendingForms(updatedPendingForms);
+      await AsyncStorage.setItem(
+        "pending_forms",
+        JSON.stringify(updatedPendingForms)
+      );
     };
 
     fetchPendingForms();
-    checkNetworkStatus();
-  }, []);
+    synchronizePendingForms();
+  }, [isOnline]);
 
   const handleSubmitPendingForm = async (form) => {
     try {
@@ -95,18 +113,10 @@ export default function PendingForms() {
         );
       }
 
-      // Remove the form from pending forms
-      const updatedPendingForms = pendingForms.filter((f) => f.id !== form.id);
-      setPendingForms(updatedPendingForms);
-      await AsyncStorage.setItem(
-        "pending_forms",
-        JSON.stringify(updatedPendingForms)
-      );
-
-      Alert.alert("Éxito", "Formulario enviado correctamente.");
+      console.log(`✅ Formulario ID ${form.id} enviado correctamente.`);
     } catch (error) {
-      console.error("❌ Error al enviar el formulario pendiente:", error);
-      Alert.alert("Error", "No se pudo enviar el formulario pendiente.");
+      console.error(`❌ Error al enviar formulario ID ${form.id}:`, error);
+      throw error; // Re-throw the error to handle it in the synchronization logic
     }
   };
 
