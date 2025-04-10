@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
-import { useRouter } from "expo-router"; // Add this import
+import { useRouter } from "expo-router";
 
 export default function MyForms() {
   const [submittedForms, setSubmittedForms] = useState([]);
@@ -28,21 +28,36 @@ export default function MyForms() {
   );
 
   useEffect(() => {
-    const fetchSubmittedForms = async () => {
-      try {
-        const storedSubmittedForms =
-          await AsyncStorage.getItem("submitted_forms");
-        setSubmittedForms(
-          storedSubmittedForms ? JSON.parse(storedSubmittedForms) : []
-        );
-      } catch (error) {
-        console.error("❌ Error al cargar formularios enviados:", error);
-        Alert.alert("Error", "No se pudieron cargar los formularios enviados.");
-      }
-    };
-
-    fetchSubmittedForms();
+    handleViewForms();
   }, []);
+
+  const handleViewForms = async () => {
+    try {
+      const accessToken = await AsyncStorage.getItem("authToken");
+      if (!accessToken) {
+        console.error("Error: No hay token de acceso disponible.");
+        return;
+      }
+
+      const response = await fetch(
+        `https://54b8-179-33-13-68.ngrok-free.app/forms/users/completed_forms`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Error al cargar formularios enviados.");
+      }
+
+      const data = await response.json();
+      setSubmittedForms(data || []);
+    } catch (error) {
+      console.error("❌ Error al cargar formularios enviados:", error);
+      Alert.alert("Error", "No se pudieron cargar los formularios enviados.");
+    }
+  };
 
   return (
     <ScrollView style={styles.container}>
@@ -59,7 +74,10 @@ export default function MyForms() {
               Título: {form.title || "Sin título"}
             </Text>
             <Text style={styles.formDescription}>
-              Fecha de envío: {form.submitted_at || "Desconocida"}
+              Fecha de envío: {form.submission_date || "Desconocida"}
+            </Text>
+            <Text style={styles.formDescription}>
+              Hora de envío: {form.submission_time || "Desconocida"}
             </Text>
           </View>
         ))

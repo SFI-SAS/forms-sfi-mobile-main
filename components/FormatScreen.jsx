@@ -389,7 +389,16 @@ export default function FormatScreen() {
         const pendingForms = storedPendingForms
           ? JSON.parse(storedPendingForms)
           : [];
-        pendingForms.push({ id, responses, mode: "offline" }); // Explicitly set mode to offline
+        const currentDate = new Date();
+        const submissionDate = currentDate.toISOString().split("T")[0]; // Format: YYYY-MM-DD
+        const submissionTime = currentDate.toTimeString().split(" ")[0]; // Format: HH:MM:SS
+        pendingForms.push({
+          id,
+          responses,
+          mode: "offline",
+          submission_date: submissionDate,
+          submission_time: submissionTime,
+        });
         await AsyncStorage.setItem(
           "pending_forms",
           JSON.stringify(pendingForms)
@@ -446,6 +455,13 @@ export default function FormatScreen() {
           }
         }
 
+        // Add submission date and time to the form
+        const currentDate = new Date();
+        const submissionDate = currentDate.toISOString().split("T")[0]; // Format: YYYY-MM-DD
+        const submissionTime = currentDate.toTimeString().split(" ")[0]; // Format: HH:MM:SS
+        saveResponseData.submission_date = submissionDate;
+        saveResponseData.submission_time = submissionTime;
+
         Alert.alert("Éxito", "Respuestas enviadas correctamente.");
         router.back();
       } catch (err) {
@@ -483,7 +499,7 @@ export default function FormatScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>Formulario: {title.toLocaleUpperCase()}</Text>
+      <Text style={styles.header}>{title.toLocaleUpperCase()}</Text>
       <Text style={styles.subHeader}>ID: 00{id}</Text>
       <Text style={styles.instructions}>
         Responde las preguntas a continuación:
@@ -706,10 +722,13 @@ const styles = StyleSheet.create({
   },
   questionsContainer: {
     maxHeight: height * 0.5,
-    backgroundColor: "#FFFFFFFF", // Limit height to 60% of the screen
+    backgroundColor: "#E4E4E4FF", // Limit height to 60% of the screen
     color: "white",
     marginBottom: height * 0.02,
-    padding: 10,
+    padding: 9,
+    borderRadius: width * 0.02,
+    borderColor: "#000000FF",
+    borderWidth: 1,
   },
   loadingText: {
     fontSize: width * 0.05,
@@ -732,11 +751,14 @@ const styles = StyleSheet.create({
     backgroundColor: "green",
     borderRadius: width * 0.02,
     alignItems: "center",
+    borderColor: "#000000FF",
+    borderWidth: 1,
   },
   submitButtonText: {
     color: "white",
     fontWeight: "bold",
     fontSize: width * 0.045,
+    
   },
   backButton: {
     marginTop: height * 0.02,
@@ -744,6 +766,8 @@ const styles = StyleSheet.create({
     backgroundColor: "blue",
     borderRadius: width * 0.02,
     alignItems: "center",
+    borderColor: "#000000FF",
+    borderWidth: 1,
   },
   backButtonText: {
     color: "white",
@@ -757,6 +781,9 @@ const styles = StyleSheet.create({
     padding: height * 0.015, // Dynamic padding
     backgroundColor: "#f9f9f9",
     fontSize: width * 0.045, // Dynamic font size
+    borderRadius: width * 0.02,
+    borderColor: "#000000FF",
+    borderWidth: 1,
   },
   picker: {
     borderWidth: 1,
@@ -764,6 +791,9 @@ const styles = StyleSheet.create({
     borderRadius: width * 0.02, // Dynamic border radius
     backgroundColor: "#f9f9f9",
     marginTop: height * 0.01,
+    borderRadius: width * 0.02,
+    borderColor: "#000000FF",
+    borderWidth: 1,
   },
   fileButton: {
     backgroundColor: "#9225EBFF",
@@ -771,6 +801,8 @@ const styles = StyleSheet.create({
     borderRadius: width * 0.02, // Dynamic border radius
     alignItems: "center",
     marginTop: height * 0.02,
+    borderColor: "#000000FF",
+    borderWidth: 1,
   },
   fileButtonText: {
     color: "white",
@@ -783,6 +815,8 @@ const styles = StyleSheet.create({
     borderRadius: width * 0.02, // Dynamic border radius
     alignItems: "center",
     marginTop: height * 0.02,
+    borderColor: "#000000FF",
+    borderWidth: 1,
   },
   dateButtonText: {
     color: "white",
@@ -798,19 +832,20 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginBottom: height * 0.01,
+   
   },
   checkbox: {
     width: width * 0.08, // Dynamic size
     height: width * 0.08, // Dynamic size
     borderWidth: 3,
-    borderColor: "#242424FF",
+    borderColor: "#706C6CFF",
     borderRadius: width * 0.01, // Dynamic border radius
     justifyContent: "center",
     alignItems: "center",
-    marginRight: width * 0.02, // Dynamic margin
+    marginRight: width * 0.03, // Dynamic margin
   },
   checkboxSelected: {
-    backgroundColor: "#2563eb",
+    backgroundColor: "#20B46FFF",
     borderColor: "#020202FF",
   },
   checkboxCheckmark: {

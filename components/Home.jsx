@@ -13,11 +13,16 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 import { useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
+import { Logo } from "./Logo";
 
 const { width, height } = Dimensions.get("window"); // Get screen dimensions
 
 export default function Home() {
   const router = useRouter();
+  const [userForms, setUserForms] = useState([]);
+  const [isOffline, setIsOffline] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [userInfo, setUserInfo] = useState(null); // State to store user information
 
   useFocusEffect(
     React.useCallback(() => {
@@ -30,9 +35,29 @@ export default function Home() {
     }, [])
   );
 
-  const [userForms, setUserForms] = useState([]);
-  const [isOffline, setIsOffline] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const fetchUserInfo = async () => {
+    try {
+      const token = await AsyncStorage.getItem("authToken");
+      if (!token) throw new Error("No authentication token found");
+
+      const response = await fetch(
+        "https://54b8-179-33-13-68.ngrok-free.app/auth/validate-token",
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Error fetching user information");
+      }
+
+      const data = await response.json();
+      setUserInfo(data.user); // Save user information
+    } catch (error) {
+      console.error("❌ Error fetching user information:", error);
+    }
+  };
 
   const fetchUserForms = async () => {
     try {
@@ -121,6 +146,7 @@ export default function Home() {
 
       if (state.isConnected) {
         fetchUserForms();
+        fetchUserInfo(); // Fetch user information when online
 
         // Synchronize pending forms when back online
         const storedPendingForms = await AsyncStorage.getItem("pending_forms");
@@ -199,12 +225,31 @@ export default function Home() {
 
   return (
     <ScrollView style={styles.container}>
-      <Text style={styles.header}>Formatos Asignados</Text>
-      <Text style={isOffline ? styles.offlineText : styles.onlineText}>
-        Estado: {isOffline ? "Offline ◉" : "Online ◉"}
-      </Text>
+      <Text style={styles.header}>Formatos asignados al usuario: </Text>
+      {userInfo && (
+        <View style={styles.userInfoContainer}>
+          <Text style={styles.userInfoText}>{userInfo.name}</Text>
+          <Text style={styles.userInfoText}>Email: {userInfo.email}</Text>
+          <Text style={styles.userInfoText}>
+            Documento: {userInfo.num_document}
+          </Text>
+          <Text style={styles.userInfoText}>
+            Teléfono: {userInfo.telephone}
+          </Text>
+          <Text style={styles.userInfoText}>
+            Tipo de Usuario: {userInfo.user_type}
+          </Text>
+          <Text style={isOffline ? styles.offlineText : styles.onlineText}>
+            {isOffline ? "Offline ◉" : "Online ◉"}
+          </Text>
+        </View>
+      )}
+
       {loading ? (
+        <View>
         <Text style={styles.loadingText}>Cargando...</Text>
+        <Logo/>
+        </View>
       ) : (
         <View style={styles.formsContainer}>
           <ScrollView>
@@ -217,7 +262,7 @@ export default function Home() {
                       style={styles.formItem}
                       onPress={() => handleFormPress(form)}
                     >
-                      <Text style={styles.formText}>Formato: {form.title}</Text>
+                      <Text style={styles.formText}>Titulo: {form.title}</Text>
                       <Text style={styles.formDescription}>
                         Descripción: {form.description}
                       </Text>
@@ -228,14 +273,14 @@ export default function Home() {
         </View>
       )}
       <TouchableOpacity onPress={handleNavigateToMyForms} style={styles.button}>
-        <Text style={styles.buttonText}>Ver formularios diligenciados</Text>
+        <Text style={styles.buttonText}>Ver formatos diligenciados</Text>
       </TouchableOpacity>
       <TouchableOpacity
         onPress={handleNavigateToPendingForms}
         style={styles.button}
       >
         <Text style={styles.buttonText}>
-          Ver formularios pendientes de envío
+          Ver formatos pendientes de envío
         </Text>
       </TouchableOpacity>
       <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
@@ -252,12 +297,30 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     marginBottom: height * 0.02,
   },
+  userInfoContainer: {
+    padding: width * 0.01,
+    backgroundColor: "#EBE5D2FF",
+    borderRadius: width * 0.02,
+    marginBottom: height * 0.02,
+    borderColor: "#000000FF",
+    borderWidth: 1,
+    alignItems: "center",
+    
+  },
+  userInfoText: {
+    fontSize: 15,
+    color: "#333",
+    marginBottom: height * 0.01,
+    fontWeight: "bold"
+  },
   onlineText: {
+    fontSize: width * 0.053,
     color: "green",
     fontWeight: "bold",
     marginBottom: height * 0.01,
   },
   offlineText: {
+    fontSize: width * 0.045,
     color: "red",
     fontWeight: "bold",
     marginBottom: height * 0.01,
@@ -270,12 +333,15 @@ const styles = StyleSheet.create({
   formsContainer: {
     maxHeight: height * 0.5, // Limit height to half the screen
     marginBottom: height * 0.02,
+    
   },
   formItem: {
     padding: width * 0.04,
     backgroundColor: "#f0f0f0",
     borderRadius: width * 0.02,
     marginBottom: height * 0.02,
+    borderColor: "#000000FF",
+    borderWidth: 1
   },
   formText: { fontSize: width * 0.05, fontWeight: "bold" },
   formDescription: { fontSize: width * 0.04, color: "#555" },
@@ -285,6 +351,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#2563eb",
     borderRadius: width * 0.02,
     alignItems: "center",
+    borderColor: "#000000FF",
+    borderWidth: 1,
   },
   buttonText: { color: "white", fontWeight: "bold", fontSize: width * 0.045 },
   logoutButton: {
@@ -293,6 +361,8 @@ const styles = StyleSheet.create({
     backgroundColor: "red",
     borderRadius: width * 0.02,
     alignItems: "center",
+    borderColor: "#000000FF",
+    borderWidth: 1,
   },
   logoutText: { color: "white", fontWeight: "bold", fontSize: width * 0.045 },
 });
