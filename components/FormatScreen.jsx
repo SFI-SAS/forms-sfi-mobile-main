@@ -29,6 +29,10 @@ export default function FormatScreen() {
   const [loading, setLoading] = useState(true);
   const [tableAnswers, setTableAnswers] = useState({}); // State to store related answers for table questions
   const [userFieldSelection, setUserFieldSelection] = useState({}); // State to store selected field for "users" source
+  const [textAnswers, setTextAnswers] = useState({});
+  const [tableAnswersState, setTableAnswersState] = useState({});
+  const [selectedAnswers, setSelectedAnswers] = useState({}); // Initialize selectedAnswers as an empty object
+  const [datePickerVisible, setDatePickerVisible] = useState({}); // State to manage visibility of DateTimePicker
 
   useFocusEffect(
     React.useCallback(() => {
@@ -165,12 +169,9 @@ export default function FormatScreen() {
 
       console.log("📄 Resultado del selector de documentos:", result);
 
-      if (result && result.assets && result.assets.length > 0) {
-        const file = result.assets[0]; // Extract the first file from the assets array
-        console.log("✅ Archivo seleccionado:", file);
-
-        handleAnswerChange(questionId, file.uri); // Save the file URI in the answers state
-        Alert.alert("Archivo seleccionado", `Nombre: ${file.name}`);
+      if (result && !result.canceled && result.assets?.[0]?.uri) {
+        handleAnswerChange(questionId, result.assets[0].uri); // Save the file URI in the answers state
+        Alert.alert("Archivo seleccionado", `Ruta: ${result.assets[0].uri}`);
       } else if (result && result.canceled) {
         console.log("⚠️ Selección de archivo cancelada por el usuario.");
       } else {
@@ -267,6 +268,85 @@ export default function FormatScreen() {
     }
   };
 
+  const handleAddField = (questionId) => {
+    setAnswers((prev) => ({
+      ...prev,
+      [questionId]: Array.isArray(prev[questionId])
+        ? [...prev[questionId], { id: Date.now(), value: "" }] // Add unique ID for each input
+        : [{ id: Date.now(), value: "" }], // Ensure it's an array
+    }));
+  };
+
+  const handleRemoveField = (questionId, fieldId) => {
+    setAnswers((prev) => ({
+      ...prev,
+      [questionId]: Array.isArray(prev[questionId])
+        ? prev[questionId].filter((field) => field.id !== fieldId)
+        : [],
+    }));
+  };
+
+  const handleFieldChange = (questionId, fieldId, value) => {
+    setAnswers((prev) => ({
+      ...prev,
+      [questionId]: prev[questionId].map((field) =>
+        field.id === fieldId ? { ...field, value } : field
+      ),
+    }));
+  };
+
+  const handleTextChange = (questionId, index, value) => {
+    setTextAnswers((prev) => {
+      const updatedAnswers = [...(prev[questionId] || [])];
+      updatedAnswers[index] = value;
+      return { ...prev, [questionId]: updatedAnswers };
+    });
+  };
+
+  const handleAddTextField = (questionId) => {
+    setTextAnswers((prev) => ({
+      ...prev,
+      [questionId]: [...(prev[questionId] || []), ""],
+    }));
+  };
+
+  const handleRemoveTextField = (questionId, index) => {
+    setTextAnswers((prev) => ({
+      ...prev,
+      [questionId]: prev[questionId].filter((_, i) => i !== index),
+    }));
+  };
+
+  const handleTableSelectChange = (questionId, index, value) => {
+    setTableAnswersState((prev) => {
+      const updatedAnswers = [...(prev[questionId] || [])];
+      updatedAnswers[index] = value;
+      return { ...prev, [questionId]: updatedAnswers };
+    });
+  };
+
+  const handleAddTableAnswer = (questionId) => {
+    setTableAnswersState((prev) => ({
+      ...prev,
+      [questionId]: [...(prev[questionId] || []), ""],
+    }));
+  };
+
+  const handleRemoveTableAnswer = (questionId, index) => {
+    setTableAnswersState((prev) => ({
+      ...prev,
+      [questionId]: prev[questionId].filter((_, i) => i !== index),
+    }));
+  };
+
+  const handleDateChange = (questionId, selectedDate) => {
+    if (selectedDate) {
+      const formattedDate = selectedDate.toISOString().split("T")[0]; // Format: YYYY-MM-DD
+      setAnswers((prev) => ({ ...prev, [questionId]: formattedDate }));
+    }
+    setDatePickerVisible((prev) => ({ ...prev, [questionId]: false })); // Hide the DateTimePicker
+  };
+
   useEffect(() => {
     if (id) {
       NetInfo.fetch().then((state) => {
@@ -295,119 +375,37 @@ export default function FormatScreen() {
       });
   }, [questions]);
 
+  useEffect(() => {
+    const initialTextAnswers = {};
+    const initialTableAnswers = {};
+
+    questions.forEach((q) => {
+      if (q.question_type === "text") {
+        initialTextAnswers[q.id] = [""];
+      } else if (q.question_type === "table") {
+        initialTableAnswers[q.id] = [""];
+      }
+    });
+
+    setTextAnswers(initialTextAnswers);
+    setTableAnswersState(initialTableAnswers);
+  }, [questions]);
+
   const handleSubmitForm = async () => {
     console.log("📤 Enviando formulario ID:", id);
     try {
       const token = await AsyncStorage.getItem("authToken");
       if (!token) throw new Error("No authentication token found");
 
-      let hasError = false;
-      const newErrors = {}; // Map for errors
-
-      const responses = await Promise.all(
-        questions.map(async (q) => {
-          let responseValue = "";
-          let filePath = "";
-
-          if (q.question_type === "multiple_choice") {
-            const selectedOptions = answers[q.id] || [];
-            responseValue =
-              selectedOptions.length > 0 ? selectedOptions.join(", ") : "";
-          } else if (q.options?.length > 0) {
-            responseValue = answers[q.id] || "";
-          } else if (q.question_type === "file") {
-            const fileUri = answers[q.id];
-            if (fileUri) {
-              const uploadFormData = new FormData();
-              uploadFormData.append("file", {
-                uri: fileUri,
-                name: fileUri.split("/").pop(),
-                type: "application/octet-stream",
-              });
-              try {
-                const uploadResponse = await fetch(
-                  `https://54b8-179-33-13-68.ngrok-free.app/responses/upload-file/`,
-                  {
-                    method: "POST",
-                    headers: {
-                      Authorization: `Bearer ${token}`,
-                    },
-                    body: uploadFormData,
-                  }
-                );
-
-                const uploadResult = await uploadResponse.json();
-                if (!uploadResponse.ok) {
-                  throw new Error(
-                    uploadResult.detail || "Error al subir el archivo"
-                  );
-                }
-
-                filePath = uploadResult.file_name;
-              } catch (error) {
-                console.error("❌ Error al subir archivo:", error);
-                newErrors[q.id] = true;
-                hasError = true;
-              }
-            } else if (q.required) {
-              newErrors[q.id] = true;
-              hasError = true;
-            }
-          } else if (q.question_type === "date") {
-            responseValue = answers[q.id] || "";
-          } else {
-            responseValue = answers[q.id] || "";
-          }
-
-          if (q.required && responseValue.trim() === "") {
-            newErrors[q.id] = true;
-            hasError = true;
-          }
-
-          return {
-            question_id: q.id,
-            answer_text: responseValue,
-            file_path: filePath,
-          };
-        })
-      );
-
-      if (hasError) {
-        Alert.alert(
-          "Error",
-          "Por favor, responde todas las preguntas obligatorias."
-        );
-        return;
-      }
-
       const mode = await NetInfo.fetch().then((state) =>
         state.isConnected ? "online" : "offline"
       );
 
       if (mode === "offline") {
-        const storedPendingForms = await AsyncStorage.getItem("pending_forms");
-        const pendingForms = storedPendingForms
-          ? JSON.parse(storedPendingForms)
-          : [];
-        const currentDate = new Date();
-        const submissionDate = currentDate.toISOString().split("T")[0]; // Format: YYYY-MM-DD
-        const submissionTime = currentDate.toTimeString().split(" ")[0]; // Format: HH:MM:SS
-        pendingForms.push({
-          id,
-          responses,
-          mode: "offline",
-          submission_date: submissionDate,
-          submission_time: submissionTime,
-        });
-        await AsyncStorage.setItem(
-          "pending_forms",
-          JSON.stringify(pendingForms)
-        );
         Alert.alert(
-          "Guardado Offline",
-          "El formulario se guardó en modo offline y será enviado cuando haya conexión."
+          "Modo Offline",
+          "El formulario no puede ser enviado en modo offline."
         );
-        router.back();
         return;
       }
 
@@ -418,24 +416,65 @@ export default function FormatScreen() {
         },
       };
 
-      try {
-        // 1. Save the responses with the response_id and mode
-        const saveResponseRes = await fetch(
-          `https://54b8-179-33-13-68.ngrok-free.app/responses/save-response/${id}`,
-          {
-            method: "POST",
-            headers: requestOptions.headers,
-            body: JSON.stringify({ mode }),
+      // Iterate through each question and submit the form for each value
+      for (const question of questions) {
+        const questionId = question.id;
+        let valuesToSubmit = [];
+
+        if (
+          question.question_type === "text" &&
+          textAnswers[questionId]?.length > 0
+        ) {
+          valuesToSubmit = textAnswers[questionId].filter(
+            (answer) => answer.trim() !== ""
+          );
+        } else if (
+          question.question_type === "table" &&
+          tableAnswersState[questionId]?.length > 0
+        ) {
+          valuesToSubmit = tableAnswersState[questionId].filter(
+            (answer) => answer.trim() !== ""
+          );
+        } else if (question.question_type === "file") {
+          const filePath = answers[questionId] || "";
+          if (filePath) {
+            valuesToSubmit = [filePath];
           }
-        );
+        } else if (
+          question.question_type === "date" &&
+          answers[questionId]?.length > 0
+        ) {
+          valuesToSubmit = [answers[questionId]];
+        } else if (
+          question.question_type === "multiple_choice" &&
+          selectedAnswers[questionId]?.length > 0
+        ) {
+          valuesToSubmit = selectedAnswers[questionId];
+        } else if (
+          question.question_type === "one_choice" &&
+          selectedAnswers[questionId]?.length > 0
+        ) {
+          valuesToSubmit = [selectedAnswers[questionId][0]];
+        }
 
-        const saveResponseData = await saveResponseRes.json();
-        console.log("✅ Respuesta guardada:", saveResponseData);
-        const responseId = saveResponseData.response_id;
-
-        // 2. Save each answer in the correct endpoint
-        for (const response of responses) {
+        // Submit the form for each value of the current question
+        for (const value of valuesToSubmit) {
           try {
+            // Save the response and get the response ID
+            const saveResponseRes = await fetch(
+              `https://54b8-179-33-13-68.ngrok-free.app/responses/save-response/${id}`,
+              {
+                method: "POST",
+                headers: requestOptions.headers,
+                body: JSON.stringify({ mode }),
+              }
+            );
+
+            const saveResponseData = await saveResponseRes.json();
+            console.log("✅ Respuesta guardada:", saveResponseData);
+            const responseId = saveResponseData.response_id;
+
+            // Submit the value as a new answer
             const res = await fetch(
               `https://54b8-179-33-13-68.ngrok-free.app/responses/save-answers`,
               {
@@ -443,9 +482,9 @@ export default function FormatScreen() {
                 headers: requestOptions.headers,
                 body: JSON.stringify({
                   response_id: responseId,
-                  question_id: response.question_id,
-                  answer_text: response.answer_text,
-                  file_path: response.file_path,
+                  question_id: questionId,
+                  answer_text: question.question_type === "file" ? "" : value,
+                  file_path: question.question_type === "file" ? value : "",
                 }),
               }
             );
@@ -454,20 +493,10 @@ export default function FormatScreen() {
             console.error("❌ Error en la solicitud:", error);
           }
         }
-
-        // Add submission date and time to the form
-        const currentDate = new Date();
-        const submissionDate = currentDate.toISOString().split("T")[0]; // Format: YYYY-MM-DD
-        const submissionTime = currentDate.toTimeString().split(" ")[0]; // Format: HH:MM:SS
-        saveResponseData.submission_date = submissionDate;
-        saveResponseData.submission_time = submissionTime;
-
-        Alert.alert("Éxito", "Respuestas enviadas correctamente.");
-        router.back();
-      } catch (err) {
-        console.error("❌ Error al enviar respuestas:", err);
-        Alert.alert("Error", "Error al enviar respuestas.");
       }
+
+      Alert.alert("Éxito", "Respuestas enviadas correctamente.");
+      router.back();
     } catch (error) {
       console.error("❌ Error al guardar el formulario:", error);
       Alert.alert("Error", "No se pudo guardar el formulario.");
@@ -475,7 +504,7 @@ export default function FormatScreen() {
   };
 
   const handleMultipleChoiceChange = (questionId, option) => {
-    setAnswers((prev) => {
+    setSelectedAnswers((prev) => {
       const currentAnswers = prev[questionId] || [];
       if (currentAnswers.includes(option)) {
         // Remove the option if it's already selected
@@ -491,9 +520,9 @@ export default function FormatScreen() {
   };
 
   const handleOneChoiceChange = (questionId, option) => {
-    setAnswers((prev) => ({
+    setSelectedAnswers((prev) => ({
       ...prev,
-      [questionId]: option, // Replace the current selection with the new one
+      [questionId]: [option], // Replace the current selection with the new one
     }));
   };
 
@@ -522,86 +551,38 @@ export default function FormatScreen() {
                 </Text>
                 {/* Render input types based on question type */}
                 {question.question_type === "text" && (
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Escribe tu respuesta"
-                    value={answers[question.id] || ""}
-                    onChangeText={(value) =>
-                      handleAnswerChange(question.id, value)
-                    }
-                  />
-                )}
-                {(question.question_type === "multiple_choice" ||
-                  question.question_type === "one_choice") &&
-                  question.options && (
-                    <View>
-                      {question.options.map((option, index) => (
-                        <View key={index} style={styles.checkboxContainer}>
-                          <TouchableOpacity
-                            style={[
-                              styles.checkbox,
-                              question.question_type === "multiple_choice" &&
-                                answers[question.id]?.includes(option) &&
-                                styles.checkboxSelected,
-                              question.question_type === "one_choice" &&
-                                answers[question.id] === option &&
-                                styles.checkboxSelected,
-                            ]}
-                            onPress={() =>
-                              question.question_type === "multiple_choice"
-                                ? handleMultipleChoiceChange(
-                                    question.id,
-                                    option
-                                  )
-                                : handleOneChoiceChange(question.id, option)
-                            }
-                          >
-                            {(question.question_type === "multiple_choice" &&
-                              answers[question.id]?.includes(option)) ||
-                            (question.question_type === "one_choice" &&
-                              answers[question.id] === option) ? (
-                              <Text style={styles.checkboxCheckmark}>✔</Text>
-                            ) : null}
-                          </TouchableOpacity>
-                          <Text style={styles.checkboxLabel}>{option}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-                {question.question_type === "number" && (
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Escribe un número"
-                    keyboardType="numeric"
-                    value={answers[question.id] || ""}
-                    onChangeText={(value) =>
-                      handleAnswerChange(question.id, value)
-                    }
-                  />
-                )}
-                {question.question_type === "date" && (
-                  <TouchableOpacity
-                    style={styles.dateButton}
-                    onPress={() =>
-                      Alert.alert(
-                        "Seleccionar fecha",
-                        "Por favor selecciona una fecha usando el selector." <
-                          DateTimePicker >
-                          <DateTimePicker />
-                      )
-                    }
-                  >
-                    <Text style={styles.dateButtonText}>
-                      {answers[question.id] || "Seleccionar fecha"}
-                    </Text>
-                  </TouchableOpacity>
+                  <>
+                    {textAnswers[question.id]?.map((field, index) => (
+                      <View key={index} style={styles.dynamicFieldContainer}>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="Escribe tu respuesta"
+                          value={field}
+                          onChangeText={(text) =>
+                            handleTextChange(question.id, index, text)
+                          }
+                        />
+                        <TouchableOpacity
+                          style={styles.removeButton}
+                          onPress={() =>
+                            handleRemoveTextField(question.id, index)
+                          }
+                        >
+                          <Text style={styles.removeButtonText}>-</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                    <TouchableOpacity
+                      style={styles.addButton}
+                      onPress={() => handleAddTextField(question.id)}
+                    >
+                      <Text style={styles.addButtonText}>+</Text>
+                    </TouchableOpacity>
+                  </>
                 )}
                 {question.question_type === "file" && (
                   <TouchableOpacity
-                    style={[
-                      styles.fileButton,
-                      answers[question.id] && { backgroundColor: "red" },
-                    ]}
+                    style={styles.fileButton}
                     onPress={() => handleFileUpload(question.id)}
                   >
                     <Text style={styles.fileButtonText}>
@@ -613,77 +594,152 @@ export default function FormatScreen() {
                 )}
                 {question.question_type === "table" && (
                   <>
-                    {/* Handle "usuarios" source */}
-                    {Array.isArray(tableAnswers[question.id]) &&
-                      tableAnswers[question.id].length > 0 &&
-                      typeof tableAnswers[question.id][0] === "object" && (
-                        <>
-                          <Picker
-                            selectedValue={
-                              userFieldSelection[question.id] || ""
-                            }
-                            onValueChange={(value) =>
-                              setUserFieldSelection((prev) => ({
-                                ...prev,
-                                [question.id]: value,
-                              }))
-                            }
-                            style={styles.picker}
-                          >
-                            <Picker.Item label="Selecciona un campo" value="" />
-                            {Object.keys(tableAnswers[question.id][0]).map(
-                              (field, index) => (
-                                <Picker.Item
-                                  key={index}
-                                  label={field}
-                                  value={field}
-                                />
-                              )
-                            )}
-                          </Picker>
-                          {userFieldSelection[question.id] && (
-                            <Picker
-                              selectedValue={answers[question.id] || ""}
-                              onValueChange={(value) =>
-                                handleAnswerChange(question.id, value)
-                              }
-                              style={styles.picker}
-                            >
-                              <Picker.Item
-                                label="Selecciona una opción"
-                                value=""
-                              />
-                              {tableAnswers[question.id].map((user, index) => (
-                                <Picker.Item
-                                  key={index}
-                                  label={user[userFieldSelection[question.id]]}
-                                  value={user[userFieldSelection[question.id]]}
-                                />
-                              ))}
-                            </Picker>
-                          )}
-                        </>
-                      )}
-                    {/* Handle "pregunta_relacionada" source */}
-                    {Array.isArray(tableAnswers[question.id]) &&
-                      typeof tableAnswers[question.id][0] === "string" && (
+                    {tableAnswersState[question.id]?.map((field, index) => (
+                      <View key={index} style={styles.dynamicFieldContainer}>
                         <Picker
-                          selectedValue={answers[question.id] || ""}
-                          onValueChange={(value) =>
-                            handleAnswerChange(question.id, value)
+                          selectedValue={field}
+                          onValueChange={(selectedValue) =>
+                            handleTableSelectChange(
+                              question.id,
+                              index,
+                              selectedValue
+                            )
                           }
                           style={styles.picker}
                         >
                           <Picker.Item label="Selecciona una opción" value="" />
-                          {tableAnswers[question.id].map((option, index) => (
-                            <Picker.Item
-                              key={index}
-                              label={option}
-                              value={option}
-                            />
-                          ))}
+                          {Array.isArray(tableAnswers[question.id]) &&
+                            tableAnswers[question.id].map((option, i) => (
+                              <Picker.Item
+                                key={i}
+                                label={option}
+                                value={option}
+                              />
+                            ))}
                         </Picker>
-                      )}
+                        <TouchableOpacity
+                          style={styles.removeButton}
+                          onPress={() =>
+                            handleRemoveTableAnswer(question.id, index)
+                          }
+                        >
+                          <Text style={styles.removeButtonText}>-</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                    <TouchableOpacity
+                      style={styles.addButton}
+                      onPress={() => handleAddTableAnswer(question.id)}
+                    >
+                      <Text style={styles.addButtonText}>+</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+                {question.question_type === "multiple_choice" &&
+                  question.options && (
+                    <View>
+                      {question.options.map((option, index) => (
+                        <View key={index} style={styles.checkboxContainer}>
+                          <TouchableOpacity
+                            style={[
+                              styles.checkbox,
+                              answers[question.id]?.includes(option) &&
+                                styles.checkboxSelected,
+                            ]}
+                            onPress={() =>
+                              setAnswers((prev) => {
+                                const currentAnswers = prev[question.id] || [];
+                                const updatedAnswers = currentAnswers.includes(
+                                  option
+                                )
+                                  ? currentAnswers.filter((o) => o !== option)
+                                  : [...currentAnswers, option];
+                                return {
+                                  ...prev,
+                                  [question.id]: updatedAnswers,
+                                };
+                              })
+                            }
+                          >
+                            {answers[question.id]?.includes(option) && (
+                              <Text style={styles.checkboxCheckmark}>✔</Text>
+                            )}
+                          </TouchableOpacity>
+                          <Text style={styles.checkboxLabel}>{option}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                {question.question_type === "one_choice" &&
+                  question.options && (
+                    <View>
+                      {question.options.map((option, index) => (
+                        <View key={index} style={styles.checkboxContainer}>
+                          <TouchableOpacity
+                            style={[
+                              styles.checkbox,
+                              answers[question.id] === option &&
+                                styles.checkboxSelected,
+                            ]}
+                            onPress={() =>
+                              setAnswers((prev) => ({
+                                ...prev,
+                                [question.id]: option,
+                              }))
+                            }
+                          >
+                            {answers[question.id] === option && (
+                              <Text style={styles.checkboxCheckmark}>✔</Text>
+                            )}
+                          </TouchableOpacity>
+                          <Text style={styles.checkboxLabel}>{option}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                {question.question_type === "number" && (
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Escribe un número"
+                    keyboardType="numeric"
+                    value={answers[question.id]?.[0] || ""}
+                    onChangeText={(value) =>
+                      setAnswers((prev) => ({
+                        ...prev,
+                        [question.id]: [value],
+                      }))
+                    }
+                  />
+                )}
+                {question.question_type === "date" && (
+                  <>
+                    <TouchableOpacity
+                      style={styles.dateButton}
+                      onPress={() =>
+                        setDatePickerVisible((prev) => ({
+                          ...prev,
+                          [question.id]: true,
+                        }))
+                      }
+                    >
+                      <Text style={styles.dateButtonText}>
+                        {answers[question.id] || "Seleccionar fecha"}
+                      </Text>
+                    </TouchableOpacity>
+                    {datePickerVisible[question.id] && (
+                      <DateTimePicker
+                        value={
+                          answers[question.id]
+                            ? new Date(answers[question.id])
+                            : new Date()
+                        }
+                        mode="date"
+                        display="default"
+                        onChange={(event, selectedDate) =>
+                          handleDateChange(question.id, selectedDate)
+                        }
+                      />
+                    )}
                   </>
                 )}
               </View>
@@ -748,7 +804,7 @@ const styles = StyleSheet.create({
   submitButton: {
     marginTop: height * 0.03,
     padding: height * 0.02,
-    backgroundColor: "green",
+    backgroundColor: "#4F87DBFF",
     borderRadius: width * 0.02,
     alignItems: "center",
     borderColor: "#000000FF",
@@ -758,12 +814,11 @@ const styles = StyleSheet.create({
     color: "white",
     fontWeight: "bold",
     fontSize: width * 0.045,
-    
   },
   backButton: {
     marginTop: height * 0.02,
     padding: height * 0.02,
-    backgroundColor: "blue",
+    backgroundColor: "red",
     borderRadius: width * 0.02,
     alignItems: "center",
     borderColor: "#000000FF",
@@ -784,25 +839,27 @@ const styles = StyleSheet.create({
     borderRadius: width * 0.02,
     borderColor: "#000000FF",
     borderWidth: 1,
+    width: width * 0.75, // Dynamic width
   },
   picker: {
     borderWidth: 1,
     borderColor: "#ccc",
-    borderRadius: width * 0.02, // Dynamic border radius
+    borderRadius: width * 0.75, // Dynamic border radius
     backgroundColor: "#f9f9f9",
     marginTop: height * 0.01,
     borderRadius: width * 0.02,
     borderColor: "#000000FF",
     borderWidth: 1,
+    width: width * 0.75, // Dynamic width
   },
   fileButton: {
     backgroundColor: "#9225EBFF",
     padding: height * 0.02, // Dynamic padding
     borderRadius: width * 0.02, // Dynamic border radius
     alignItems: "center",
-    marginTop: height * 0.02,
     borderColor: "#000000FF",
     borderWidth: 1,
+    width: width * 0.75, // Dynamic width
   },
   fileButtonText: {
     color: "white",
@@ -832,7 +889,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginBottom: height * 0.01,
-   
   },
   checkbox: {
     width: width * 0.08, // Dynamic size
@@ -856,5 +912,40 @@ const styles = StyleSheet.create({
   checkboxLabel: {
     fontSize: width * 0.045, // Dynamic font size
     color: "#333",
+  },
+  dynamicFieldContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: height * 0.01,
+    marginBottom: height * 0.01,
+    width: width * 0.75, // Dynamic width
+
+    justifyContent: "space-between",
+  },
+  addButton: {
+    backgroundColor: "green",
+    padding: height * 0.02,
+    borderRadius: width * 0.6,
+    alignItems: "center",
+    marginTop: height * 0.01,
+    width: width * 0.14, // Dynamic width
+    borderColor: "#000000FF",
+    borderWidth: 1,
+  },
+  addButtonText: {
+    color: "white",
+    fontWeight: "bold",
+    fontSize: width * 0.045,
+  },
+  removeButton: {
+    backgroundColor: "red",
+    padding: height * 0.015,
+    borderRadius: width * 0.02,
+    marginLeft: width * 0.02,
+  },
+  removeButtonText: {
+    color: "white",
+    fontWeight: "bold",
+    fontSize: width * 0.045,
   },
 });
