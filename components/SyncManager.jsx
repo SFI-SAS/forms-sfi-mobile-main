@@ -17,7 +17,7 @@ const SyncManager = () => {
           try {
             const token = await AsyncStorage.getItem("authToken");
             const response = await fetch(
-              `https://54b8-179-33-13-68.ngrok-free.app/save-response/${form.id}?mode=offline`,
+              `https://35b3-179-33-13-68.ngrok-free.app/save-response/${form.id}?mode=offline`,
               {
                 method: "POST",
                 headers: {

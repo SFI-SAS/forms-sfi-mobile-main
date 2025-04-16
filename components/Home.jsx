@@ -8,14 +8,28 @@ import {
   ScrollView,
   BackHandler,
   Dimensions, // Import Dimensions
+  Animated, // Import Animated
+  Easing, // Import Easing
+  Image,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 import { useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
 import { Logo } from "./Logo";
+import { SvgXml } from "react-native-svg"; // Import SvgXml
+import { HomeIcon, InfoIcon } from "../components/Icons";
 
 const { width, height } = Dimensions.get("window"); // Get screen dimensions
+
+// Spinner SVG igual que en FormatScreen
+const spinnerSvg = `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><path fill="#000000FF" stroke="#EE4138FF" stroke-width="15" transform-origin="center" d="m148 84.7 13.8-8-10-17.3-13.8 8a50 50 0 0 0-27.4-15.9v-16h-20v16A50 50 0 0 0 63 67.4l-13.8-8-10 17.3 13.8 8a50 50 0 0 0 0 31.7l-13.8 8 10 17.3 13.8-8a50 50 0 0 0 27.5 15.9v16h20v-16a50 50 0 0 0 27.4-15.9l13.8 8 10-17.3-13.8-8a50 50 0 0 0 0-31.7Zm-47.5 50.8a35 35 0 1 1 0-70 35 35 0 0 1 0 70Z"><animateTransform type="rotate" attributeName="transform" calcMode="spline" dur="1.8" values="0;120" keyTimes="0;1" keySplines="0 0 1 1" repeatCount="indefinite"></animateTransform></path></svg>
+`;
+
+const QUESTIONS_KEY = "offline_questions";
+const FORMS_METADATA_KEY = "offline_forms_metadata";
+const RELATED_ANSWERS_KEY = "offline_related_answers";
 
 export default function Home() {
   const router = useRouter();
@@ -23,6 +37,7 @@ export default function Home() {
   const [isOffline, setIsOffline] = useState(false);
   const [loading, setLoading] = useState(true);
   const [userInfo, setUserInfo] = useState(null); // State to store user information
+  const [spinAnim] = useState(new Animated.Value(0)); // Spinner animation state
 
   useFocusEffect(
     React.useCallback(() => {
@@ -35,13 +50,37 @@ export default function Home() {
     }, [])
   );
 
+  // Utilidad para guardar y cargar userInfo de AsyncStorage
+  const USER_INFO_KEY = "user_info_offline";
+  const FORMS_KEY = "offline_forms";
+  const PENDING_FORMS_KEY = "pending_forms";
+
+  // Guarda la info de usuario en AsyncStorage
+  const saveUserInfoOffline = async (user) => {
+    try {
+      await AsyncStorage.setItem(USER_INFO_KEY, JSON.stringify(user));
+    } catch (e) {
+      console.error("❌ Error guardando userInfo offline:", e);
+    }
+  };
+
+  // Carga la info de usuario desde AsyncStorage
+  const loadUserInfoOffline = async () => {
+    try {
+      const stored = await AsyncStorage.getItem(USER_INFO_KEY);
+      if (stored) setUserInfo(JSON.parse(stored));
+    } catch (e) {
+      console.error("❌ Error cargando userInfo offline:", e);
+    }
+  };
+
   const fetchUserInfo = async () => {
     try {
       const token = await AsyncStorage.getItem("authToken");
       if (!token) throw new Error("No authentication token found");
 
       const response = await fetch(
-        "https://54b8-179-33-13-68.ngrok-free.app/auth/validate-token",
+        "https://35b3-179-33-13-68.ngrok-free.app/auth/validate-token",
         {
           method: "GET",
           headers: { Authorization: `Bearer ${token}` },
@@ -54,9 +93,93 @@ export default function Home() {
 
       const data = await response.json();
       setUserInfo(data.user); // Save user information
+      saveUserInfoOffline(data.user); // Guarda siempre la info online/offline
     } catch (error) {
       console.error("❌ Error fetching user information:", error);
+      // Si falla online, intenta cargar offline
+      loadUserInfoOffline();
     }
+  };
+
+  const fetchAndCacheQuestionsAndRelated = async (forms, token) => {
+    // Guarda preguntas y respuestas relacionadas para cada formulario
+    let allQuestions = {};
+    let allFormsMetadata = {};
+    let allRelatedAnswers = {};
+
+    for (const form of forms) {
+      try {
+        // 1. Preguntas del formulario
+        const qRes = await fetch(
+          `https://35b3-179-33-13-68.ngrok-free.app/forms/${form.id}`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+          }
+        );
+        const qData = await qRes.json();
+        if (!qRes.ok)
+          throw new Error(qData.detail || "Error fetching questions");
+
+        // Ajusta opciones para multiple_choice/one_choice
+        const adjustedQuestions = qData.questions.map((question) => {
+          if (
+            (question.question_type === "multiple_choice" ||
+              question.question_type === "one_choice") &&
+            Array.isArray(question.options)
+          ) {
+            return {
+              ...question,
+              options: question.options.map((option) => option.option_text),
+            };
+          }
+          return question;
+        });
+
+        allQuestions[form.id] = adjustedQuestions;
+        allFormsMetadata[form.id] = {
+          title: qData.title,
+          description: qData.description,
+        };
+
+        // 2. Respuestas relacionadas para preguntas tipo tabla
+        for (const question of adjustedQuestions) {
+          if (question.question_type === "table") {
+            try {
+              const relRes = await fetch(
+                `https://35b3-179-33-13-68.ngrok-free.app/questions/question-table-relation/answers/${question.id}`,
+                {
+                  method: "GET",
+                  headers: { Authorization: `Bearer ${token}` },
+                }
+              );
+              const relData = await relRes.json();
+              allRelatedAnswers[question.id] = relData;
+            } catch (e) {
+              // Si falla, guarda vacío
+              allRelatedAnswers[question.id] = {};
+            }
+          }
+        }
+      } catch (e) {
+        // Si falla, sigue con el siguiente formulario
+        continue;
+      }
+    }
+
+    // Guarda todo en AsyncStorage
+    await AsyncStorage.setItem(QUESTIONS_KEY, JSON.stringify(allQuestions));
+    await AsyncStorage.setItem(
+      FORMS_METADATA_KEY,
+      JSON.stringify(allFormsMetadata)
+    );
+    await AsyncStorage.setItem(
+      RELATED_ANSWERS_KEY,
+      JSON.stringify(allRelatedAnswers)
+    );
   };
 
   const fetchUserForms = async () => {
@@ -65,7 +188,7 @@ export default function Home() {
       if (!token) throw new Error("No authentication token found");
 
       const response = await fetch(
-        "https://54b8-179-33-13-68.ngrok-free.app/forms/users/form_by_user",
+        "https://35b3-179-33-13-68.ngrok-free.app/forms/users/form_by_user",
         {
           method: "GET",
           headers: {
@@ -84,6 +207,9 @@ export default function Home() {
 
       // Cache forms for offline access
       await AsyncStorage.setItem("offline_forms", JSON.stringify(data));
+
+      // NUEVO: Guarda preguntas y respuestas relacionadas de todos los formularios
+      await fetchAndCacheQuestionsAndRelated(data, token);
     } catch (error) {
       console.error("❌ Error al obtener los formularios del usuario:", error);
       Alert.alert(
@@ -145,7 +271,7 @@ export default function Home() {
       setIsOffline(!state.isConnected);
 
       if (state.isConnected) {
-        fetchUserForms();
+        await fetchUserForms();
         fetchUserInfo(); // Fetch user information when online
 
         // Synchronize pending forms when back online
@@ -167,7 +293,7 @@ export default function Home() {
 
             // Submit the form
             const saveResponseRes = await fetch(
-              `https://54b8-179-33-13-68.ngrok-free.app/responses/save-response/${form.id}?mode=offline`,
+              `https://35b3-179-33-13-68.ngrok-free.app/responses/save-response/${form.id}?mode=offline`,
               {
                 method: "POST",
                 headers: requestOptions.headers,
@@ -180,7 +306,7 @@ export default function Home() {
             // Submit each answer
             for (const response of form.responses) {
               await fetch(
-                `https://54b8-179-33-13-68.ngrok-free.app/responses/save-answers`,
+                `https://35b3-179-33-13-68.ngrok-free.app/responses/save-answers`,
                 {
                   method: "POST",
                   headers: requestOptions.headers,
@@ -210,7 +336,9 @@ export default function Home() {
           }
         }
       } else {
-        loadOfflineForms();
+        // SOLO cargar formularios locales, no consultar endpoint
+        await loadOfflineForms();
+        loadUserInfoOffline(); // Cargar info usuario offline
       }
     };
 
@@ -223,146 +351,304 @@ export default function Home() {
     return () => unsubscribe();
   }, []);
 
-  return (
-    <ScrollView style={styles.container}>
-      <Text style={styles.header}>Formatos asignados al usuario: </Text>
-      {userInfo && (
-        <View style={styles.userInfoContainer}>
-          <Text style={styles.userInfoText}>{userInfo.name}</Text>
-          <Text style={styles.userInfoText}>Email: {userInfo.email}</Text>
-          <Text style={styles.userInfoText}>
-            Documento: {userInfo.num_document}
-          </Text>
-          <Text style={styles.userInfoText}>
-            Teléfono: {userInfo.telephone}
-          </Text>
-          <Text style={styles.userInfoText}>
-            Tipo de Usuario: {userInfo.user_type}
-          </Text>
-          <Text style={isOffline ? styles.offlineText : styles.onlineText}>
-            {isOffline ? "Offline ◉" : "Online ◉"}
-          </Text>
-        </View>
-      )}
+  useEffect(() => {
+    if (loading) {
+      Animated.loop(
+        Animated.timing(spinAnim, {
+          toValue: 1,
+          duration: 1200,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+      ).start();
+    } else {
+      spinAnim.stopAnimation();
+      spinAnim.setValue(0);
+    }
+  }, [loading]);
 
-      {loading ? (
-        <View>
-        <Text style={styles.loadingText}>Cargando...</Text>
-        <Logo/>
+  const spin = spinAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "360deg"],
+  });
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.headerCard}>
+        <Text style={styles.headerTitle}>Formatos asignados</Text>
+        {userInfo && (
+          <View style={styles.headerUserRow}>
+            <View style={styles.headerUserCol}>
+              <Text
+                style={styles.headerUserName}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {userInfo.name}
+              </Text>
+              <Text style={styles.headerUserMiniLabel}>Email</Text>
+              <Text
+                style={styles.headerUserMiniValue}
+                numberOfLines={1}
+                ellipsizeMode="middle"
+              >
+                {userInfo.email}
+              </Text>
+              <Text style={styles.headerUserMiniLabel}>Doc</Text>
+              <Text
+                style={styles.headerUserMiniValue}
+                numberOfLines={1}
+                ellipsizeMode="middle"
+              >
+                {userInfo.num_document}
+              </Text>
+            </View>
+            <View style={styles.headerUserCol}>
+              <Text style={styles.headerUserMiniLabel}>Tel</Text>
+              <Text
+                style={styles.headerUserMiniValue}
+                numberOfLines={1}
+                ellipsizeMode="middle"
+              >
+                {userInfo.telephone}
+              </Text>
+              <Text style={styles.headerUserMiniLabel}>Tipo</Text>
+              <Text
+                style={styles.headerUserMiniValue}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {userInfo.user_type}
+              </Text>
+              <Text
+                style={[
+                  styles.headerUserStatus,
+                  isOffline ? styles.offlineText : styles.onlineText,
+                ]}
+              >
+                {isOffline ? "Offline ◉" : "Online ◉"}
+              </Text>
+            </View>
+          </View>
+        )}
+      </View>
+      <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
+        {loading ? (
+          <View style={{ alignItems: "center", marginVertical: 30 }}>
+            <Animated.View style={{ transform: [{ rotate: spin }] }}>
+              <SvgXml xml={spinnerSvg} width={40} height={40} />
+            </Animated.View>
+            <Text style={styles.loadingText}>Cargando...</Text>
+          </View>
+        ) : (
+          <View style={styles.formsScrollWrapper}>
+            <ScrollView
+              style={styles.formsContainer}
+              contentContainerStyle={{ paddingBottom: 10 }}
+              showsVerticalScrollIndicator={true}
+            >
+              {userForms &&
+                userForms.map(
+                  (form) =>
+                    form && (
+                      <TouchableOpacity
+                        key={form.id}
+                        style={styles.formItem}
+                        onPress={() => handleFormPress(form)}
+                      >
+                        <Text
+                          style={styles.formText}
+                          numberOfLines={1}
+                          ellipsizeMode="tail"
+                        >
+                          {form.title}
+                        </Text>
+                        <Text
+                          style={styles.formDescription}
+                          numberOfLines={2}
+                          ellipsizeMode="tail"
+                        >
+                          {form.description}
+                        </Text>
+                      </TouchableOpacity>
+                    )
+                )}
+            </ScrollView>
+          </View>
+        )}
+      </ScrollView>
+      <View style={styles.fixedButtonsContainer}>
+        <View style={styles.buttonsRow}>
+          <TouchableOpacity
+            onPress={handleNavigateToMyForms}
+            style={styles.buttonMini}
+          >
+            <Text style={styles.buttonMiniText}>Diligenciados </Text>
+            <Image
+              source={require("../assets/fact_check_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24.png")}
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={handleNavigateToPendingForms}
+            style={styles.buttonMini}
+          >
+            <Text style={styles.buttonMiniText}>Pendientes </Text>
+            <Image
+              source={require("../assets/sync_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24.png")}
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={handleLogout}
+            style={styles.logoutButtonMini}
+          >
+            <Text style={styles.buttonMiniText}>Salir </Text>
+            <Image
+              source={require("../assets/logout_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24 (1).png")}
+            />
+          </TouchableOpacity>
         </View>
-      ) : (
-        <View style={styles.formsContainer}>
-          <ScrollView>
-            {userForms &&
-              userForms.map(
-                (form) =>
-                  form && ( // Validación para evitar errores si `form` es null o undefined
-                    <TouchableOpacity
-                      key={form.id}
-                      style={styles.formItem}
-                      onPress={() => handleFormPress(form)}
-                    >
-                      <Text style={styles.formText}>Titulo: {form.title}</Text>
-                      <Text style={styles.formDescription}>
-                        Descripción: {form.description}
-                      </Text>
-                    </TouchableOpacity>
-                  )
-              )}
-          </ScrollView>
-        </View>
-      )}
-      <TouchableOpacity onPress={handleNavigateToMyForms} style={styles.button}>
-        <Text style={styles.buttonText}>Ver formatos diligenciados</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        onPress={handleNavigateToPendingForms}
-        style={styles.button}
-      >
-        <Text style={styles.buttonText}>
-          Ver formatos pendientes de envío
-        </Text>
-      </TouchableOpacity>
-      <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-        <Text style={styles.logoutText}>Cerrar Sesión</Text>
-      </TouchableOpacity>
-    </ScrollView>
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: width * 0.05, backgroundColor: "#ffffff" },
-  header: {
-    fontSize: width * 0.06,
-    fontWeight: "bold",
-    marginBottom: height * 0.02,
-  },
-  userInfoContainer: {
-    padding: width * 0.01,
-    backgroundColor: "#EBE5D2FF",
-    borderRadius: width * 0.02,
-    marginBottom: height * 0.02,
-    borderColor: "#000000FF",
+  container: { flex: 1, padding: width * 0.01, backgroundColor: "#f8f8f8" },
+  headerCard: {
+    backgroundColor: "#fff",
+    borderRadius: width * 0.025,
+    padding: width * 0.02,
+    marginBottom: height * 0.005,
+    marginTop: height * 0.005,
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOpacity: 0.06,
+    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+    borderColor: "#e0e0e0",
     borderWidth: 1,
-    alignItems: "center",
-    
+    minHeight: height * 0.11,
+    justifyContent: "center",
   },
-  userInfoText: {
-    fontSize: 15,
-    color: "#333",
-    marginBottom: height * 0.01,
-    fontWeight: "bold"
+  headerTitle: {
+    fontSize: width * 0.045,
+    fontWeight: "bold",
+    color: "#2563eb",
+    marginBottom: 2,
+    textAlign: "center",
+  },
+  headerUserRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: width * 0.02,
+  },
+  headerUserCol: {
+    flex: 1,
+    minWidth: width * 0.22,
+    maxWidth: width * 0.5,
+    paddingRight: width * 0.01,
+  },
+  headerUserName: {
+    fontSize: width * 0.038,
+    fontWeight: "bold",
+    color: "#222",
+    marginBottom: 1,
+  },
+  headerUserMiniLabel: {
+    fontSize: width * 0.028,
+    color: "#888",
+    fontWeight: "bold",
+    marginTop: 1,
+  },
+  headerUserMiniValue: {
+    fontSize: width * 0.031,
+    color: "#444",
+    marginBottom: 1,
+  },
+  headerUserStatus: {
+    fontSize: width * 0.032,
+    fontWeight: "bold",
+    marginTop: 2,
   },
   onlineText: {
-    fontSize: width * 0.053,
     color: "green",
-    fontWeight: "bold",
-    marginBottom: height * 0.01,
   },
   offlineText: {
-    fontSize: width * 0.045,
     color: "red",
-    fontWeight: "bold",
-    marginBottom: height * 0.01,
   },
   loadingText: {
-    fontSize: width * 0.05,
+    fontSize: width * 0.045,
     textAlign: "center",
     marginVertical: height * 0.02,
   },
+  formsScrollWrapper: {
+    flex: 1,
+    maxHeight: height * 0.5,
+    marginBottom: height * 0.01,
+  },
   formsContainer: {
-    maxHeight: height * 0.5, // Limit height to half the screen
-    marginBottom: height * 0.02,
-    
+    flexGrow: 0,
+    maxHeight: height * 0.5,
   },
   formItem: {
-    padding: width * 0.04,
+    padding: width * 0.03,
     backgroundColor: "#f0f0f0",
-    borderRadius: width * 0.02,
-    marginBottom: height * 0.02,
-    borderColor: "#000000FF",
-    borderWidth: 1
+    borderRadius: width * 0.018,
+    marginBottom: height * 0.012,
+    borderColor: "#00000022",
+    borderWidth: 1,
   },
-  formText: { fontSize: width * 0.05, fontWeight: "bold" },
-  formDescription: { fontSize: width * 0.04, color: "#555" },
-  button: {
-    marginTop: height * 0.02,
-    padding: height * 0.02,
+  formText: {
+    fontSize: width * 0.042,
+    fontWeight: "bold",
+    color: "#222",
+  },
+  formDescription: {
+    fontSize: width * 0.032,
+    color: "#555",
+  },
+  fixedButtonsContainer: {
+    backgroundColor: "#fff",
+    paddingTop: 4,
+    paddingBottom: 4,
+    borderTopWidth: 1,
+    borderColor: "#eee",
+  },
+  buttonsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: width * 0.02,
+    marginHorizontal: width * 0.01,
+  },
+  buttonMini: {
+    flex: 1,
+    marginHorizontal: width * 0.01,
+    paddingVertical: height * 0.012,
     backgroundColor: "#2563eb",
-    borderRadius: width * 0.02,
+    borderRadius: width * 0.018,
     alignItems: "center",
-    borderColor: "#000000FF",
+    borderColor: "#00000022",
     borderWidth: 1,
+    flexDirection: "row",
+    justifyContent: "center",
   },
-  buttonText: { color: "white", fontWeight: "bold", fontSize: width * 0.045 },
-  logoutButton: {
-    marginTop: height * 0.03,
-    padding: height * 0.02,
+  buttonMiniText: {
+    color: "white",
+    fontWeight: "bold",
+    fontSize: width * 0.038,
+  },
+  logoutButtonMini: {
+    flex: 1,
+    marginHorizontal: width * 0.01,
+    paddingVertical: height * 0.012,
     backgroundColor: "red",
-    borderRadius: width * 0.02,
+    borderRadius: width * 0.018,
     alignItems: "center",
-    borderColor: "#000000FF",
+    borderColor: "#00000022",
     borderWidth: 1,
+    flexDirection: "row",
+    justifyContent: "center",
   },
-  logoutText: { color: "white", fontWeight: "bold", fontSize: width * 0.045 },
 });

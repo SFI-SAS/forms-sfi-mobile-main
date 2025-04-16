@@ -59,7 +59,7 @@ export function Main() {
 
         if (savedToken && isLoggedOut !== "true") {
           const responseUser = await fetch(
-            `https://54b8-179-33-13-68.ngrok-free.app/auth/validate-token`,
+            `https://35b3-179-33-13-68.ngrok-free.app/auth/validate-token`,
             {
               method: "GET",
               headers: { Authorization: `Bearer ${savedToken}` },
@@ -131,7 +131,7 @@ export function Main() {
 
       // Primera petición: obtener token
       const response = await fetch(
-        `https://54b8-179-33-13-68.ngrok-free.app/auth/token`,
+        `https://35b3-179-33-13-68.ngrok-free.app/auth/token`,
         {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -166,7 +166,7 @@ export function Main() {
 
       // Validar el token usando GET
       const responseUser = await fetch(
-        `https://54b8-179-33-13-68.ngrok-free.app/auth/validate-token`,
+        `https://35b3-179-33-13-68.ngrok-free.app/auth/validate-token`,
         {
           method: "GET",
           headers: { Authorization: `Bearer ${token}` },

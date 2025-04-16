@@ -11,6 +11,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
+import { HomeIcon } from "./Icons";
 
 export default function MyForms() {
   const [submittedForms, setSubmittedForms] = useState([]);
@@ -40,7 +41,7 @@ export default function MyForms() {
       }
 
       const response = await fetch(
-        `https://54b8-179-33-13-68.ngrok-free.app/forms/users/completed_forms`,
+        `https://35b3-179-33-13-68.ngrok-free.app/forms/users/completed_forms`,
         {
           method: "GET",
           headers: { Authorization: `Bearer ${accessToken}` },
@@ -86,7 +87,12 @@ export default function MyForms() {
         style={styles.backButton}
         onPress={() => router.push("/home")}
       >
-        <Text style={styles.backButtonText}>Volver al Home</Text>
+        <Text style={styles.backButtonText}>
+          
+        <HomeIcon color={"white"} />
+          {"  "}
+        Home
+        </Text>
       </TouchableOpacity>
     </ScrollView>
   );
@@ -110,6 +116,7 @@ const styles = StyleSheet.create({
     backgroundColor: "blue",
     borderRadius: 5,
     alignItems: "center",
+    
   },
   backButtonText: {
     color: "white",

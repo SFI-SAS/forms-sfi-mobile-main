@@ -9,6 +9,8 @@ import {
   ScrollView,
   BackHandler,
   Dimensions, // Import Dimensions
+  Animated, // Import Animated
+  Easing, // Import Easing
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -17,8 +19,18 @@ import { Picker } from "@react-native-picker/picker";
 import NetInfo from "@react-native-community/netinfo";
 import DateTimePicker from "@react-native-community/datetimepicker"; // Import DateTimePicker
 import { useFocusEffect } from "@react-navigation/native";
-
+import { SvgXml } from "react-native-svg";
+import { HomeIcon } from "./Icons"; // Adjust the import path as necessary
 const { width, height } = Dimensions.get("window"); // Get screen dimensions
+
+const QUESTIONS_KEY = "offline_questions";
+const FORMS_METADATA_KEY = "offline_forms_metadata";
+const RELATED_ANSWERS_KEY = "offline_related_answers";
+
+// Copia el SVG como string
+const spinnerSvg = `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><path fill="#000000FF" stroke="#EE4138FF" stroke-width="15" transform-origin="center" d="m148 84.7 13.8-8-10-17.3-13.8 8a50 50 0 0 0-27.4-15.9v-16h-20v16A50 50 0 0 0 63 67.4l-13.8-8-10 17.3 13.8 8a50 50 0 0 0 0 31.7l-13.8 8 10 17.3 13.8-8a50 50 0 0 0 27.5 15.9v16h20v-16a50 50 0 0 0 27.4-15.9l13.8 8 10-17.3-13.8-8a50 50 0 0 0 0-31.7Zm-47.5 50.8a35 35 0 1 1 0-70 35 35 0 0 1 0 70Z"><animateTransform type="rotate" attributeName="transform" calcMode="spline" dur="1.8" values="0;120" keyTimes="0;1" keySplines="0 0 1 1" repeatCount="indefinite"></animateTransform></path></svg>
+`;
 
 export default function FormatScreen() {
   const router = useRouter();
@@ -33,115 +45,81 @@ export default function FormatScreen() {
   const [tableAnswersState, setTableAnswersState] = useState({});
   const [selectedAnswers, setSelectedAnswers] = useState({}); // Initialize selectedAnswers as an empty object
   const [datePickerVisible, setDatePickerVisible] = useState({}); // State to manage visibility of DateTimePicker
+  const [errors, setErrors] = useState({});
+  const [errorMessage, setErrorMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [spinAnim] = useState(new Animated.Value(0));
 
   useFocusEffect(
     React.useCallback(() => {
       const disableBack = () => true; // Disable hardware back button
-      BackHandler.addEventListener("hardwareBackPress", disableBack);
-
       return () => {
         BackHandler.removeEventListener("hardwareBackPress", disableBack);
       };
     }, [])
   );
 
-  const fetchQuestionsByFormId = async (formId) => {
+  // NUEVO: Cargar preguntas y respuestas relacionadas SOLO de AsyncStorage
+  const loadAllOfflineData = async (formId) => {
     try {
-      const token = await AsyncStorage.getItem("authToken");
-      if (!token) throw new Error("No authentication token found");
-
-      const response = await fetch(
-        `https://54b8-179-33-13-68.ngrok-free.app/forms/${formId}`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
-
-      const data = await response.json();
-      console.log("📋 Respuesta del endpoint para preguntas:", data.questions); // Debugger
-
-      if (!response.ok)
-        throw new Error(data.detail || "Error fetching questions");
-
-      // Adjust options for `multiple_choice` and `one_choice` question types
-      const adjustedQuestions = data.questions.map((question) => {
-        if (
-          (question.question_type === "multiple_choice" ||
-            question.question_type === "one_choice") &&
-          Array.isArray(question.options)
-        ) {
-          return {
-            ...question,
-            options: question.options.map((option) => option.option_text), // Extract `option_text`
-          };
-        }
-        return question;
-      });
-
-      setQuestions(adjustedQuestions);
-
-      // Save questions and metadata for offline use
-      const storedQuestions = await AsyncStorage.getItem("offline_questions");
+      // Preguntas
+      const storedQuestions = await AsyncStorage.getItem(QUESTIONS_KEY);
       const offlineQuestions = storedQuestions
         ? JSON.parse(storedQuestions)
         : {};
-
-      offlineQuestions[formId] = adjustedQuestions;
-      await AsyncStorage.setItem(
-        "offline_questions",
-        JSON.stringify(offlineQuestions)
-      );
-
-      // Save form metadata separately
-      const storedForms = await AsyncStorage.getItem("offline_forms");
-      const offlineForms = storedForms ? JSON.parse(storedForms) : {};
-
-      offlineForms[formId] = {
-        title: data.title,
-        description: data.description,
-      };
-      await AsyncStorage.setItem("offline_forms", JSON.stringify(offlineForms));
-
-      console.log("✅ Preguntas y metadatos guardados en AsyncStorage.");
-    } catch (error) {
-      console.error("❌ Error al obtener las preguntas:", error.message);
-      Alert.alert("Error", "No se pudieron cargar las preguntas.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadOfflineQuestions = async (formId) => {
-    try {
-      const storedQuestions = await AsyncStorage.getItem("offline_questions");
-      const offlineQuestions = storedQuestions
-        ? JSON.parse(storedQuestions)
-        : {};
-      console.log(
-        "📂 Preguntas cargadas desde AsyncStorage:",
-        offlineQuestions
-      );
-
-      if (offlineQuestions[formId]) {
-        setQuestions(offlineQuestions[formId]);
-      } else {
+      if (!offlineQuestions[formId]) {
         Alert.alert(
           "Modo Offline",
           "No hay preguntas guardadas para este formulario."
         );
+        setLoading(false);
+        return;
       }
+      setQuestions(offlineQuestions[formId]);
+
+      // Respuestas relacionadas para preguntas tipo tabla
+      const storedRelated = await AsyncStorage.getItem(RELATED_ANSWERS_KEY);
+      const offlineRelated = storedRelated ? JSON.parse(storedRelated) : {};
+      // Carga para cada pregunta tipo tabla
+      const tableAnswersObj = {};
+      offlineQuestions[formId].forEach((q) => {
+        if (q.question_type === "table") {
+          const rel = offlineRelated[q.id];
+          if (rel) {
+            if (rel.source === "pregunta_relacionada") {
+              tableAnswersObj[q.id] = Array.isArray(rel.respuestas)
+                ? rel.respuestas.map((item) => item.respuesta)
+                : [];
+            } else if (rel.source === "usuarios") {
+              tableAnswersObj[q.id] = Array.isArray(rel.data) ? rel.data : [];
+            } else {
+              tableAnswersObj[q.id] = [];
+            }
+          } else {
+            tableAnswersObj[q.id] = [];
+          }
+        }
+      });
+      setTableAnswers(tableAnswersObj);
     } catch (error) {
-      console.error("❌ Error cargando preguntas offline:", error);
+      console.error("❌ Error cargando datos offline:", error);
+      Alert.alert("Error", "No se pudieron cargar los datos offline.");
     } finally {
       setLoading(false);
     }
   };
 
+  useEffect(() => {
+    if (id) {
+      loadAllOfflineData(id);
+    }
+  }, [id]);
+
   const handleAnswerChange = (questionId, value) => {
+    console.log(
+      `✏️ Capturando respuesta para pregunta ID ${questionId}:`,
+      value
+    );
     setAnswers((prev) => ({ ...prev, [questionId]: value }));
 
     // Save answers to AsyncStorage
@@ -149,6 +127,10 @@ export default function FormatScreen() {
       .then((storedAnswers) => {
         const offlineAnswers = storedAnswers ? JSON.parse(storedAnswers) : {};
         offlineAnswers[questionId] = value;
+        console.log(
+          `💾 Guardando respuesta en AsyncStorage para pregunta ID ${questionId}:`,
+          value
+        );
         return AsyncStorage.setItem(
           "offline_answers",
           JSON.stringify(offlineAnswers)
@@ -186,88 +168,6 @@ export default function FormatScreen() {
     }
   };
 
-  const fetchRelatedAnswers = async (questionId) => {
-    try {
-      const token = await AsyncStorage.getItem("authToken");
-      if (!token) throw new Error("No authentication token found");
-
-      const response = await fetch(
-        `https://54b8-179-33-13-68.ngrok-free.app/questions/question-table-relation/answers/${questionId}`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`Error HTTP! Estado: ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      // Handle "pregunta_relacionada" and "usuarios" sources
-      if (data.source === "pregunta_relacionada") {
-        setTableAnswers((prev) => ({
-          ...prev,
-          [questionId]: Array.isArray(data.respuestas)
-            ? data.respuestas.map((item) => item.respuesta) // Extract "respuesta" for display
-            : [],
-        }));
-      } else if (data.source === "usuarios") {
-        setTableAnswers((prev) => ({
-          ...prev,
-          [questionId]: Array.isArray(data.data) ? data.data : [], // Store the full user objects
-        }));
-      }
-
-      // Save related answers to AsyncStorage for offline use
-      const storedAnswers = await AsyncStorage.getItem("offline_answers");
-      const offlineAnswers = storedAnswers ? JSON.parse(storedAnswers) : {};
-      offlineAnswers[questionId] = data;
-      await AsyncStorage.setItem(
-        "offline_answers",
-        JSON.stringify(offlineAnswers)
-      );
-
-      console.log("📋 Respuestas relacionadas para pregunta tipo table:", data);
-    } catch (error) {
-      console.error("❌ Error obteniendo respuestas relacionadas:", error);
-      setTableAnswers((prev) => ({
-        ...prev,
-        [questionId]: [], // On error, avoid invalid values
-      }));
-    }
-  };
-
-  const loadOfflineAnswers = async (questionId) => {
-    try {
-      const storedAnswers = await AsyncStorage.getItem("offline_answers");
-      const offlineAnswers = storedAnswers ? JSON.parse(storedAnswers) : {};
-      if (offlineAnswers[questionId]) {
-        const data = offlineAnswers[questionId];
-        if (data.source === "pregunta_relacionada") {
-          setTableAnswers((prev) => ({
-            ...prev,
-            [questionId]: Array.isArray(data.respuestas)
-              ? data.respuestas.map((item) => item.respuesta)
-              : [],
-          }));
-        } else if (data.source === "usuarios") {
-          setTableAnswers((prev) => ({
-            ...prev,
-            [questionId]: Array.isArray(data.data) ? data.data : [],
-          }));
-        }
-      } else {
-        console.warn("⚠️ No hay respuestas guardadas para esta pregunta.");
-      }
-    } catch (error) {
-      console.error("❌ Error cargando respuestas offline:", error);
-    }
-  };
-
   const handleAddField = (questionId) => {
     setAnswers((prev) => ({
       ...prev,
@@ -296,6 +196,10 @@ export default function FormatScreen() {
   };
 
   const handleTextChange = (questionId, index, value) => {
+    console.log(
+      `✏️ Actualizando respuesta ${index + 1} para pregunta ID ${questionId}:`,
+      value
+    );
     setTextAnswers((prev) => {
       const updatedAnswers = [...(prev[questionId] || [])];
       updatedAnswers[index] = value;
@@ -304,6 +208,7 @@ export default function FormatScreen() {
   };
 
   const handleAddTextField = (questionId) => {
+    console.log(`➕ Agregando nuevo campo para pregunta ID ${questionId}`);
     setTextAnswers((prev) => ({
       ...prev,
       [questionId]: [...(prev[questionId] || []), ""],
@@ -318,6 +223,10 @@ export default function FormatScreen() {
   };
 
   const handleTableSelectChange = (questionId, index, value) => {
+    console.log(
+      `✏️ Actualizando respuesta ${index + 1} para pregunta tabla ID ${questionId}:`,
+      value
+    );
     setTableAnswersState((prev) => {
       const updatedAnswers = [...(prev[questionId] || [])];
       updatedAnswers[index] = value;
@@ -326,6 +235,9 @@ export default function FormatScreen() {
   };
 
   const handleAddTableAnswer = (questionId) => {
+    console.log(
+      `➕ Agregando nuevo campo para pregunta tabla ID ${questionId}`
+    );
     setTableAnswersState((prev) => ({
       ...prev,
       [questionId]: [...(prev[questionId] || []), ""],
@@ -346,19 +258,6 @@ export default function FormatScreen() {
     }
     setDatePickerVisible((prev) => ({ ...prev, [questionId]: false })); // Hide the DateTimePicker
   };
-
-  useEffect(() => {
-    if (id) {
-      NetInfo.fetch().then((state) => {
-        if (state.isConnected) {
-          fetchQuestionsByFormId(id);
-        } else {
-          loadOfflineQuestions(id);
-          loadOfflineAnswers();
-        }
-      });
-    }
-  }, [id]);
 
   useEffect(() => {
     // Fetch related answers for table questions
@@ -391,8 +290,74 @@ export default function FormatScreen() {
     setTableAnswersState(initialTableAnswers);
   }, [questions]);
 
+  useEffect(() => {
+    if (submitting) {
+      Animated.loop(
+        Animated.timing(spinAnim, {
+          toValue: 1,
+          duration: 1200,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+      ).start();
+    } else {
+      spinAnim.stopAnimation();
+      spinAnim.setValue(0);
+    }
+  }, [submitting]);
+
+  const spin = spinAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "360deg"],
+  });
+
+  const sendAnswers = async (answers, responseId, requestOptions) => {
+    const results = [];
+    // Simplemente recorre todas las respuestas y envía cada una como un objeto independiente,
+    // aunque tengan el mismo response_id y question_id.
+    for (let i = 0; i < answers.length; i++) {
+      const answer = answers[i];
+      try {
+        const responseData = {
+          response_id: responseId,
+          question_id: answer.question_id,
+          answer_text: answer.answer_text,
+          file_path: answer.file_path || "",
+        };
+
+        console.log(
+          `📤 Enviando respuesta ${i + 1}/${answers.length}`,
+          responseData
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        const res = await fetch(
+          `https://35b3-179-33-13-68.ngrok-free.app/responses/save-answers`,
+          {
+            method: "POST",
+            headers: requestOptions.headers,
+            body: JSON.stringify(responseData),
+          }
+        );
+
+        const responseJson = await res.json();
+
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        console.log(`✅ Respuesta ${i + 1} guardada:`, responseJson);
+        results.push(responseJson);
+      } catch (error) {
+        console.error(`❌ Error en respuesta ${i + 1}:`, error);
+        results.push({ error: true, message: error.message });
+      }
+    }
+    return results;
+  };
+
   const handleSubmitForm = async () => {
-    console.log("📤 Enviando formulario ID:", id);
+    console.log("📤 Iniciando envío de formulario ID:", id);
+    setSubmitting(true);
     try {
       const token = await AsyncStorage.getItem("authToken");
       if (!token) throw new Error("No authentication token found");
@@ -401,105 +366,165 @@ export default function FormatScreen() {
         state.isConnected ? "online" : "offline"
       );
 
-      if (mode === "offline") {
-        Alert.alert(
-          "Modo Offline",
-          "El formulario no puede ser enviado en modo offline."
-        );
-        return;
-      }
+      // Preparar todas las respuestas
+      const allAnswers = [];
+      console.log("📋 Preparando respuestas para cada pregunta...");
 
-      const requestOptions = {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-      };
-
-      // Iterate through each question and submit the form for each value
       for (const question of questions) {
         const questionId = question.id;
-        let valuesToSubmit = [];
 
+        // Text (varios campos)
         if (
           question.question_type === "text" &&
           textAnswers[questionId]?.length > 0
         ) {
-          valuesToSubmit = textAnswers[questionId].filter(
+          const validAnswers = textAnswers[questionId].filter(
             (answer) => answer.trim() !== ""
           );
-        } else if (
+          validAnswers.forEach((answer) => {
+            allAnswers.push({
+              question_id: questionId,
+              answer_text: answer,
+              file_path: "",
+            });
+          });
+        }
+        // Table (varios campos)
+        else if (
           question.question_type === "table" &&
           tableAnswersState[questionId]?.length > 0
         ) {
-          valuesToSubmit = tableAnswersState[questionId].filter(
+          const validAnswers = tableAnswersState[questionId].filter(
             (answer) => answer.trim() !== ""
           );
-        } else if (question.question_type === "file") {
-          const filePath = answers[questionId] || "";
-          if (filePath) {
-            valuesToSubmit = [filePath];
-          }
-        } else if (
-          question.question_type === "date" &&
-          answers[questionId]?.length > 0
-        ) {
-          valuesToSubmit = [answers[questionId]];
-        } else if (
-          question.question_type === "multiple_choice" &&
-          selectedAnswers[questionId]?.length > 0
-        ) {
-          valuesToSubmit = selectedAnswers[questionId];
-        } else if (
-          question.question_type === "one_choice" &&
-          selectedAnswers[questionId]?.length > 0
-        ) {
-          valuesToSubmit = [selectedAnswers[questionId][0]];
+          validAnswers.forEach((answer) => {
+            allAnswers.push({
+              question_id: questionId,
+              answer_text: answer,
+              file_path: "",
+            });
+          });
         }
-
-        // Submit the form for each value of the current question
-        for (const value of valuesToSubmit) {
-          try {
-            // Save the response and get the response ID
-            const saveResponseRes = await fetch(
-              `https://54b8-179-33-13-68.ngrok-free.app/responses/save-response/${id}`,
-              {
-                method: "POST",
-                headers: requestOptions.headers,
-                body: JSON.stringify({ mode }),
-              }
-            );
-
-            const saveResponseData = await saveResponseRes.json();
-            console.log("✅ Respuesta guardada:", saveResponseData);
-            const responseId = saveResponseData.response_id;
-
-            // Submit the value as a new answer
-            const res = await fetch(
-              `https://54b8-179-33-13-68.ngrok-free.app/responses/save-answers`,
-              {
-                method: "POST",
-                headers: requestOptions.headers,
-                body: JSON.stringify({
-                  response_id: responseId,
-                  question_id: questionId,
-                  answer_text: question.question_type === "file" ? "" : value,
-                  file_path: question.question_type === "file" ? value : "",
-                }),
-              }
-            );
-            console.log("✅ Respuesta enviada:", await res.json());
-          } catch (error) {
-            console.error("❌ Error en la solicitud:", error);
-          }
+        // Multiple choice
+        else if (
+          question.question_type === "multiple_choice" &&
+          Array.isArray(answers[questionId]) &&
+          answers[questionId].length > 0
+        ) {
+          answers[questionId].forEach((option) => {
+            allAnswers.push({
+              question_id: questionId,
+              answer_text: option,
+              file_path: "",
+            });
+          });
+        }
+        // One choice
+        else if (
+          question.question_type === "one_choice" &&
+          answers[questionId]
+        ) {
+          allAnswers.push({
+            question_id: questionId,
+            answer_text: answers[questionId],
+            file_path: "",
+          });
+        }
+        // File
+        else if (question.question_type === "file" && answers[questionId]) {
+          allAnswers.push({
+            question_id: questionId,
+            answer_text: "",
+            file_path: answers[questionId],
+          });
+        }
+        // Date
+        else if (question.question_type === "date" && answers[questionId]) {
+          allAnswers.push({
+            question_id: questionId,
+            answer_text: answers[questionId],
+            file_path: "",
+          });
+        }
+        // Number y otros tipos simples
+        else if (
+          question.question_type === "number" &&
+          answers[questionId]?.[0]
+        ) {
+          allAnswers.push({
+            question_id: questionId,
+            answer_text: answers[questionId][0],
+            file_path: "",
+          });
         }
       }
 
-      Alert.alert("Éxito", "Respuestas enviadas correctamente.");
+      if (allAnswers.length === 0) {
+        Alert.alert("Error", "No hay respuestas para enviar");
+        return;
+      }
+
+      if (mode === "offline") {
+        // Guardar en pending_forms
+        const storedPending = await AsyncStorage.getItem("pending_forms");
+        const pendingForms = storedPending ? JSON.parse(storedPending) : [];
+        pendingForms.push({
+          id,
+          responses: allAnswers,
+          timestamp: Date.now(),
+        });
+        await AsyncStorage.setItem(
+          "pending_forms",
+          JSON.stringify(pendingForms)
+        );
+        Alert.alert(
+          "Guardado Offline",
+          "El formulario se guardó para envío automático cuando tengas conexión."
+        );
+        setSubmitting(false);
+        router.back();
+        return;
+      }
+
+      // Log de depuración con todas las respuestas antes de enviar
+      console.log("📝 Respuestas a enviar:", allAnswers);
+
+      // Crear registro de respuesta y obtener response_id
+      console.log("📡 Creando registro de respuesta...");
+      const saveResponseRes = await fetch(
+        `https://35b3-179-33-13-68.ngrok-free.app/responses/save-response/${id}`,
+        {
+          method: "POST",
+          headers: requestOptions.headers,
+          body: JSON.stringify({ mode }),
+        }
+      );
+
+      const saveResponseData = await saveResponseRes.json();
+      console.log("✅ Registro de respuesta creado:", saveResponseData);
+      const responseId = saveResponseData.response_id;
+
+      if (!responseId) {
+        throw new Error("No se pudo obtener el ID de respuesta");
+      }
+
+      // Enviar todas las respuestas con el response_id
+      console.log("📤 Enviando respuestas de forma secuencial...");
+      const results = await sendAnswers(allAnswers, responseId, requestOptions);
+
+      // Verificar si hubo errores
+      const hasErrors = results.some((result) => result.error);
+      if (hasErrors) {
+        throw new Error("Algunas respuestas no pudieron ser guardadas");
+      }
+
+      Alert.alert("Éxito ✅", "Formulario enviado correctamente");
       router.back();
     } catch (error) {
-      console.error("❌ Error al guardar el formulario:", error);
-      Alert.alert("Error", "No se pudo guardar el formulario.");
+      console.error("❌ Error en el proceso de envío:", error);
+      Alert.alert("Error", "No se pudo completar el envío del formulario");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -747,14 +772,32 @@ export default function FormatScreen() {
           )}
         </ScrollView>
       </View>
-      <TouchableOpacity style={styles.submitButton} onPress={handleSubmitForm}>
-        <Text style={styles.submitButtonText}>Guardar Formulario</Text>
+      <TouchableOpacity
+        style={styles.submitButton}
+        onPress={submitting ? null : handleSubmitForm}
+        disabled={submitting}
+      >
+        {submitting ? (
+          <>
+            <Animated.View style={{ transform: [{ rotate: spin }] }}>
+              <SvgXml xml={spinnerSvg} width={40} height={40} />
+            </Animated.View>
+            <Text style={styles.submitButtonText}>Enviando...</Text>
+          </>
+        ) : (
+          <Text style={styles.submitButtonText}>Guardar Formulario</Text>
+        )}
       </TouchableOpacity>
       <TouchableOpacity
         style={styles.backButton}
         onPress={() => router.push("/home")}
+        disabled={submitting}
       >
-        <Text style={styles.backButtonText}>Volver al Home</Text>
+        <Text style={styles.backButtonText}>
+          <HomeIcon color={"white"} />
+          {"  "}
+          Home
+        </Text>
       </TouchableOpacity>
     </View>
   );
@@ -947,5 +990,10 @@ const styles = StyleSheet.create({
     color: "white",
     fontWeight: "bold",
     fontSize: width * 0.045,
+  },
+  spinnerContainer: {
+    width: 40,
+    height: 40,
+    backgroundColor: "transparent",
   },
 });

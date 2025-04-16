@@ -13,6 +13,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router"; // Add this import
+import { HomeIcon } from "./Icons"; // Adjust the import path as necessary
 
 const { width, height } = Dimensions.get("window"); // Get screen dimensions
 
@@ -86,7 +87,7 @@ export default function PendingForms() {
 
       // Submit the form
       const saveResponseRes = await fetch(
-        `https://54b8-179-33-13-68.ngrok-free.app/responses/save-response/${form.id}?mode=offline`,
+        `https://35b3-179-33-13-68.ngrok-free.app/responses/save-response/${form.id}?mode=offline`,
         {
           method: "POST",
           headers: requestOptions.headers,
@@ -99,7 +100,7 @@ export default function PendingForms() {
       // Submit each answer
       for (const response of form.responses) {
         await fetch(
-          `https://54b8-179-33-13-68.ngrok-free.app/responses/save-answers`,
+          `https://35b3-179-33-13-68.ngrok-free.app/responses/save-answers`,
           {
             method: "POST",
             headers: requestOptions.headers,
@@ -147,7 +148,9 @@ export default function PendingForms() {
         style={styles.backButton}
         onPress={() => router.push("/home")}
       >
-        <Text style={styles.backButtonText}>Volver al Home</Text>
+        <HomeIcon color={"white"} />
+        {"  "}
+        <Text style={styles.backButtonText}>Home</Text>
       </TouchableOpacity>
     </ScrollView>
   );
