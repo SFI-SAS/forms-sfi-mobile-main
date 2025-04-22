@@ -493,6 +493,14 @@ export default function FormatScreen() {
       // Log de depuración con todas las respuestas antes de enviar
       console.log("📝 Respuestas a enviar:", allAnswers);
 
+      // Definir requestOptions aquí
+      const requestOptions = {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      };
+
       // Crear registro de respuesta y obtener response_id
       console.log("📡 Creando registro de respuesta...");
       const saveResponseRes = await fetch(
