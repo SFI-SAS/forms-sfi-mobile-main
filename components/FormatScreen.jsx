@@ -1106,58 +1106,59 @@ export default function FormatScreen() {
           )}
         </View>
         {/* Mostrar grupos de respuestas enviadas en modo progresivo */}
-        {isRepeatedQuestions.length > 1 && submittedRepeatedGroups.length > 0 && (
-          <View style={styles.submittedGroupsContainer}>
-            <Text style={styles.submittedGroupsTitle}>
-              Formularios diligenciados:
-            </Text>
-            <View style={{ maxHeight: height * 0.25 }}>
-              <ScrollView
-                contentContainerStyle={{ paddingBottom: 10 }}
-                nestedScrollEnabled
-              >
-                {submittedRepeatedGroups.map((group, idx) => (
-                  <View key={idx} style={styles.submittedGroupCard}>
-                    <Text style={styles.submittedGroupHeader}>
-                      Formulario diligenciado #{idx + 1}
-                    </Text>
-                    {isRepeatedQuestions.map((q) => (
-                      <View key={q.id} style={styles.submittedGroupRow}>
-                        <Text style={styles.submittedGroupQuestion}>
-                          {q.question_text}:
-                        </Text>
-                        <View style={styles.submittedGroupAnswerBox}>
-                          {Array.isArray(group[q.id])
-                            ? group[q.id]
-                                .filter((ans) => ans && ans !== "")
-                                .map((ans, i) => (
+        {isRepeatedQuestions.length > 1 &&
+          submittedRepeatedGroups.length > 0 && (
+            <View style={styles.submittedGroupsContainer}>
+              <Text style={styles.submittedGroupsTitle}>
+                Formularios diligenciados:
+              </Text>
+              <View style={{ maxHeight: height * 0.25 }}>
+                <ScrollView
+                  contentContainerStyle={{ paddingBottom: 10 }}
+                  nestedScrollEnabled
+                >
+                  {submittedRepeatedGroups.map((group, idx) => (
+                    <View key={idx} style={styles.submittedGroupCard}>
+                      <Text style={styles.submittedGroupHeader}>
+                        Formulario diligenciado #{idx + 1}
+                      </Text>
+                      {isRepeatedQuestions.map((q) => (
+                        <View key={q.id} style={styles.submittedGroupRow}>
+                          <Text style={styles.submittedGroupQuestion}>
+                            {q.question_text}:
+                          </Text>
+                          <View style={styles.submittedGroupAnswerBox}>
+                            {Array.isArray(group[q.id])
+                              ? group[q.id]
+                                  .filter((ans) => ans && ans !== "")
+                                  .map((ans, i) => (
+                                    <Text
+                                      key={i}
+                                      style={styles.submittedGroupAnswer}
+                                      numberOfLines={1}
+                                      ellipsizeMode="tail"
+                                    >
+                                      {ans}
+                                    </Text>
+                                  ))
+                              : group[q.id] && (
                                   <Text
-                                    key={i}
                                     style={styles.submittedGroupAnswer}
                                     numberOfLines={1}
                                     ellipsizeMode="tail"
                                   >
-                                    {ans}
+                                    {group[q.id]}
                                   </Text>
-                                ))
-                            : group[q.id] && (
-                                <Text
-                                  style={styles.submittedGroupAnswer}
-                                  numberOfLines={1}
-                                  ellipsizeMode="tail"
-                                >
-                                  {group[q.id]}
-                                </Text>
-                              )}
+                                )}
+                          </View>
                         </View>
-                      </View>
-                    ))}
-                  </View>
-                ))}
-              </ScrollView>
+                      ))}
+                    </View>
+                  ))}
+                </ScrollView>
+              </View>
             </View>
-          </View>
-        )}
+          )}
         {/* Botón de envío progresivo si hay más de una pregunta is_repeated */}
         {isRepeatedQuestions.length > 1 ? (
           <TouchableOpacity
