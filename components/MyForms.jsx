@@ -41,7 +41,7 @@ export default function MyForms() {
       }
 
       const response = await fetch(
-        `https://35b3-179-33-13-68.ngrok-free.app/forms/users/completed_forms`,
+        `https://ab11-179-33-13-68.ngrok-free.app/forms/users/completed_forms`,
         {
           method: "GET",
           headers: { Authorization: `Bearer ${accessToken}` },
@@ -88,10 +88,9 @@ export default function MyForms() {
         onPress={() => router.push("/home")}
       >
         <Text style={styles.backButtonText}>
-          
-        <HomeIcon color={"white"} />
+          <HomeIcon color={"white"} />
           {"  "}
-        Home
+          Home
         </Text>
       </TouchableOpacity>
     </ScrollView>
@@ -116,7 +115,6 @@ const styles = StyleSheet.create({
     backgroundColor: "blue",
     borderRadius: 5,
     alignItems: "center",
-    
   },
   backButtonText: {
     color: "white",
