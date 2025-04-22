@@ -53,6 +53,7 @@ export default function FormatScreen() {
   const [firstNonRepeatedAnswers, setFirstNonRepeatedAnswers] = useState({});
   const [isRepeatedQuestions, setIsRepeatedQuestions] = useState([]);
   const [singleRepeated, setSingleRepeated] = useState(false);
+  const [submittedRepeatedGroups, setSubmittedRepeatedGroups] = useState([]); // Nuevo: almacena grupos enviados
 
   useFocusEffect(
     React.useCallback(() => {
@@ -821,6 +822,20 @@ export default function FormatScreen() {
       // Limpiar solo los campos is_repeated
       clearRepeatedAnswers();
 
+      // Guardar grupo de respuestas enviadas localmente para mostrar debajo
+      const group = {};
+      for (const question of isRepeatedQuestions) {
+        const questionId = question.id;
+        if (question.question_type === "text") {
+          group[questionId] = [...(textAnswers[questionId] || [])];
+        } else if (question.question_type === "table") {
+          group[questionId] = [...(tableAnswersState[questionId] || [])];
+        } else {
+          group[questionId] = answers[questionId];
+        }
+      }
+      setSubmittedRepeatedGroups((prev) => [...prev, group]);
+
       Alert.alert(
         "Éxito ✅",
         "Respuestas enviadas. Puedes seguir agregando más."
@@ -835,16 +850,19 @@ export default function FormatScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>{title.toLocaleUpperCase()}</Text>
-      <Text style={styles.subHeader}>ID: 00{id}</Text>
-      <Text style={styles.instructions}>
-        Responde las preguntas a continuación:
-      </Text>
-      <Text style={styles.instructions}>
-        Recuerda que puedes subir archivos (si es necesario).
-      </Text>
-      <View style={styles.questionsContainer}>
-        <ScrollView>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={styles.header}>{title.toLocaleUpperCase()}</Text>
+        <Text style={styles.subHeader}>ID: 00{id}</Text>
+        <Text style={styles.instructions}>
+          Responde las preguntas a continuación:
+        </Text>
+        <Text style={styles.instructions}>
+          Recuerda que puedes subir archivos (si es necesario).
+        </Text>
+        <View style={styles.questionsContainer}>
           {loading ? (
             <Text style={styles.loadingText}>Cargando preguntas...</Text>
           ) : (
@@ -1086,62 +1104,120 @@ export default function FormatScreen() {
               );
             })
           )}
-        </ScrollView>
-      </View>
-      {/* Botón de envío progresivo si hay más de una pregunta is_repeated */}
-      {isRepeatedQuestions.length > 1 ? (
+        </View>
+        {/* Mostrar grupos de respuestas enviadas en modo progresivo */}
+        {isRepeatedQuestions.length > 1 && submittedRepeatedGroups.length > 0 && (
+          <View style={styles.submittedGroupsContainer}>
+            <Text style={styles.submittedGroupsTitle}>
+              Formularios diligenciados:
+            </Text>
+            <View style={{ maxHeight: height * 0.25 }}>
+              <ScrollView
+                contentContainerStyle={{ paddingBottom: 10 }}
+                nestedScrollEnabled
+              >
+                {submittedRepeatedGroups.map((group, idx) => (
+                  <View key={idx} style={styles.submittedGroupCard}>
+                    <Text style={styles.submittedGroupHeader}>
+                      Formulario diligenciado #{idx + 1}
+                    </Text>
+                    {isRepeatedQuestions.map((q) => (
+                      <View key={q.id} style={styles.submittedGroupRow}>
+                        <Text style={styles.submittedGroupQuestion}>
+                          {q.question_text}:
+                        </Text>
+                        <View style={styles.submittedGroupAnswerBox}>
+                          {Array.isArray(group[q.id])
+                            ? group[q.id]
+                                .filter((ans) => ans && ans !== "")
+                                .map((ans, i) => (
+                                  <Text
+                                    key={i}
+                                    style={styles.submittedGroupAnswer}
+                                    numberOfLines={1}
+                                    ellipsizeMode="tail"
+                                  >
+                                    {ans}
+                                  </Text>
+                                ))
+                            : group[q.id] && (
+                                <Text
+                                  style={styles.submittedGroupAnswer}
+                                  numberOfLines={1}
+                                  ellipsizeMode="tail"
+                                >
+                                  {group[q.id]}
+                                </Text>
+                              )}
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
+          </View>
+        )}
+        {/* Botón de envío progresivo si hay más de una pregunta is_repeated */}
+        {isRepeatedQuestions.length > 1 ? (
+          <TouchableOpacity
+            style={styles.submitButton}
+            onPress={submitting ? null : handleProgressiveSubmit}
+            disabled={submitting}
+          >
+            {submitting ? (
+              <>
+                <Animated.View style={{ transform: [{ rotate: spin }] }}>
+                  <SvgXml xml={spinnerSvg} width={40} height={40} />
+                </Animated.View>
+                <Text style={styles.submitButtonText}>Enviando...</Text>
+              </>
+            ) : (
+              <Text style={styles.submitButtonText}>Siguiente ➡</Text>
+            )}
+          </TouchableOpacity>
+        ) : (
+          // Si solo hay una pregunta is_repeated, usa el flujo normal
+          <TouchableOpacity
+            style={styles.submitButton}
+            onPress={submitting ? null : handleSubmitForm}
+            disabled={submitting}
+          >
+            {submitting ? (
+              <>
+                <Animated.View style={{ transform: [{ rotate: spin }] }}>
+                  <SvgXml xml={spinnerSvg} width={40} height={40} />
+                </Animated.View>
+                <Text style={styles.submitButtonText}>Enviando...</Text>
+              </>
+            ) : (
+              <Text style={styles.submitButtonText}>Guardar Formulario</Text>
+            )}
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
-          style={styles.submitButton}
-          onPress={submitting ? null : handleProgressiveSubmit}
+          style={styles.backButton}
+          onPress={() => router.push("/home")}
           disabled={submitting}
         >
-          {submitting ? (
-            <>
-              <Animated.View style={{ transform: [{ rotate: spin }] }}>
-                <SvgXml xml={spinnerSvg} width={40} height={40} />
-              </Animated.View>
-              <Text style={styles.submitButtonText}>Enviando...</Text>
-            </>
-          ) : (
-            <Text style={styles.submitButtonText}>Siguiente</Text>
-          )}
+          <Text style={styles.backButtonText}>
+            <HomeIcon color={"white"} />
+            {"  "}
+            Home
+          </Text>
         </TouchableOpacity>
-      ) : (
-        // Si solo hay una pregunta is_repeated, usa el flujo normal
-        <TouchableOpacity
-          style={styles.submitButton}
-          onPress={submitting ? null : handleSubmitForm}
-          disabled={submitting}
-        >
-          {submitting ? (
-            <>
-              <Animated.View style={{ transform: [{ rotate: spin }] }}>
-                <SvgXml xml={spinnerSvg} width={40} height={40} />
-              </Animated.View>
-              <Text style={styles.submitButtonText}>Enviando...</Text>
-            </>
-          ) : (
-            <Text style={styles.submitButtonText}>Guardar Formulario</Text>
-          )}
-        </TouchableOpacity>
-      )}
-      <TouchableOpacity
-        style={styles.backButton}
-        onPress={() => router.push("/home")}
-        disabled={submitting}
-      >
-        <Text style={styles.backButtonText}>
-          <HomeIcon color={"white"} />
-          {"  "}
-          Home
-        </Text>
-      </TouchableOpacity>
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: width * 0.05, backgroundColor: "#ffffff" },
+  container: { flex: 1, backgroundColor: "#ffffff" },
+  scrollContent: {
+    padding: width * 0.05,
+    paddingBottom: height * 0.05,
+    flexGrow: 1,
+  },
   header: {
     fontSize: width * 0.06,
     fontWeight: "bold",
@@ -1157,8 +1233,8 @@ const styles = StyleSheet.create({
     marginBottom: height * 0.01,
   },
   questionsContainer: {
-    maxHeight: height * 0.5,
-    backgroundColor: "#E4E4E4FF", // Limit height to 60% of the screen
+    // Elimina maxHeight para permitir scroll global
+    backgroundColor: "#E4E4E4FF",
     color: "white",
     marginBottom: height * 0.02,
     padding: 9,
@@ -1332,5 +1408,63 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     backgroundColor: "transparent",
+  },
+  submittedGroupsContainer: {
+    marginTop: height * 0.01,
+    marginBottom: height * 0.01,
+    backgroundColor: "#f5f7fa",
+    borderRadius: width * 0.02,
+    borderColor: "#b0b0b0",
+    borderWidth: 1,
+    padding: width * 0.025,
+    maxWidth: "100%",
+  },
+  submittedGroupsTitle: {
+    fontWeight: "bold",
+    fontSize: width * 0.045,
+    marginBottom: height * 0.01,
+    color: "#1a237e",
+  },
+  submittedGroupCard: {
+    backgroundColor: "#e3eafc",
+    borderRadius: width * 0.015,
+    padding: width * 0.02,
+    marginBottom: height * 0.01,
+    borderColor: "#90caf9",
+    borderWidth: 1,
+  },
+  submittedGroupHeader: {
+    fontWeight: "bold",
+    fontSize: width * 0.038,
+    marginBottom: height * 0.005,
+    color: "#1976d2",
+  },
+  submittedGroupRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginBottom: height * 0.005,
+    flexWrap: "wrap",
+  },
+  submittedGroupQuestion: {
+    fontWeight: "bold",
+    fontSize: width * 0.035,
+    color: "#333",
+    flexShrink: 1,
+    maxWidth: "45%",
+  },
+  submittedGroupAnswerBox: {
+    flex: 1,
+    marginLeft: width * 0.01,
+    flexDirection: "column",
+    flexWrap: "wrap",
+  },
+  submittedGroupAnswer: {
+    fontSize: width * 0.035,
+    color: "#222",
+    backgroundColor: "#fff",
+    borderRadius: width * 0.01,
+    paddingHorizontal: width * 0.01,
+    marginBottom: 2,
+    maxWidth: "100%",
   },
 });

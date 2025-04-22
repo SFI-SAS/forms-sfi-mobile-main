@@ -376,7 +376,8 @@ export default function Home() {
   return (
     <View style={styles.container}>
       <View style={styles.headerCard}>
-        <Text style={styles.headerTitle}>Formatos asignados</Text>
+      <Text style={styles.headerTitle}>Datos del usuario</Text>
+
         {userInfo && (
           <View style={styles.headerUserRow}>
             <View style={styles.headerUserCol}>
@@ -433,6 +434,7 @@ export default function Home() {
           </View>
         )}
       </View>
+      <Text style={styles.headerTitle}>Formatos asignados para este usuario</Text>
       <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
         {loading ? (
           <View style={{ alignItems: "center", marginVertical: 30 }}>
