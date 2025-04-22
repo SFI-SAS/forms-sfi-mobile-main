@@ -49,6 +49,10 @@ export default function FormatScreen() {
   const [errorMessage, setErrorMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [spinAnim] = useState(new Animated.Value(0));
+  const [nonRepeatedLocked, setNonRepeatedLocked] = useState(false);
+  const [firstNonRepeatedAnswers, setFirstNonRepeatedAnswers] = useState({});
+  const [isRepeatedQuestions, setIsRepeatedQuestions] = useState([]);
+  const [singleRepeated, setSingleRepeated] = useState(false);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -551,6 +555,276 @@ export default function FormatScreen() {
     }));
   };
 
+  // Detectar preguntas is_repeated
+  useEffect(() => {
+    if (questions.length > 0) {
+      const repeated = questions.filter((q) => q.is_repeated);
+      setIsRepeatedQuestions(repeated);
+      setSingleRepeated(repeated.length === 1);
+    }
+  }, [questions]);
+
+  // Inicializar respuestas bloqueadas para no repetidas tras el primer envío
+  const lockNonRepeatedAnswers = () => {
+    const locked = {};
+    questions.forEach((q) => {
+      if (!q.is_repeated) {
+        if (q.question_type === "text") {
+          locked[q.id] = textAnswers[q.id] || [""];
+        } else if (q.question_type === "table") {
+          locked[q.id] = tableAnswersState[q.id] || [""];
+        } else {
+          locked[q.id] = answers[q.id];
+        }
+      }
+    });
+    setFirstNonRepeatedAnswers(locked);
+    setNonRepeatedLocked(true);
+  };
+
+  // Limpiar solo los campos is_repeated tras envío progresivo
+  const clearRepeatedAnswers = () => {
+    // Limpiar text/table/answers solo de is_repeated
+    const newText = { ...textAnswers };
+    const newTable = { ...tableAnswersState };
+    const newAns = { ...answers };
+    isRepeatedQuestions.forEach((q) => {
+      if (q.question_type === "text") newText[q.id] = [""];
+      if (q.question_type === "table") newTable[q.id] = [""];
+      newAns[q.id] = q.question_type === "number" ? [""] : "";
+    });
+    setTextAnswers(newText);
+    setTableAnswersState(newTable);
+    setAnswers(newAns);
+  };
+
+  // Envío progresivo: solo envía los campos is_repeated y bloquea los demás tras el primer envío
+  const handleProgressiveSubmit = async () => {
+    setSubmitting(true);
+    try {
+      const token = await AsyncStorage.getItem("authToken");
+      if (!token) throw new Error("No authentication token found");
+      const mode = await NetInfo.fetch().then((state) =>
+        state.isConnected ? "online" : "offline"
+      );
+
+      // Solo respuestas de preguntas is_repeated
+      const repeatedAnswers = [];
+      for (const question of isRepeatedQuestions) {
+        const questionId = question.id;
+        if (
+          question.question_type === "text" &&
+          textAnswers[questionId]?.length > 0
+        ) {
+          const validAnswers = textAnswers[questionId].filter(
+            (answer) => answer.trim() !== ""
+          );
+          validAnswers.forEach((answer) => {
+            repeatedAnswers.push({
+              question_id: questionId,
+              answer_text: answer,
+              file_path: "",
+            });
+          });
+        } else if (
+          question.question_type === "table" &&
+          tableAnswersState[questionId]?.length > 0
+        ) {
+          const validAnswers = tableAnswersState[questionId].filter(
+            (answer) => answer.trim() !== ""
+          );
+          validAnswers.forEach((answer) => {
+            repeatedAnswers.push({
+              question_id: questionId,
+              answer_text: answer,
+              file_path: "",
+            });
+          });
+        } else if (
+          question.question_type === "multiple_choice" &&
+          Array.isArray(answers[questionId]) &&
+          answers[questionId].length > 0
+        ) {
+          answers[questionId].forEach((option) => {
+            repeatedAnswers.push({
+              question_id: questionId,
+              answer_text: option,
+              file_path: "",
+            });
+          });
+        } else if (
+          question.question_type === "one_choice" &&
+          answers[questionId]
+        ) {
+          repeatedAnswers.push({
+            question_id: questionId,
+            answer_text: answers[questionId],
+            file_path: "",
+          });
+        } else if (question.question_type === "file" && answers[questionId]) {
+          repeatedAnswers.push({
+            question_id: questionId,
+            answer_text: "",
+            file_path: answers[questionId],
+          });
+        } else if (question.question_type === "date" && answers[questionId]) {
+          repeatedAnswers.push({
+            question_id: questionId,
+            answer_text: answers[questionId],
+            file_path: "",
+          });
+        } else if (
+          question.question_type === "number" &&
+          answers[questionId]?.[0]
+        ) {
+          repeatedAnswers.push({
+            question_id: questionId,
+            answer_text: answers[questionId][0],
+            file_path: "",
+          });
+        }
+      }
+
+      if (repeatedAnswers.length === 0) {
+        Alert.alert("Error", "No hay respuestas para enviar");
+        setSubmitting(false);
+        return;
+      }
+
+      // Solo la primera vez, enviar también las no repetidas y bloquearlas
+      let nonRepeatedAnswers = [];
+      if (!nonRepeatedLocked) {
+        for (const question of questions) {
+          if (!question.is_repeated) {
+            const questionId = question.id;
+            if (
+              question.question_type === "text" &&
+              textAnswers[questionId]?.length > 0
+            ) {
+              const validAnswers = textAnswers[questionId].filter(
+                (answer) => answer.trim() !== ""
+              );
+              validAnswers.forEach((answer) => {
+                nonRepeatedAnswers.push({
+                  question_id: questionId,
+                  answer_text: answer,
+                  file_path: "",
+                });
+              });
+            } else if (
+              question.question_type === "table" &&
+              tableAnswersState[questionId]?.length > 0
+            ) {
+              const validAnswers = tableAnswersState[questionId].filter(
+                (answer) => answer.trim() !== ""
+              );
+              validAnswers.forEach((answer) => {
+                nonRepeatedAnswers.push({
+                  question_id: questionId,
+                  answer_text: answer,
+                  file_path: "",
+                });
+              });
+            } else if (
+              question.question_type === "multiple_choice" &&
+              Array.isArray(answers[questionId]) &&
+              answers[questionId].length > 0
+            ) {
+              answers[questionId].forEach((option) => {
+                nonRepeatedAnswers.push({
+                  question_id: questionId,
+                  answer_text: option,
+                  file_path: "",
+                });
+              });
+            } else if (
+              question.question_type === "one_choice" &&
+              answers[questionId]
+            ) {
+              nonRepeatedAnswers.push({
+                question_id: questionId,
+                answer_text: answers[questionId],
+                file_path: "",
+              });
+            } else if (
+              question.question_type === "file" &&
+              answers[questionId]
+            ) {
+              nonRepeatedAnswers.push({
+                question_id: questionId,
+                answer_text: "",
+                file_path: answers[questionId],
+              });
+            } else if (
+              question.question_type === "date" &&
+              answers[questionId]
+            ) {
+              nonRepeatedAnswers.push({
+                question_id: questionId,
+                answer_text: answers[questionId],
+                file_path: "",
+              });
+            } else if (
+              question.question_type === "number" &&
+              answers[questionId]?.[0]
+            ) {
+              nonRepeatedAnswers.push({
+                question_id: questionId,
+                answer_text: answers[questionId][0],
+                file_path: "",
+              });
+            }
+          }
+        }
+      }
+
+      // Enviar respuestas (primera vez: todas, luego solo is_repeated)
+      const allToSend = nonRepeatedLocked
+        ? repeatedAnswers
+        : [...nonRepeatedAnswers, ...repeatedAnswers];
+
+      // ...enviar igual que en handleSubmitForm...
+      const requestOptions = {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      };
+
+      // Crear registro de respuesta y obtener response_id
+      const saveResponseRes = await fetch(
+        `https://ab11-179-33-13-68.ngrok-free.app/responses/save-response/${id}`,
+        {
+          method: "POST",
+          headers: requestOptions.headers,
+          body: JSON.stringify({ mode }),
+        }
+      );
+      const saveResponseData = await saveResponseRes.json();
+      const responseId = saveResponseData.response_id;
+      if (!responseId) throw new Error("No se pudo obtener el ID de respuesta");
+
+      // Enviar todas las respuestas con el response_id
+      await sendAnswers(allToSend, responseId, requestOptions);
+
+      // Bloquear campos no repetidos tras el primer envío
+      if (!nonRepeatedLocked) lockNonRepeatedAnswers();
+
+      // Limpiar solo los campos is_repeated
+      clearRepeatedAnswers();
+
+      Alert.alert(
+        "Éxito ✅",
+        "Respuestas enviadas. Puedes seguir agregando más."
+      );
+    } catch (error) {
+      console.error("❌ Error en el proceso de envío:", error);
+      Alert.alert("Error", "No se pudo completar el envío del formulario");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <View style={styles.container}>
       <Text style={styles.header}>{title.toLocaleUpperCase()}</Text>
@@ -566,228 +840,283 @@ export default function FormatScreen() {
           {loading ? (
             <Text style={styles.loadingText}>Cargando preguntas...</Text>
           ) : (
-            questions.map((question) => (
-              <View key={question.id} style={styles.questionContainer}>
-                <Text style={styles.questionLabel}>
-                  {question.question_text}
-                  {question.required && (
-                    <Text style={styles.requiredText}> *</Text>
-                  )}
-                </Text>
-                {/* Render input types based on question type */}
-                {question.question_type === "text" && (
-                  <>
-                    {textAnswers[question.id]?.map((field, index) => (
-                      <View key={index} style={styles.dynamicFieldContainer}>
-                        <TextInput
-                          style={styles.input}
-                          placeholder="Escribe tu respuesta"
-                          value={field}
-                          onChangeText={(text) =>
-                            handleTextChange(question.id, index, text)
-                          }
-                        />
-                        <TouchableOpacity
-                          style={styles.removeButton}
-                          onPress={() =>
-                            handleRemoveTextField(question.id, index)
-                          }
-                        >
-                          <Text style={styles.removeButtonText}>-</Text>
-                        </TouchableOpacity>
-                      </View>
-                    ))}
-                    <TouchableOpacity
-                      style={styles.addButton}
-                      onPress={() => handleAddTextField(question.id)}
-                    >
-                      <Text style={styles.addButtonText}>+</Text>
-                    </TouchableOpacity>
-                  </>
-                )}
-                {question.question_type === "file" && (
-                  <TouchableOpacity
-                    style={styles.fileButton}
-                    onPress={() => handleFileUpload(question.id)}
-                  >
-                    <Text style={styles.fileButtonText}>
-                      {answers[question.id]
-                        ? "Archivo seleccionado"
-                        : "Subir archivo"}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-                {question.question_type === "table" && (
-                  <>
-                    {tableAnswersState[question.id]?.map((field, index) => (
-                      <View key={index} style={styles.dynamicFieldContainer}>
-                        <Picker
-                          selectedValue={field}
-                          onValueChange={(selectedValue) =>
-                            handleTableSelectChange(
-                              question.id,
-                              index,
-                              selectedValue
-                            )
-                          }
-                          style={styles.picker}
-                        >
-                          <Picker.Item label="Selecciona una opción" value="" />
-                          {Array.isArray(tableAnswers[question.id]) &&
-                            tableAnswers[question.id].map((option, i) => (
-                              <Picker.Item
-                                key={i}
-                                label={option}
-                                value={option}
-                              />
-                            ))}
-                        </Picker>
-                        <TouchableOpacity
-                          style={styles.removeButton}
-                          onPress={() =>
-                            handleRemoveTableAnswer(question.id, index)
-                          }
-                        >
-                          <Text style={styles.removeButtonText}>-</Text>
-                        </TouchableOpacity>
-                      </View>
-                    ))}
-                    <TouchableOpacity
-                      style={styles.addButton}
-                      onPress={() => handleAddTableAnswer(question.id)}
-                    >
-                      <Text style={styles.addButtonText}>+</Text>
-                    </TouchableOpacity>
-                  </>
-                )}
-                {question.question_type === "multiple_choice" &&
-                  question.options && (
-                    <View>
-                      {question.options.map((option, index) => (
-                        <View key={index} style={styles.checkboxContainer}>
-                          <TouchableOpacity
-                            style={[
-                              styles.checkbox,
-                              answers[question.id]?.includes(option) &&
-                                styles.checkboxSelected,
-                            ]}
-                            onPress={() =>
-                              setAnswers((prev) => {
-                                const currentAnswers = prev[question.id] || [];
-                                const updatedAnswers = currentAnswers.includes(
-                                  option
-                                )
-                                  ? currentAnswers.filter((o) => o !== option)
-                                  : [...currentAnswers, option];
-                                return {
-                                  ...prev,
-                                  [question.id]: updatedAnswers,
-                                };
-                              })
+            questions.map((question) => {
+              const isRepeated = !!question.is_repeated;
+              const isLocked = nonRepeatedLocked && !isRepeated;
+              // Solo permitir agregar campos dinámicos si hay una sola pregunta is_repeated y es esta
+              const allowAddRemove = isRepeated && singleRepeated;
+
+              return (
+                <View key={question.id} style={styles.questionContainer}>
+                  <Text style={styles.questionLabel}>
+                    {question.question_text}
+                    {question.required && (
+                      <Text style={styles.requiredText}> *</Text>
+                    )}
+                  </Text>
+                  {/* Render input types based on question type */}
+                  {question.question_type === "text" && (
+                    <>
+                      {textAnswers[question.id]?.map((field, index) => (
+                        <View key={index} style={styles.dynamicFieldContainer}>
+                          <TextInput
+                            style={styles.input}
+                            placeholder="Escribe tu respuesta"
+                            value={field}
+                            onChangeText={(text) =>
+                              !isLocked &&
+                              handleTextChange(question.id, index, text)
                             }
-                          >
-                            {answers[question.id]?.includes(option) && (
-                              <Text style={styles.checkboxCheckmark}>✔</Text>
-                            )}
-                          </TouchableOpacity>
-                          <Text style={styles.checkboxLabel}>{option}</Text>
+                            editable={!isLocked}
+                          />
+                          {allowAddRemove && (
+                            <TouchableOpacity
+                              style={styles.removeButton}
+                              onPress={() =>
+                                handleRemoveTextField(question.id, index)
+                              }
+                            >
+                              <Text style={styles.removeButtonText}>-</Text>
+                            </TouchableOpacity>
+                          )}
                         </View>
                       ))}
-                    </View>
+                      {allowAddRemove && (
+                        <TouchableOpacity
+                          style={styles.addButton}
+                          onPress={() => handleAddTextField(question.id)}
+                        >
+                          <Text style={styles.addButtonText}>+</Text>
+                        </TouchableOpacity>
+                      )}
+                    </>
                   )}
-                {question.question_type === "one_choice" &&
-                  question.options && (
-                    <View>
-                      {question.options.map((option, index) => (
-                        <View key={index} style={styles.checkboxContainer}>
-                          <TouchableOpacity
-                            style={[
-                              styles.checkbox,
-                              answers[question.id] === option &&
-                                styles.checkboxSelected,
-                            ]}
-                            onPress={() =>
-                              setAnswers((prev) => ({
-                                ...prev,
-                                [question.id]: option,
-                              }))
-                            }
-                          >
-                            {answers[question.id] === option && (
-                              <Text style={styles.checkboxCheckmark}>✔</Text>
-                            )}
-                          </TouchableOpacity>
-                          <Text style={styles.checkboxLabel}>{option}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-                {question.question_type === "number" && (
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Escribe un número"
-                    keyboardType="numeric"
-                    value={answers[question.id]?.[0] || ""}
-                    onChangeText={(value) =>
-                      setAnswers((prev) => ({
-                        ...prev,
-                        [question.id]: [value],
-                      }))
-                    }
-                  />
-                )}
-                {question.question_type === "date" && (
-                  <>
+                  {question.question_type === "file" && (
                     <TouchableOpacity
-                      style={styles.dateButton}
-                      onPress={() =>
-                        setDatePickerVisible((prev) => ({
-                          ...prev,
-                          [question.id]: true,
-                        }))
-                      }
+                      style={styles.fileButton}
+                      onPress={() => !isLocked && handleFileUpload(question.id)}
+                      disabled={isLocked}
                     >
-                      <Text style={styles.dateButtonText}>
-                        {answers[question.id] || "Seleccionar fecha"}
+                      <Text style={styles.fileButtonText}>
+                        {answers[question.id]
+                          ? "Archivo seleccionado"
+                          : "Subir archivo"}
                       </Text>
                     </TouchableOpacity>
-                    {datePickerVisible[question.id] && (
-                      <DateTimePicker
-                        value={
-                          answers[question.id]
-                            ? new Date(answers[question.id])
-                            : new Date()
-                        }
-                        mode="date"
-                        display="default"
-                        onChange={(event, selectedDate) =>
-                          handleDateChange(question.id, selectedDate)
-                        }
-                      />
+                  )}
+                  {question.question_type === "table" && (
+                    <>
+                      {tableAnswersState[question.id]?.map((field, index) => (
+                        <View key={index} style={styles.dynamicFieldContainer}>
+                          <Picker
+                            selectedValue={field}
+                            onValueChange={(selectedValue) =>
+                              !isLocked &&
+                              handleTableSelectChange(
+                                question.id,
+                                index,
+                                selectedValue
+                              )
+                            }
+                            style={styles.picker}
+                            enabled={!isLocked}
+                          >
+                            <Picker.Item
+                              label="Selecciona una opción"
+                              value=""
+                            />
+                            {Array.isArray(tableAnswers[question.id]) &&
+                              tableAnswers[question.id].map((option, i) => (
+                                <Picker.Item
+                                  key={i}
+                                  label={option}
+                                  value={option}
+                                />
+                              ))}
+                          </Picker>
+                          {allowAddRemove && (
+                            <TouchableOpacity
+                              style={styles.removeButton}
+                              onPress={() =>
+                                handleRemoveTableAnswer(question.id, index)
+                              }
+                            >
+                              <Text style={styles.removeButtonText}>-</Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      ))}
+                      {allowAddRemove && (
+                        <TouchableOpacity
+                          style={styles.addButton}
+                          onPress={() => handleAddTableAnswer(question.id)}
+                        >
+                          <Text style={styles.addButtonText}>+</Text>
+                        </TouchableOpacity>
+                      )}
+                    </>
+                  )}
+                  {question.question_type === "multiple_choice" &&
+                    question.options && (
+                      <View>
+                        {question.options.map((option, index) => (
+                          <View key={index} style={styles.checkboxContainer}>
+                            <TouchableOpacity
+                              style={[
+                                styles.checkbox,
+                                answers[question.id]?.includes(option) &&
+                                  styles.checkboxSelected,
+                              ]}
+                              onPress={() =>
+                                !isLocked &&
+                                setAnswers((prev) => {
+                                  const currentAnswers =
+                                    prev[question.id] || [];
+                                  const updatedAnswers =
+                                    currentAnswers.includes(option)
+                                      ? currentAnswers.filter(
+                                          (o) => o !== option
+                                        )
+                                      : [...currentAnswers, option];
+                                  return {
+                                    ...prev,
+                                    [question.id]: updatedAnswers,
+                                  };
+                                })
+                              }
+                              disabled={isLocked}
+                            >
+                              {answers[question.id]?.includes(option) && (
+                                <Text style={styles.checkboxCheckmark}>✔</Text>
+                              )}
+                            </TouchableOpacity>
+                            <Text style={styles.checkboxLabel}>{option}</Text>
+                          </View>
+                        ))}
+                      </View>
                     )}
-                  </>
-                )}
-              </View>
-            ))
+                  {question.question_type === "one_choice" &&
+                    question.options && (
+                      <View>
+                        {question.options.map((option, index) => (
+                          <View key={index} style={styles.checkboxContainer}>
+                            <TouchableOpacity
+                              style={[
+                                styles.checkbox,
+                                answers[question.id] === option &&
+                                  styles.checkboxSelected,
+                              ]}
+                              onPress={() =>
+                                !isLocked &&
+                                setAnswers((prev) => ({
+                                  ...prev,
+                                  [question.id]: option,
+                                }))
+                              }
+                              disabled={isLocked}
+                            >
+                              {answers[question.id] === option && (
+                                <Text style={styles.checkboxCheckmark}>✔</Text>
+                              )}
+                            </TouchableOpacity>
+                            <Text style={styles.checkboxLabel}>{option}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  {question.question_type === "number" && (
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Escribe un número"
+                      keyboardType="numeric"
+                      value={answers[question.id]?.[0] || ""}
+                      onChangeText={(value) =>
+                        !isLocked &&
+                        setAnswers((prev) => ({
+                          ...prev,
+                          [question.id]: [value],
+                        }))
+                      }
+                      editable={!isLocked}
+                    />
+                  )}
+                  {question.question_type === "date" && (
+                    <>
+                      <TouchableOpacity
+                        style={styles.dateButton}
+                        onPress={() =>
+                          !isLocked &&
+                          setDatePickerVisible((prev) => ({
+                            ...prev,
+                            [question.id]: true,
+                          }))
+                        }
+                        disabled={isLocked}
+                      >
+                        <Text style={styles.dateButtonText}>
+                          {answers[question.id] || "Seleccionar fecha"}
+                        </Text>
+                      </TouchableOpacity>
+                      {datePickerVisible[question.id] && (
+                        <DateTimePicker
+                          value={
+                            answers[question.id]
+                              ? new Date(answers[question.id])
+                              : new Date()
+                          }
+                          mode="date"
+                          display="default"
+                          onChange={(event, selectedDate) =>
+                            !isLocked &&
+                            handleDateChange(question.id, selectedDate)
+                          }
+                        />
+                      )}
+                    </>
+                  )}
+                </View>
+              );
+            })
           )}
         </ScrollView>
       </View>
-      <TouchableOpacity
-        style={styles.submitButton}
-        onPress={submitting ? null : handleSubmitForm}
-        disabled={submitting}
-      >
-        {submitting ? (
-          <>
-            <Animated.View style={{ transform: [{ rotate: spin }] }}>
-              <SvgXml xml={spinnerSvg} width={40} height={40} />
-            </Animated.View>
-            <Text style={styles.submitButtonText}>Enviando...</Text>
-          </>
-        ) : (
-          <Text style={styles.submitButtonText}>Guardar Formulario</Text>
-        )}
-      </TouchableOpacity>
+      {/* Botón de envío progresivo si hay más de una pregunta is_repeated */}
+      {isRepeatedQuestions.length > 1 ? (
+        <TouchableOpacity
+          style={styles.submitButton}
+          onPress={submitting ? null : handleProgressiveSubmit}
+          disabled={submitting}
+        >
+          {submitting ? (
+            <>
+              <Animated.View style={{ transform: [{ rotate: spin }] }}>
+                <SvgXml xml={spinnerSvg} width={40} height={40} />
+              </Animated.View>
+              <Text style={styles.submitButtonText}>Enviando...</Text>
+            </>
+          ) : (
+            <Text style={styles.submitButtonText}>Siguiente</Text>
+          )}
+        </TouchableOpacity>
+      ) : (
+        // Si solo hay una pregunta is_repeated, usa el flujo normal
+        <TouchableOpacity
+          style={styles.submitButton}
+          onPress={submitting ? null : handleSubmitForm}
+          disabled={submitting}
+        >
+          {submitting ? (
+            <>
+              <Animated.View style={{ transform: [{ rotate: spin }] }}>
+                <SvgXml xml={spinnerSvg} width={40} height={40} />
+              </Animated.View>
+              <Text style={styles.submitButtonText}>Enviando...</Text>
+            </>
+          ) : (
+            <Text style={styles.submitButtonText}>Guardar Formulario</Text>
+          )}
+        </TouchableOpacity>
+      )}
       <TouchableOpacity
         style={styles.backButton}
         onPress={() => router.push("/home")}

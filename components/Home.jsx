@@ -121,6 +121,7 @@ export default function Home() {
           }
         );
         const qData = await qRes.json();
+        console.log(qData);
         if (!qRes.ok)
           throw new Error(qData.detail || "Error fetching questions");
 
@@ -158,6 +159,7 @@ export default function Home() {
               );
               const relData = await relRes.json();
               allRelatedAnswers[question.id] = relData;
+              
             } catch (e) {
               // Si falla, guarda vacío
               allRelatedAnswers[question.id] = {};
@@ -202,7 +204,6 @@ export default function Home() {
       if (!response.ok) {
         throw new Error(data.detail || "Error fetching user forms");
       }
-
       setUserForms(data);
 
       // Cache forms for offline access
