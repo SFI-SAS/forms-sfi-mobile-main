@@ -80,7 +80,7 @@ export default function Home() {
       if (!token) throw new Error("No authentication token found");
 
       const response = await fetch(
-        "https://ab11-179-33-13-68.ngrok-free.app/auth/validate-token",
+        "https://1943-179-33-13-68.ngrok-free.app/auth/validate-token",
         {
           method: "GET",
           headers: { Authorization: `Bearer ${token}` },
@@ -111,7 +111,7 @@ export default function Home() {
       try {
         // 1. Preguntas del formulario
         const qRes = await fetch(
-          `https://ab11-179-33-13-68.ngrok-free.app/forms/${form.id}`,
+          `https://1943-179-33-13-68.ngrok-free.app/forms/${form.id}`,
           {
             method: "GET",
             headers: {
@@ -151,7 +151,7 @@ export default function Home() {
           if (question.question_type === "table") {
             try {
               const relRes = await fetch(
-                `https://ab11-179-33-13-68.ngrok-free.app/questions/question-table-relation/answers/${question.id}`,
+                `https://1943-179-33-13-68.ngrok-free.app/questions/question-table-relation/answers/${question.id}`,
                 {
                   method: "GET",
                   headers: { Authorization: `Bearer ${token}` },
@@ -159,7 +159,6 @@ export default function Home() {
               );
               const relData = await relRes.json();
               allRelatedAnswers[question.id] = relData;
-              
             } catch (e) {
               // Si falla, guarda vacío
               allRelatedAnswers[question.id] = {};
@@ -190,7 +189,7 @@ export default function Home() {
       if (!token) throw new Error("No authentication token found");
 
       const response = await fetch(
-        "https://ab11-179-33-13-68.ngrok-free.app/forms/users/form_by_user",
+        "https://1943-179-33-13-68.ngrok-free.app/forms/users/form_by_user",
         {
           method: "GET",
           headers: {
@@ -294,7 +293,7 @@ export default function Home() {
 
             // Submit the form
             const saveResponseRes = await fetch(
-              `https://ab11-179-33-13-68.ngrok-free.app/responses/save-response/${form.id}?mode=offline`,
+              `https://1943-179-33-13-68.ngrok-free.app/responses/save-response/${form.id}?mode=offline`,
               {
                 method: "POST",
                 headers: requestOptions.headers,
@@ -307,7 +306,7 @@ export default function Home() {
             // Submit each answer
             for (const response of form.responses) {
               await fetch(
-                `https://ab11-179-33-13-68.ngrok-free.app/responses/save-answers`,
+                `https://1943-179-33-13-68.ngrok-free.app/responses/save-answers`,
                 {
                   method: "POST",
                   headers: requestOptions.headers,
@@ -376,7 +375,7 @@ export default function Home() {
   return (
     <View style={styles.container}>
       <View style={styles.headerCard}>
-      <Text style={styles.headerTitle}>Datos del usuario</Text>
+        <Text style={styles.headerTitle}>Datos del usuario</Text>
 
         {userInfo && (
           <View style={styles.headerUserRow}>
@@ -434,7 +433,9 @@ export default function Home() {
           </View>
         )}
       </View>
-      <Text style={styles.headerTitle}>Formatos asignados para este usuario</Text>
+      <Text style={styles.headerTitle}>
+        Formatos asignados para este usuario
+      </Text>
       <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
         {loading ? (
           <View style={{ alignItems: "center", marginVertical: 30 }}>
