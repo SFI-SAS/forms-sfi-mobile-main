@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   View,
   Text,
@@ -7,16 +7,21 @@ import {
   ScrollView,
   Alert,
   BackHandler,
+  Modal,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { HomeIcon } from "./Icons";
 
+const INACTIVITY_TIMEOUT = 8 * 60 * 1000; // 8 minutos
+
 export default function MyForms() {
   const [submittedForms, setSubmittedForms] = useState([]);
   const [responsesByForm, setResponsesByForm] = useState({});
   const [expandedForms, setExpandedForms] = useState({});
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const inactivityTimer = useRef(null);
   const router = useRouter();
 
   useFocusEffect(
@@ -44,7 +49,7 @@ export default function MyForms() {
 
       // Obtener formularios enviados
       const response = await fetch(
-        `https://1943-179-33-13-68.ngrok-free.app/forms/users/completed_forms`,
+        `https://0077-179-33-13-68.ngrok-free.app/forms/users/completed_forms`,
         {
           method: "GET",
           headers: { Authorization: `Bearer ${accessToken}` },
@@ -87,6 +92,36 @@ export default function MyForms() {
       [formId]: !prev[formId],
     }));
   };
+
+  // --- Inactividad: logout automático ---
+  const resetInactivityTimer = async () => {
+    if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
+    inactivityTimer.current = setTimeout(async () => {
+      await AsyncStorage.setItem("isLoggedOut", "true");
+      setShowLogoutModal(true);
+    }, INACTIVITY_TIMEOUT);
+  };
+
+  useEffect(() => {
+    const reset = () => resetInactivityTimer();
+    const touchListener = () => reset();
+    const focusListener = () => reset();
+
+    // React Native events
+    const subscription = BackHandler.addEventListener(
+      "hardwareBackPress",
+      reset
+    );
+    const interval = setInterval(reset, 1000 * 60 * 4);
+
+    reset();
+
+    return () => {
+      if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
+      subscription.remove();
+      clearInterval(interval);
+    };
+  }, []);
 
   return (
     <ScrollView style={styles.container}>
@@ -198,6 +233,74 @@ export default function MyForms() {
           Home
         </Text>
       </TouchableOpacity>
+      {/* Modal de cierre de sesión por inactividad */}
+      <Modal
+        visible={showLogoutModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowLogoutModal(false)}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.4)",
+            justifyContent: "center",
+            alignItems: "center",
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: "#fff",
+              borderRadius: 10,
+              padding: 24,
+              width: "80%",
+              alignItems: "center",
+              elevation: 5,
+            }}
+          >
+            <Text
+              style={{
+                fontWeight: "bold",
+                fontSize: 20,
+                marginBottom: 8,
+                color: "#222",
+              }}
+            >
+              Sesión cerrada por inactividad
+            </Text>
+            <Text
+              style={{
+                fontSize: 16,
+                color: "#444",
+                marginBottom: 12,
+                textAlign: "center",
+              }}
+            >
+              Por seguridad, la sesión se cerró automáticamente tras 8 minutos
+              sin actividad.
+            </Text>
+            <TouchableOpacity
+              style={{
+                backgroundColor: "#2563eb",
+                borderRadius: 6,
+                padding: 12,
+                alignItems: "center",
+                width: "100%",
+              }}
+              onPress={() => {
+                setShowLogoutModal(false);
+                router.push("/");
+              }}
+            >
+              <Text
+                style={{ color: "white", fontWeight: "bold", fontSize: 18 }}
+              >
+                Ir al inicio de sesión
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }

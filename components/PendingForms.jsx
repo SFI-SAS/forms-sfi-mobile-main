@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   View,
   Text,
@@ -8,6 +8,9 @@ import {
   ScrollView,
   BackHandler,
   Dimensions, // Import Dimensions
+  Modal,
+  TextInput,
+  Keyboard,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
@@ -16,11 +19,19 @@ import { useRouter } from "expo-router"; // Add this import
 import { HomeIcon } from "./Icons"; // Adjust the import path as necessary
 
 const { width, height } = Dimensions.get("window"); // Get screen dimensions
+const INACTIVITY_TIMEOUT = 8 * 60 * 1000; // 8 minutos
 
 export default function PendingForms() {
   const [pendingForms, setPendingForms] = useState([]);
   const [isOnline, setIsOnline] = useState(false);
   const router = useRouter();
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [password, setPassword] = useState("");
+  const [syncQueue, setSyncQueue] = useState([]);
+  const [syncing, setSyncing] = useState(false);
+  const [pendingSync, setPendingSync] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const inactivityTimer = useRef(null);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -34,31 +45,94 @@ export default function PendingForms() {
   );
 
   useEffect(() => {
+    const resetInactivityTimer = async () => {
+      if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
+      inactivityTimer.current = setTimeout(async () => {
+        await AsyncStorage.setItem("isLoggedOut", "true");
+        setShowLogoutModal(true);
+      }, INACTIVITY_TIMEOUT);
+    };
+
+    const reset = () => resetInactivityTimer();
+    const focusListener = () => reset();
+    const keyboardListener = Keyboard.addListener("keyboardDidShow", reset);
+    const interval = setInterval(reset, 1000 * 60 * 4);
+
+    reset();
+
+    return () => {
+      if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
+      keyboardListener.remove();
+      clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
     const fetchPendingForms = async () => {
       const storedPendingForms = await AsyncStorage.getItem("pending_forms");
       setPendingForms(storedPendingForms ? JSON.parse(storedPendingForms) : []);
     };
 
-    const synchronizePendingForms = async () => {
-      if (!isOnline) return;
+    fetchPendingForms();
+  }, []);
 
-      const storedPendingForms = await AsyncStorage.getItem("pending_forms");
-      const pendingForms = storedPendingForms
-        ? JSON.parse(storedPendingForms)
-        : [];
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      setIsOnline(state.isConnected);
+      if (state.isConnected && pendingForms.length > 0) {
+        setPendingSync(true);
+      }
+    });
+    return () => unsubscribe();
+  }, [pendingForms]);
+
+  useEffect(() => {
+    if (pendingSync && isOnline && pendingForms.length > 0) {
+      setShowPasswordModal(true);
+      setSyncQueue([...pendingForms]);
+      setPendingSync(false);
+    }
+  }, [pendingSync, isOnline, pendingForms]);
+
+  const handlePasswordSubmit = async () => {
+    setSyncing(true);
+    try {
+      const token = await AsyncStorage.getItem("authToken");
+      if (!token) throw new Error("No authentication token found");
+
+      const res = await fetch(
+        "https://0077-179-33-13-68.ngrok-free.app/auth/validate-password",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ password }),
+        }
+      );
+      if (!res.ok) {
+        Alert.alert(
+          "Contraseña incorrecta",
+          "La contraseña es incorrecta. Intenta de nuevo."
+        );
+        setSyncing(false);
+        return;
+      }
 
       const successfullySentForms = [];
-
-      for (const form of pendingForms) {
+      for (const form of syncQueue) {
         try {
-          await handleSubmitPendingForm(form);
-          successfullySentForms.push(form.id); // Track successfully sent forms
+          await handleSubmitPendingForm(form, token);
+          successfullySentForms.push(form.id);
         } catch (error) {
-          console.error("❌ Error al sincronizar formulario pendiente:", error);
+          Alert.alert(
+            "Error",
+            `No se pudo sincronizar el formulario ID ${form.id}`
+          );
         }
       }
 
-      // Remove successfully sent forms from the pending list
       const updatedPendingForms = pendingForms.filter(
         (form) => !successfullySentForms.includes(form.id)
       );
@@ -67,15 +141,20 @@ export default function PendingForms() {
         "pending_forms",
         JSON.stringify(updatedPendingForms)
       );
-    };
+      setShowPasswordModal(false);
+      setPassword("");
+      setSyncQueue([]);
+      Alert.alert("Sincronización", "Formularios sincronizados correctamente.");
+    } catch (error) {
+      Alert.alert("Error", "No se pudo validar la contraseña o sincronizar.");
+    } finally {
+      setSyncing(false);
+    }
+  };
 
-    fetchPendingForms();
-    synchronizePendingForms();
-  }, [isOnline]);
-
-  const handleSubmitPendingForm = async (form) => {
+  const handleSubmitPendingForm = async (form, tokenOverride = null) => {
     try {
-      const token = await AsyncStorage.getItem("authToken");
+      const token = tokenOverride || (await AsyncStorage.getItem("authToken"));
       if (!token) throw new Error("No authentication token found");
 
       const requestOptions = {
@@ -85,9 +164,8 @@ export default function PendingForms() {
         },
       };
 
-      // Submit the form
       const saveResponseRes = await fetch(
-        `https://1943-179-33-13-68.ngrok-free.app/responses/save-response/${form.id}?mode=offline`,
+        `https://0077-179-33-13-68.ngrok-free.app/responses/save-response/${form.id}?mode=offline`,
         {
           method: "POST",
           headers: requestOptions.headers,
@@ -97,10 +175,9 @@ export default function PendingForms() {
       const saveResponseData = await saveResponseRes.json();
       const responseId = saveResponseData.response_id;
 
-      // Submit each answer
       for (const response of form.responses) {
         await fetch(
-          `https://1943-179-33-13-68.ngrok-free.app/responses/save-answers`,
+          `https://0077-179-33-13-68.ngrok-free.app/responses/save-answers`,
           {
             method: "POST",
             headers: requestOptions.headers,
@@ -117,42 +194,124 @@ export default function PendingForms() {
       console.log(`✅ Formulario ID ${form.id} enviado correctamente.`);
     } catch (error) {
       console.error(`❌ Error al enviar formulario ID ${form.id}:`, error);
-      throw error; // Re-throw the error to handle it in the synchronization logic
+      throw error;
     }
   };
 
   return (
-    <ScrollView style={styles.container}>
-      <Text style={styles.header}>Formularios Pendientes</Text>
-      {pendingForms.length === 0 ? (
-        <Text style={styles.noPendingText}>
-          No hay formularios en estado offline pendientes.
-        </Text>
-      ) : (
-        pendingForms.map((form, index) => (
-          <View key={index} style={styles.formItem}>
-            <Text style={styles.formText}>Formulario ID: {form.id}</Text>
+    <View style={{ flex: 1 }}>
+      <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
+        <Text style={styles.header}>Formularios Pendientes</Text>
+        {pendingForms.length === 0 ? (
+          <Text style={styles.noPendingText}>
+            No hay formularios en estado offline pendientes.
+          </Text>
+        ) : (
+          pendingForms.map((form, index) => (
+            <View key={index} style={styles.formItem}>
+              <Text style={styles.formText}>Formulario ID: {form.id}</Text>
+              <TouchableOpacity
+                style={styles.submitButton}
+                onPress={() => {
+                  setSyncQueue([form]);
+                  setShowPasswordModal(true);
+                }}
+                disabled={!isOnline}
+              >
+                <Text style={styles.submitButtonText}>
+                  {isOnline ? "Enviar" : "Sin conexión"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ))
+        )}
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.push("/home")}
+        >
+          <Text style={styles.backButtonText}>
+            <HomeIcon color={"white"} />
+            {"  "}
+            Home
+          </Text>
+        </TouchableOpacity>
+      </ScrollView>
+      <Modal
+        visible={showPasswordModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!syncing) setShowPasswordModal(false);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Confirmar sincronización</Text>
+            <Text style={styles.modalText}>
+              Por seguridad, ingresa tu contraseña para sincronizar los datos
+              pendientes.
+            </Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Contraseña"
+              secureTextEntry
+              value={password}
+              onChangeText={setPassword}
+              editable={!syncing}
+            />
+            <View style={{ flexDirection: "row", marginTop: 10 }}>
+              <TouchableOpacity
+                style={[styles.modalButton, { backgroundColor: "#2563eb" }]}
+                onPress={handlePasswordSubmit}
+                disabled={syncing || !password}
+              >
+                <Text style={styles.modalButtonText}>
+                  {syncing ? "Sincronizando..." : "Sincronizar"}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, { backgroundColor: "#aaa" }]}
+                onPress={() => {
+                  if (!syncing) setShowPasswordModal(false);
+                  setPassword("");
+                  setSyncQueue([]);
+                }}
+                disabled={syncing}
+              >
+                <Text style={styles.modalButtonText}>Cancelar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      <Modal
+        visible={showLogoutModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowLogoutModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>
+              Sesión cerrada por inactividad
+            </Text>
+            <Text style={styles.modalText}>
+              Por seguridad, la sesión se cerró automáticamente tras 8 minutos
+              sin actividad.
+            </Text>
             <TouchableOpacity
-              style={styles.submitButton}
-              onPress={() => handleSubmitPendingForm(form)}
-              disabled={!isOnline}
+              style={[styles.modalButton, { backgroundColor: "#2563eb" }]}
+              onPress={() => {
+                setShowLogoutModal(false);
+                router.push("/");
+              }}
             >
-              <Text style={styles.submitButtonText}>
-                {isOnline ? "Enviar" : "Sin conexión"}
-              </Text>
+              <Text style={styles.modalButtonText}>Ir al inicio de sesión</Text>
             </TouchableOpacity>
           </View>
-        ))
-      )}
-      <TouchableOpacity
-        style={styles.backButton}
-        onPress={() => router.push("/home")}
-      >
-        <HomeIcon color={"white"} />
-        {"  "}
-        <Text style={styles.backButtonText}>Home</Text>
-      </TouchableOpacity>
-    </ScrollView>
+        </View>
+      </Modal>
+    </View>
   );
 }
 
@@ -198,5 +357,47 @@ const styles = StyleSheet.create({
     color: "white",
     fontWeight: "bold",
     fontSize: width * 0.045,
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+  },
+  modalContent: {
+    width: "80%",
+    backgroundColor: "white",
+    borderRadius: 10,
+    padding: 20,
+    alignItems: "center",
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    marginBottom: 10,
+  },
+  modalText: {
+    fontSize: 16,
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  modalInput: {
+    width: "100%",
+    padding: 10,
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 5,
+    marginBottom: 20,
+  },
+  modalButton: {
+    flex: 1,
+    padding: 10,
+    borderRadius: 5,
+    alignItems: "center",
+    marginHorizontal: 5,
+  },
+  modalButtonText: {
+    color: "white",
+    fontWeight: "bold",
   },
 });

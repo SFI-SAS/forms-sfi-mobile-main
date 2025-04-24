@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   Dimensions, // Import Dimensions
   Animated, // Import Animated
   Easing, // Import Easing
+  Modal,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -31,6 +32,8 @@ const RELATED_ANSWERS_KEY = "offline_related_answers";
 const spinnerSvg = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><path fill="#000000FF" stroke="#EE4138FF" stroke-width="15" transform-origin="center" d="m148 84.7 13.8-8-10-17.3-13.8 8a50 50 0 0 0-27.4-15.9v-16h-20v16A50 50 0 0 0 63 67.4l-13.8-8-10 17.3 13.8 8a50 50 0 0 0 0 31.7l-13.8 8 10 17.3 13.8-8a50 50 0 0 0 27.5 15.9v16h20v-16a50 50 0 0 0 27.4-15.9l13.8 8 10-17.3-13.8-8a50 50 0 0 0 0-31.7Zm-47.5 50.8a35 35 0 1 1 0-70 35 35 0 0 1 0 70Z"><animateTransform type="rotate" attributeName="transform" calcMode="spline" dur="1.8" values="0;120" keyTimes="0;1" keySplines="0 0 1 1" repeatCount="indefinite"></animateTransform></path></svg>
 `;
+
+const INACTIVITY_TIMEOUT = 8 * 60 * 1000; // 8 minutos
 
 const saveCompletedFormAnswers = async ({
   formId,
@@ -91,6 +94,9 @@ export default function FormatScreen() {
   const [isRepeatedQuestions, setIsRepeatedQuestions] = useState([]);
   const [singleRepeated, setSingleRepeated] = useState(false);
   const [submittedRepeatedGroups, setSubmittedRepeatedGroups] = useState([]); // Nuevo: almacena grupos enviados
+  const [pickerSearch, setPickerSearch] = useState({}); // Nuevo: estado para búsqueda en Pickers
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const inactivityTimer = useRef(null);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -375,7 +381,7 @@ export default function FormatScreen() {
         await new Promise((resolve) => setTimeout(resolve, 50));
 
         const res = await fetch(
-          `https://1943-179-33-13-68.ngrok-free.app/responses/save-answers`,
+          `https://0077-179-33-13-68.ngrok-free.app/responses/save-answers`,
           {
             method: "POST",
             headers: requestOptions.headers,
@@ -549,7 +555,7 @@ export default function FormatScreen() {
       // Crear registro de respuesta y obtener response_id
       console.log("📡 Creando registro de respuesta...");
       const saveResponseRes = await fetch(
-        `https://1943-179-33-13-68.ngrok-free.app/responses/save-response/${id}`,
+        `https://0077-179-33-13-68.ngrok-free.app/responses/save-response/${id}`,
         {
           method: "POST",
           headers: requestOptions.headers,
@@ -951,7 +957,7 @@ export default function FormatScreen() {
 
       // Crear registro de respuesta y obtener response_id
       const saveResponseRes = await fetch(
-        `https://1943-179-33-13-68.ngrok-free.app/responses/save-response/${id}`,
+        `https://0077-179-33-13-68.ngrok-free.app/responses/save-response/${id}`,
         {
           method: "POST",
           headers: requestOptions.headers,
@@ -1005,6 +1011,35 @@ export default function FormatScreen() {
     }
   };
 
+  const resetInactivityTimer = async () => {
+    if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
+    inactivityTimer.current = setTimeout(async () => {
+      await AsyncStorage.setItem("isLoggedOut", "true");
+      setShowLogoutModal(true);
+    }, INACTIVITY_TIMEOUT);
+  };
+
+  useEffect(() => {
+    const reset = () => resetInactivityTimer();
+    const touchListener = () => reset();
+    const focusListener = () => reset();
+
+    // React Native events
+    const subscription = BackHandler.addEventListener(
+      "hardwareBackPress",
+      reset
+    );
+    const interval = setInterval(reset, 1000 * 60 * 4);
+
+    reset();
+
+    return () => {
+      if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
+      subscription.remove();
+      clearInterval(interval);
+    };
+  }, []);
+
   return (
     <View style={styles.container}>
       <ScrollView
@@ -1023,15 +1058,7 @@ export default function FormatScreen() {
         {/* Preguntas NO repetidas */}
         {questions.some((q) => !q.is_repeated) && (
           <View style={styles.questionsContainer}>
-            <Text
-              style={{
-                fontWeight: "bold",
-                fontSize: width * 0.045,
-                marginBottom: 6,
-              }}
-            >
-              Preguntas no repetidas
-            </Text>
+            {/* ...existing code... */}
             {loading ? (
               <Text style={styles.loadingText}>Cargando preguntas...</Text>
             ) : (
@@ -1039,10 +1066,15 @@ export default function FormatScreen() {
                 .filter((question) => !question.is_repeated)
                 .map((question) => {
                   const isLocked = nonRepeatedLocked;
-                  // ...existing code for rendering each input type...
                   return (
                     <View key={question.id} style={styles.questionContainer}>
-                      {/* ...existing code for rendering each input type... */}
+                      {/* Mostrar el texto de la pregunta siempre */}
+                      <Text style={styles.questionLabel}>
+                        {question.question_text}
+                        {question.required && (
+                          <Text style={styles.requiredText}> *</Text>
+                        )}
+                      </Text>
                       {/* Text */}
                       {question.question_type === "text" && (
                         <>
@@ -1090,6 +1122,23 @@ export default function FormatScreen() {
                                 key={index}
                                 style={styles.dynamicFieldContainer}
                               >
+                                <View style={styles.pickerSearchWrapper}>
+                                  <TextInput
+                                    style={styles.pickerSearchInput}
+                                    placeholder="Buscar opción..."
+                                    value={
+                                      pickerSearch[`${question.id}_${index}`] ||
+                                      ""
+                                    }
+                                    onChangeText={(text) =>
+                                      setPickerSearch((prev) => ({
+                                        ...prev,
+                                        [`${question.id}_${index}`]: text,
+                                      }))
+                                    }
+                                    editable={!isLocked}
+                                  />
+                                </View>
                                 <Picker
                                   selectedValue={field}
                                   onValueChange={(selectedValue) =>
@@ -1108,15 +1157,27 @@ export default function FormatScreen() {
                                     value=""
                                   />
                                   {Array.isArray(tableAnswers[question.id]) &&
-                                    tableAnswers[question.id].map(
-                                      (option, i) => (
+                                    tableAnswers[question.id]
+                                      .filter((option) =>
+                                        (pickerSearch[
+                                          `${question.id}_${index}`
+                                        ] || "") === ""
+                                          ? true
+                                          : option
+                                              .toLowerCase()
+                                              .includes(
+                                                pickerSearch[
+                                                  `${question.id}_${index}`
+                                                ]?.toLowerCase() || ""
+                                              )
+                                      )
+                                      .map((option, i) => (
                                         <Picker.Item
                                           key={i}
                                           label={option}
                                           value={option}
                                         />
-                                      )
-                                    )}
+                                      ))}
                                 </Picker>
                               </View>
                             )
@@ -1269,31 +1330,22 @@ export default function FormatScreen() {
         {/* Preguntas REPETIDAS */}
         {isRepeatedQuestions.length > 0 && (
           <View style={[styles.questionsContainer, { marginTop: 20 }]}>
-            <Text
-              style={{
-                fontWeight: "bold",
-                fontSize: width * 0.045,
-                marginBottom: 6,
-              }}
-            >
-              Preguntas repetidas
-            </Text>
+            {/* ...existing code... */}
             {loading ? (
               <Text style={styles.loadingText}>Cargando preguntas...</Text>
             ) : (
               isRepeatedQuestions.map((question) => {
                 const isLocked = false;
                 const allowAddRemove = isRepeatedQuestions.length === 1;
-                // ...renderizado de cada tipo de pregunta igual que antes...
                 return (
                   <View key={question.id} style={styles.questionContainer}>
+                    {/* Mostrar el texto de la pregunta siempre */}
                     <Text style={styles.questionLabel}>
                       {question.question_text}
                       {question.required && (
                         <Text style={styles.requiredText}> *</Text>
                       )}
                     </Text>
-                    {/* ...render de cada tipo de pregunta igual que antes... */}
                     {/* Text */}
                     {question.question_type === "text" && (
                       <>
@@ -1358,6 +1410,22 @@ export default function FormatScreen() {
                             key={index}
                             style={styles.dynamicFieldContainer}
                           >
+                            <View style={styles.pickerSearchWrapper}>
+                              <TextInput
+                                style={styles.pickerSearchInput}
+                                placeholder="Buscar opción..."
+                                value={
+                                  pickerSearch[`${question.id}_${index}`] || ""
+                                }
+                                onChangeText={(text) =>
+                                  setPickerSearch((prev) => ({
+                                    ...prev,
+                                    [`${question.id}_${index}`]: text,
+                                  }))
+                                }
+                                editable={!isLocked}
+                              />
+                            </View>
                             <Picker
                               selectedValue={field}
                               onValueChange={(selectedValue) =>
@@ -1376,13 +1444,26 @@ export default function FormatScreen() {
                                 value=""
                               />
                               {Array.isArray(tableAnswers[question.id]) &&
-                                tableAnswers[question.id].map((option, i) => (
-                                  <Picker.Item
-                                    key={i}
-                                    label={option}
-                                    value={option}
-                                  />
-                                ))}
+                                tableAnswers[question.id]
+                                  .filter((option) =>
+                                    (pickerSearch[`${question.id}_${index}`] ||
+                                      "") === ""
+                                      ? true
+                                      : option
+                                          .toLowerCase()
+                                          .includes(
+                                            pickerSearch[
+                                              `${question.id}_${index}`
+                                            ]?.toLowerCase() || ""
+                                          )
+                                  )
+                                  .map((option, i) => (
+                                    <Picker.Item
+                                      key={i}
+                                      label={option}
+                                      value={option}
+                                    />
+                                  ))}
                             </Picker>
                             {allowAddRemove && (
                               <TouchableOpacity
@@ -1536,7 +1617,7 @@ export default function FormatScreen() {
                 );
               })
             )}
-            {/* Botón de envío progresivo SOLO aquí */}
+            {/* Botón de envío progresivo SOLO si hay más de una pregunta repetida */}
             {isRepeatedQuestions.length > 1 && (
               <TouchableOpacity
                 style={styles.submitButton}
@@ -1645,6 +1726,77 @@ export default function FormatScreen() {
           </Text>
         </TouchableOpacity>
       </ScrollView>
+      {/* Modal de cierre de sesión por inactividad */}
+      <Modal
+        visible={showLogoutModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowLogoutModal(false)}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.4)",
+            justifyContent: "center",
+            alignItems: "center",
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: "#fff",
+              borderRadius: 10,
+              padding: 24,
+              width: width * 0.8,
+              alignItems: "center",
+              elevation: 5,
+            }}
+          >
+            <Text
+              style={{
+                fontWeight: "bold",
+                fontSize: width * 0.05,
+                marginBottom: 8,
+                color: "#222",
+              }}
+            >
+              Sesión cerrada por inactividad
+            </Text>
+            <Text
+              style={{
+                fontSize: width * 0.04,
+                color: "#444",
+                marginBottom: 12,
+                textAlign: "center",
+              }}
+            >
+              Por seguridad, la sesión se cerró automáticamente.
+            </Text>
+            <TouchableOpacity
+              style={{
+                backgroundColor: "#2563eb",
+                borderRadius: 6,
+                padding: 12,
+                alignItems: "center",
+                width: "100%",
+              }}
+              onPress={() => {
+                setShowLogoutModal(false);
+                router.push("/");
+              }}
+            >
+              <Text
+                style={{
+                  color: "white",
+                  fontWeight: "bold",
+                  fontSize: width * 0.045,
+                }}
+              >
+                Volver a iniciar sesión
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1740,11 +1892,11 @@ const styles = StyleSheet.create({
     borderColor: "#ccc",
     borderRadius: width * 0.75, // Dynamic border radius
     backgroundColor: "#f9f9f9",
-    marginTop: height * 0.01,
+    marginTop: 0,
     borderRadius: width * 0.02,
     borderColor: "#000000FF",
     borderWidth: 1,
-    width: width * 0.75, // Dynamic width
+    width: "100%",
   },
   fileButton: {
     backgroundColor: "#9225EBFF",
@@ -1808,13 +1960,12 @@ const styles = StyleSheet.create({
     color: "#333",
   },
   dynamicFieldContainer: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: "column",
+    alignItems: "flex-start",
     marginTop: height * 0.01,
     marginBottom: height * 0.01,
     width: width * 0.75, // Dynamic width
-
-    justifyContent: "space-between",
+    justifyContent: "flex-start",
   },
   addButton: {
     backgroundColor: "green",
@@ -1904,5 +2055,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: width * 0.01,
     marginBottom: 2,
     maxWidth: "100%",
+  },
+  pickerSearchWrapper: {
+    width: "100%",
+    marginBottom: 2,
+  },
+  pickerSearchInput: {
+    borderWidth: 1,
+    borderColor: "#bbb",
+    borderRadius: width * 0.015,
+    padding: height * 0.012,
+    marginBottom: 4,
+    backgroundColor: "#fff",
+    fontSize: width * 0.04,
+    width: "100%",
   },
 });

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   View,
   Text,
@@ -11,6 +11,9 @@ import {
   Animated, // Import Animated
   Easing, // Import Easing
   Image,
+  Modal,
+  TextInput,
+  Keyboard,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
@@ -30,6 +33,7 @@ const spinnerSvg = `
 const QUESTIONS_KEY = "offline_questions";
 const FORMS_METADATA_KEY = "offline_forms_metadata";
 const RELATED_ANSWERS_KEY = "offline_related_answers";
+const INACTIVITY_TIMEOUT = 8 * 60 * 1000; // 8 minutos
 
 export default function Home() {
   const router = useRouter();
@@ -38,6 +42,16 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [userInfo, setUserInfo] = useState(null); // State to store user information
   const [spinAnim] = useState(new Animated.Value(0)); // Spinner animation state
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const inactivityTimer = useRef(null);
+
+  // Sincronización segura
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [password, setPassword] = useState("");
+  const [syncQueue, setSyncQueue] = useState([]);
+  const [syncing, setSyncing] = useState(false);
+  const [pendingSync, setPendingSync] = useState(false);
+  const [pendingFormsForSync, setPendingFormsForSync] = useState([]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -80,7 +94,7 @@ export default function Home() {
       if (!token) throw new Error("No authentication token found");
 
       const response = await fetch(
-        "https://1943-179-33-13-68.ngrok-free.app/auth/validate-token",
+        "https://0077-179-33-13-68.ngrok-free.app/auth/validate-token",
         {
           method: "GET",
           headers: { Authorization: `Bearer ${token}` },
@@ -111,7 +125,7 @@ export default function Home() {
       try {
         // 1. Preguntas del formulario
         const qRes = await fetch(
-          `https://1943-179-33-13-68.ngrok-free.app/forms/${form.id}`,
+          `https://0077-179-33-13-68.ngrok-free.app/forms/${form.id}`,
           {
             method: "GET",
             headers: {
@@ -151,7 +165,7 @@ export default function Home() {
           if (question.question_type === "table") {
             try {
               const relRes = await fetch(
-                `https://1943-179-33-13-68.ngrok-free.app/questions/question-table-relation/answers/${question.id}`,
+                `https://0077-179-33-13-68.ngrok-free.app/questions/question-table-relation/answers/${question.id}`,
                 {
                   method: "GET",
                   headers: { Authorization: `Bearer ${token}` },
@@ -189,7 +203,7 @@ export default function Home() {
       if (!token) throw new Error("No authentication token found");
 
       const response = await fetch(
-        "https://1943-179-33-13-68.ngrok-free.app/forms/users/form_by_user",
+        "https://0077-179-33-13-68.ngrok-free.app/forms/users/form_by_user",
         {
           method: "GET",
           headers: {
@@ -293,7 +307,7 @@ export default function Home() {
 
             // Submit the form
             const saveResponseRes = await fetch(
-              `https://1943-179-33-13-68.ngrok-free.app/responses/save-response/${form.id}?mode=offline`,
+              `https://0077-179-33-13-68.ngrok-free.app/responses/save-response/${form.id}?mode=offline`,
               {
                 method: "POST",
                 headers: requestOptions.headers,
@@ -306,7 +320,7 @@ export default function Home() {
             // Submit each answer
             for (const response of form.responses) {
               await fetch(
-                `https://1943-179-33-13-68.ngrok-free.app/responses/save-answers`,
+                `https://0077-179-33-13-68.ngrok-free.app/responses/save-answers`,
                 {
                   method: "POST",
                   headers: requestOptions.headers,
@@ -346,6 +360,13 @@ export default function Home() {
 
     const unsubscribe = NetInfo.addEventListener((state) => {
       setIsOffline(!state.isConnected);
+      if (state.isConnected) {
+        AsyncStorage.getItem("pending_forms").then((stored) => {
+          const pendingForms = stored ? JSON.parse(stored) : [];
+          setPendingFormsForSync(pendingForms);
+          if (pendingForms.length > 0) setPendingSync(true);
+        });
+      }
     });
 
     return () => unsubscribe();
@@ -371,6 +392,196 @@ export default function Home() {
     inputRange: [0, 1],
     outputRange: ["0deg", "360deg"],
   });
+
+  // --- Inactividad: logout automático ---
+  const resetInactivityTimer = async () => {
+    if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
+    inactivityTimer.current = setTimeout(async () => {
+      await AsyncStorage.setItem("isLoggedOut", "true");
+      setShowLogoutModal(true);
+    }, INACTIVITY_TIMEOUT);
+  };
+
+  useEffect(() => {
+    const reset = () => resetInactivityTimer();
+    const touchListener = () => reset();
+    const focusListener = () => reset();
+
+    // React Native events
+    const subscription = BackHandler.addEventListener(
+      "hardwareBackPress",
+      reset
+    );
+    const interval = setInterval(reset, 1000 * 60 * 4); // refuerzo cada 4 min
+
+    // Touch events (for ScrollView, Touchable, etc.)
+    // No hay addEventListener global en RN, pero puedes usar onTouchStart/onScroll en ScrollView, etc.
+    reset();
+
+    return () => {
+      if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
+      subscription.remove();
+      clearInterval(interval);
+    };
+  }, []);
+
+  // --- Sincronización segura ---
+  useEffect(() => {
+    const checkNetworkStatus = async () => {
+      const state = await NetInfo.fetch();
+      setIsOffline(!state.isConnected);
+
+      if (state.isConnected) {
+        await fetchUserForms();
+        fetchUserInfo(); // Fetch user information when online
+
+        // Synchronize pending forms when back online
+        const storedPendingForms = await AsyncStorage.getItem("pending_forms");
+        const pendingForms = storedPendingForms
+          ? JSON.parse(storedPendingForms)
+          : [];
+        setPendingFormsForSync(pendingForms);
+        if (pendingForms.length > 0) {
+          setPendingSync(true);
+        }
+      } else {
+        // SOLO cargar formularios locales, no consultar endpoint
+        await loadOfflineForms();
+        loadUserInfoOffline(); // Cargar info usuario offline
+      }
+    };
+
+    checkNetworkStatus();
+
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      setIsOffline(!state.isConnected);
+      if (state.isConnected) {
+        AsyncStorage.getItem("pending_forms").then((stored) => {
+          const pendingForms = stored ? JSON.parse(stored) : [];
+          setPendingFormsForSync(pendingForms);
+          if (pendingForms.length > 0) setPendingSync(true);
+        });
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (pendingSync && !isOffline && pendingFormsForSync.length > 0) {
+      setShowPasswordModal(true);
+      setSyncQueue([...pendingFormsForSync]);
+      setPendingSync(false);
+    }
+  }, [pendingSync, isOffline, pendingFormsForSync]);
+
+  const handlePasswordSubmit = async () => {
+    setSyncing(true);
+    try {
+      const token = await AsyncStorage.getItem("authToken");
+      if (!token) throw new Error("No authentication token found");
+
+      // Validar contraseña
+      const res = await fetch(
+        "https://0077-179-33-13-68.ngrok-free.app/auth/validate-password",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ password }),
+        }
+      );
+      if (!res.ok) {
+        Alert.alert(
+          "Contraseña incorrecta",
+          "La contraseña es incorrecta. Intenta de nuevo."
+        );
+        setSyncing(false);
+        return;
+      }
+
+      // Sincronizar todos los formularios pendientes
+      const successfullySentForms = [];
+      for (const form of syncQueue) {
+        try {
+          await handleSubmitPendingForm(form, token);
+          successfullySentForms.push(form.id);
+        } catch (error) {
+          Alert.alert(
+            "Error",
+            `No se pudo sincronizar el formulario ID ${form.id}`
+          );
+        }
+      }
+      // Limpiar los enviados
+      const updatedPendingForms = pendingFormsForSync.filter(
+        (form) => !successfullySentForms.includes(form.id)
+      );
+      setPendingFormsForSync(updatedPendingForms);
+      await AsyncStorage.setItem(
+        "pending_forms",
+        JSON.stringify(updatedPendingForms)
+      );
+      setShowPasswordModal(false);
+      setPassword("");
+      setSyncQueue([]);
+      Alert.alert("Sincronización", "Formularios sincronizados correctamente.");
+    } catch (error) {
+      Alert.alert("Error", "No se pudo validar la contraseña o sincronizar.");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleSubmitPendingForm = async (form, tokenOverride = null) => {
+    try {
+      const token = tokenOverride || (await AsyncStorage.getItem("authToken"));
+      if (!token) throw new Error("No authentication token found");
+
+      const requestOptions = {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      };
+
+      // Submit the form
+      const saveResponseRes = await fetch(
+        `https://0077-179-33-13-68.ngrok-free.app/responses/save-response/${form.id}?mode=offline`,
+        {
+          method: "POST",
+          headers: requestOptions.headers,
+        }
+      );
+
+      const saveResponseData = await saveResponseRes.json();
+      const responseId = saveResponseData.response_id;
+
+      // Submit each answer
+      for (const response of form.responses) {
+        await fetch(
+          `https://0077-179-33-13-68.ngrok-free.app/responses/save-answers`,
+          {
+            method: "POST",
+            headers: requestOptions.headers,
+            body: JSON.stringify({
+              response_id: responseId,
+              question_id: response.question_id,
+              answer_text: response.answer_text,
+              file_path: response.file_path,
+            }),
+          }
+        );
+      }
+
+      console.log(`✅ Formulario ID ${form.id} enviado correctamente.`);
+    } catch (error) {
+      console.error(`❌ Error al enviar formulario ID ${form.id}:`, error);
+      throw error;
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -512,6 +723,196 @@ export default function Home() {
           </TouchableOpacity>
         </View>
       </View>
+      {/* Modal para pedir contraseña de sincronización */}
+      <Modal
+        visible={showPasswordModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!syncing) setShowPasswordModal(false);
+        }}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.4)",
+            justifyContent: "center",
+            alignItems: "center",
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: "#fff",
+              borderRadius: 10,
+              padding: 24,
+              width: width * 0.8,
+              alignItems: "center",
+              elevation: 5,
+            }}
+          >
+            <Text
+              style={{
+                fontWeight: "bold",
+                fontSize: width * 0.05,
+                marginBottom: 8,
+                color: "#222",
+              }}
+            >
+              Confirmar sincronización
+            </Text>
+            <Text
+              style={{
+                fontSize: width * 0.04,
+                color: "#444",
+                marginBottom: 12,
+                textAlign: "center",
+              }}
+            >
+              Por seguridad, ingresa tu contraseña para sincronizar los datos
+              pendientes.
+            </Text>
+            <TextInput
+              style={{
+                borderWidth: 1,
+                borderColor: "#bbb",
+                borderRadius: 6,
+                padding: 10,
+                width: "100%",
+                fontSize: width * 0.045,
+                marginBottom: 6,
+              }}
+              placeholder="Contraseña"
+              secureTextEntry
+              value={password}
+              onChangeText={setPassword}
+              editable={!syncing}
+            />
+            <View style={{ flexDirection: "row", marginTop: 10 }}>
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  marginHorizontal: 4,
+                  padding: 12,
+                  borderRadius: 6,
+                  alignItems: "center",
+                  backgroundColor: "#2563eb",
+                }}
+                onPress={handlePasswordSubmit}
+                disabled={syncing || !password}
+              >
+                <Text
+                  style={{
+                    color: "white",
+                    fontWeight: "bold",
+                    fontSize: width * 0.045,
+                  }}
+                >
+                  {syncing ? "Sincronizando..." : "Sincronizar"}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  marginHorizontal: 4,
+                  padding: 12,
+                  borderRadius: 6,
+                  alignItems: "center",
+                  backgroundColor: "#aaa",
+                }}
+                onPress={() => {
+                  if (!syncing) setShowPasswordModal(false);
+                  setPassword("");
+                  setSyncQueue([]);
+                }}
+                disabled={syncing}
+              >
+                <Text
+                  style={{
+                    color: "white",
+                    fontWeight: "bold",
+                    fontSize: width * 0.045,
+                  }}
+                >
+                  Cancelar
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      {/* Modal de cierre de sesión por inactividad */}
+      <Modal
+        visible={showLogoutModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowLogoutModal(false)}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.4)",
+            justifyContent: "center",
+            alignItems: "center",
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: "#fff",
+              borderRadius: 10,
+              padding: 24,
+              width: width * 0.8,
+              alignItems: "center",
+              elevation: 5,
+            }}
+          >
+            <Text
+              style={{
+                fontWeight: "bold",
+                fontSize: width * 0.05,
+                marginBottom: 8,
+                color: "#222",
+              }}
+            >
+              Sesión cerrada por inactividad
+            </Text>
+            <Text
+              style={{
+                fontSize: width * 0.04,
+                color: "#444",
+                marginBottom: 12,
+                textAlign: "center",
+              }}
+            >
+              Por seguridad, la sesión se cerró automáticamente tras 8 minutos
+              sin actividad.
+            </Text>
+            <TouchableOpacity
+              style={{
+                backgroundColor: "#2563eb",
+                borderRadius: 6,
+                padding: 12,
+                alignItems: "center",
+                width: "100%",
+              }}
+              onPress={() => {
+                setShowLogoutModal(false);
+                // Redirige al login
+                router.push("/");
+              }}
+            >
+              <Text
+                style={{
+                  color: "white",
+                  fontWeight: "bold",
+                  fontSize: width * 0.045,
+                }}
+              >
+                Ir al inicio de sesión
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
