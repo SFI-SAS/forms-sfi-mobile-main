@@ -16,6 +16,7 @@ import MatrixBackground from "./MatrixBackground";
 import { Screen } from "./Screen";
 import { useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
+import { Ionicons } from "@expo/vector-icons"; // Importar íconos
 
 // Obtener dimensiones de la pantalla
 const { width, height } = Dimensions.get("window");
@@ -36,6 +37,13 @@ export function Main() {
   const [password, setPassword] = useState("");
   const [isOffline, setIsOffline] = useState(false);
   const [userData, setUserData] = useState(null); // Estado para guardar los datos del usuario
+  const [showPassword, setShowPassword] = useState(false); // Estado para mostrar/ocultar contraseña
+  const [errors, setErrors] = useState({}); // Estado para errores visuales
+
+  // Validación de email simple
+  const isValidEmail = (email) => {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -104,6 +112,21 @@ export function Main() {
   }, [router, isOffline]);
 
   const handleLogin = async () => {
+    let newErrors = {};
+    if (!username.trim()) {
+      newErrors.username = "El email es requerido.";
+    } else if (!isValidEmail(username)) {
+      newErrors.username = "Por favor ingresa un email válido.";
+    }
+    if (!password.trim()) {
+      newErrors.password = "La contraseña es requerida.";
+    }
+    setErrors(newErrors);
+
+    if (Object.keys(newErrors).length > 0) {
+      return;
+    }
+
     try {
       if (isOffline) {
         const offlineToken = await AsyncStorage.getItem("authToken");
@@ -195,7 +218,7 @@ export function Main() {
       console.log(userData);
     } catch (error) {
       console.error("❌ API error:", error);
-      Alert.alert("Error", error.message);
+      Alert.alert("Error al iniciar sesión", "Verifique su usuario y contraseña.");
     }
   };
 
@@ -208,22 +231,60 @@ export function Main() {
           <View style={styles.inputContainer}>
             <Text style={styles.label}>Email</Text>
             <TextInput
-              onChangeText={setUsername}
+              onChangeText={(text) => {
+                setUsername(text);
+                setErrors((prev) => ({ ...prev, username: undefined }));
+              }}
               value={username}
               placeholder="name@company.com"
               keyboardType="email-address"
-              style={styles.input}
+              style={[
+                styles.input,
+                errors.username && { borderColor: "#dc2626" },
+              ]}
+              autoCapitalize="none"
+              autoCorrect={false}
             />
+            {errors.username && (
+              <Text style={styles.errorText}>{errors.username}</Text>
+            )}
           </View>
           <View style={styles.inputContainer}>
             <Text style={styles.label}>Contraseña</Text>
-            <TextInput
-              onChangeText={setPassword}
-              value={password}
-              placeholder="••••••••"
-              secureTextEntry={true}
-              style={styles.input}
-            />
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <TextInput
+                onChangeText={(text) => {
+                  setPassword(text);
+                  setErrors((prev) => ({ ...prev, password: undefined }));
+                }}
+                value={password}
+                placeholder="••••••••"
+                secureTextEntry={!showPassword}
+                style={[
+                  styles.input,
+                  { flex: 1 },
+                  errors.password && { borderColor: "#dc2626" },
+                ]}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <TouchableOpacity
+                onPress={() => setShowPassword((prev) => !prev)}
+                style={{ marginLeft: 8 }}
+                accessibilityLabel={
+                  showPassword ? "Ocultar contraseña" : "Mostrar contraseña"
+                }
+              >
+                <Ionicons
+                  name={showPassword ? "eye" : "eye-off"}
+                  size={24}
+                  color="#888"
+                />
+              </TouchableOpacity>
+            </View>
+            {errors.password && (
+              <Text style={styles.errorText}>{errors.password}</Text>
+            )}
           </View>
           <TouchableOpacity onPress={handleLogin} style={styles.button}>
             <Text style={styles.buttonText}>
@@ -277,6 +338,12 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 10,
     fontSize: width * 0.04, // Tamaño de fuente dinámico
+  },
+  errorText: {
+    color: "#dc2626",
+    fontSize: width * 0.035,
+    marginTop: 2,
+    marginLeft: 2,
   },
   button: {
     backgroundColor: "#2563eb",
