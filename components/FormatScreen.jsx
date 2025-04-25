@@ -22,6 +22,7 @@ import DateTimePicker from "@react-native-community/datetimepicker"; // Import D
 import { useFocusEffect } from "@react-navigation/native";
 import { SvgXml } from "react-native-svg";
 import { HomeIcon } from "./Icons"; // Adjust the import path as necessary
+import { Ionicons } from "@expo/vector-icons"; // Para iconos si se desea
 const { width, height } = Dimensions.get("window"); // Get screen dimensions
 
 const QUESTIONS_KEY = "offline_questions";
@@ -97,6 +98,17 @@ export default function FormatScreen() {
   const [pickerSearch, setPickerSearch] = useState({}); // Nuevo: estado para búsqueda en Pickers
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const inactivityTimer = useRef(null);
+  const [fileSerials, setFileSerials] = useState({}); // { [questionId]: serial }
+  const [fileUris, setFileUris] = useState({}); // { [questionId]: fileUri }
+  const [fileModal, setFileModal] = useState({
+    visible: false,
+    questionId: null,
+  });
+  const [showSerialModal, setShowSerialModal] = useState({
+    visible: false,
+    serial: "",
+  });
+  const [generatingSerial, setGeneratingSerial] = useState(false);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -361,15 +373,14 @@ export default function FormatScreen() {
 
   const sendAnswers = async (answers, responseId, requestOptions) => {
     const results = [];
-    // Simplemente recorre todas las respuestas y envía cada una como un objeto independiente,
-    // aunque tengan el mismo response_id y question_id.
     for (let i = 0; i < answers.length; i++) {
       const answer = answers[i];
       try {
+        const isFile = answer.question_type === "file";
         const responseData = {
           response_id: responseId,
           question_id: answer.question_id,
-          answer_text: answer.answer_text,
+          answer_text: isFile ? "" : answer.answer_text,
           file_path: answer.file_path || "",
         };
 
@@ -390,10 +401,38 @@ export default function FormatScreen() {
         );
 
         const responseJson = await res.json();
+        console.log("🟢 Respuesta de save-answers:", responseJson);
+
+        // Si es archivo y tiene serial, asocia el serial al answer_id devuelto (nuevo formato de respuesta)
+        if (
+          isFile &&
+          fileSerials[answer.question_id] &&
+          responseJson &&
+          responseJson.answer &&
+          responseJson.answer.answer_id
+        ) {
+          try {
+            const serialPayload = {
+              answer_id: responseJson.answer.answer_id,
+              serial: fileSerials[answer.question_id],
+            };
+            console.log("🔗 Asociando serial al answer:", serialPayload);
+            const serialRes = await fetch(
+              "https://0077-179-33-13-68.ngrok-free.app/responses/file-serials/",
+              {
+                method: "POST",
+                headers: requestOptions.headers,
+                body: JSON.stringify(serialPayload),
+              }
+            );
+            const serialJson = await serialRes.json();
+            console.log("🟢 Respuesta de file-serials:", serialJson);
+          } catch (serialErr) {
+            console.error("❌ Error asociando serial al answer:", serialErr);
+          }
+        }
 
         await new Promise((resolve) => setTimeout(resolve, 50));
-
-        console.log(`✅ Respuesta ${i + 1} guardada:`, responseJson);
         results.push(responseJson);
       } catch (error) {
         console.error(`❌ Error en respuesta ${i + 1}:`, error);
@@ -482,7 +521,8 @@ export default function FormatScreen() {
         else if (question.question_type === "file" && answers[questionId]) {
           allAnswers.push({
             question_id: questionId,
-            answer_text: "",
+            question_type: "file",
+            answer_text: "", // No enviar el serial aquí
             file_path: answers[questionId],
           });
         }
@@ -731,8 +771,9 @@ export default function FormatScreen() {
         } else if (question.question_type === "file" && answers[questionId]) {
           repeatedAnswers.push({
             question_id: questionId,
-            answer_text: "",
-            file_path: answers[questionId],
+            question_type: "file",
+            answer_text: "", // No enviar el serial aquí
+            file_path: "",
           });
         } else if (question.question_type === "date" && answers[questionId]) {
           repeatedAnswers.push({
@@ -1040,6 +1081,116 @@ export default function FormatScreen() {
     };
   }, []);
 
+  // Generar serial (online/offline)
+  const generateSerial = async (questionId) => {
+    setGeneratingSerial(true);
+    try {
+      const isOnline = await NetInfo.fetch().then((state) => state.isConnected);
+      let serial = "";
+      if (isOnline) {
+        const token = await AsyncStorage.getItem("authToken");
+        const res = await fetch(
+          "https://0077-179-33-13-68.ngrok-free.app/responses/file-serials/generate",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+          }
+        );
+        let data;
+        try {
+          data = await res.json();
+        } catch (e) {
+          console.error("❌ Error parseando respuesta de serial:", e);
+          Alert.alert("Error", "No se pudo obtener el serial del servidor.");
+          setGeneratingSerial(false);
+          return;
+        }
+        serial = data && data.serial;
+        if (!serial) {
+          console.error("❌ Serial no recibido del backend. Respuesta:", data);
+          Alert.alert(
+            "Error",
+            "No se pudo generar el serial. Intenta de nuevo."
+          );
+          setGeneratingSerial(false);
+          return;
+        }
+        console.log("🟢 Serial generado ONLINE:", serial);
+      } else {
+        serial = "OFF-" + Date.now() + "-" + Math.floor(Math.random() * 100000);
+        console.log("🟠 Serial generado OFFLINE:", serial);
+      }
+      setFileSerials((prev) => ({ ...prev, [questionId]: serial }));
+      setShowSerialModal({ visible: true, serial });
+    } catch (e) {
+      console.error("❌ Error generando serial:", e);
+      Alert.alert("Error", "No se pudo generar el serial.");
+    } finally {
+      setGeneratingSerial(false);
+    }
+  };
+
+  // Modal para archivo: abrir
+  const openFileModal = (questionId) => {
+    console.log(
+      "🟢 Abriendo modal de archivo para pregunta:",
+      questionId,
+      "Serial actual:",
+      fileSerials[questionId]
+    );
+    setFileModal({ visible: true, questionId });
+  };
+
+  // Modal para archivo: cerrar
+  const closeFileModal = () => {
+    console.log("🔴 Cerrando modal de archivo");
+    setFileModal({ visible: false, questionId: null });
+  };
+
+  // Modal serial: cerrar
+  const closeSerialModal = () => {
+    console.log("🔴 Cerrando modal de serial");
+    setShowSerialModal({ visible: false, serial: "" });
+  };
+
+  // Subir archivo y asociar a pregunta
+  const handleFileUploadWithSerial = async (questionId) => {
+    console.log(
+      "🟢 Subiendo archivo para pregunta:",
+      questionId,
+      "Serial:",
+      fileSerials[questionId]
+    );
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: "*/*",
+        copyToCacheDirectory: true,
+      });
+      if (result && !result.canceled && result.assets?.[0]?.uri) {
+        setFileUris((prev) => ({
+          ...prev,
+          [questionId]: result.assets[0].uri,
+        }));
+        handleAnswerChange(questionId, result.assets[0].uri);
+        console.log("🟢 Archivo seleccionado:", result.assets[0].uri);
+        Alert.alert("Archivo seleccionado", `Ruta: ${result.assets[0].uri}`);
+      } else if (result && result.canceled) {
+        console.log("⚠️ Selección de archivo cancelada por el usuario.");
+      } else {
+        console.error(
+          "❌ Resultado inesperado del selector de documentos:",
+          result
+        );
+      }
+    } catch (error) {
+      console.error("❌ Error seleccionando archivo:", error);
+      Alert.alert("Error", "No se pudo seleccionar el archivo.");
+    }
+  };
+
   return (
     <View style={styles.container}>
       <ScrollView
@@ -1099,19 +1250,50 @@ export default function FormatScreen() {
                       )}
                       {/* File */}
                       {question.question_type === "file" && (
-                        <TouchableOpacity
-                          style={styles.fileButton}
-                          onPress={() =>
-                            !isLocked && handleFileUpload(question.id)
-                          }
-                          disabled={isLocked}
+                        <View
+                          style={{
+                            flexDirection: "column",
+                            alignItems: "flex-start",
+                            width: "100%",
+                          }}
                         >
-                          <Text style={styles.fileButtonText}>
-                            {answers[question.id]
-                              ? "Archivo seleccionado"
-                              : "Subir archivo"}
-                          </Text>
-                        </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[
+                              styles.fileButton,
+                              fileUris[question.id] && {
+                                backgroundColor: "#20B46F",
+                              }, // Verde si ya hay archivo
+                            ]}
+                            onPress={() => {
+                              console.log(
+                                "🟢 Botón archivo presionado para pregunta:",
+                                question.id
+                              );
+                              !isLocked && openFileModal(question.id);
+                            }}
+                            disabled={isLocked}
+                          >
+                            <Text style={styles.fileButtonText}>
+                              {fileUris[question.id]
+                                ? "Archivo seleccionado"
+                                : "Subir archivo"}
+                            </Text>
+                          </TouchableOpacity>
+                          {/* Mostrar serial SIEMPRE debajo del campo */}
+                          {fileSerials[question.id] && (
+                            <View style={{ marginTop: 6, marginLeft: 2 }}>
+                              <Text
+                                style={{
+                                  color: "#2563eb",
+                                  fontWeight: "bold",
+                                  fontSize: 13,
+                                }}
+                              >
+                                Serial asignado: {fileSerials[question.id]}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
                       )}
                       {/* Table */}
                       {question.question_type === "table" && (
@@ -1388,19 +1570,45 @@ export default function FormatScreen() {
                     )}
                     {/* File */}
                     {question.question_type === "file" && (
-                      <TouchableOpacity
-                        style={styles.fileButton}
-                        onPress={() =>
-                          !isLocked && handleFileUpload(question.id)
-                        }
-                        disabled={isLocked}
+                      <View
+                        style={{
+                          flexDirection: "column",
+                          alignItems: "flex-start",
+                          width: "100%",
+                        }}
                       >
-                        <Text style={styles.fileButtonText}>
-                          {answers[question.id]
-                            ? "Archivo seleccionado"
-                            : "Subir archivo"}
-                        </Text>
-                      </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[
+                            styles.fileButton,
+                            fileUris[question.id] && {
+                              backgroundColor: "#20B46F",
+                            },
+                          ]}
+                          onPress={() =>
+                            !isLocked && openFileModal(question.id)
+                          }
+                          disabled={isLocked}
+                        >
+                          <Text style={styles.fileButtonText}>
+                            {fileUris[question.id]
+                              ? "Archivo seleccionado"
+                              : "Subir archivo"}
+                          </Text>
+                        </TouchableOpacity>
+                        {fileSerials[question.id] && (
+                          <View style={{ marginTop: 6, marginLeft: 2 }}>
+                            <Text
+                              style={{
+                                color: "#2563eb",
+                                fontWeight: "bold",
+                                fontSize: 13,
+                              }}
+                            >
+                              Serial asignado: {fileSerials[question.id]}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
                     )}
                     {/* Table */}
                     {question.question_type === "table" && (
@@ -1797,6 +2005,101 @@ export default function FormatScreen() {
           </View>
         </View>
       </Modal>
+      {/* Modal para generación de serial y subida de archivo */}
+      <Modal
+        visible={fileModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeFileModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            {!fileSerials[fileModal.questionId] ? (
+              <>
+                <Text style={styles.modalTitle}>
+                  ¿Desea generar un serial para este archivo?
+                </Text>
+                <View style={{ flexDirection: "row", marginTop: 10 }}>
+                  <TouchableOpacity
+                    style={[styles.modalButton, { backgroundColor: "#2563eb" }]}
+                    onPress={async () => {
+                      console.log(
+                        "🟢 Opción SÍ para generar serial, pregunta:",
+                        fileModal.questionId
+                      );
+                      await generateSerial(fileModal.questionId);
+                    }}
+                    disabled={generatingSerial}
+                  >
+                    <Text style={styles.modalButtonText}>
+                      {generatingSerial ? "Generando..." : "Sí"}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalButton, { backgroundColor: "#aaa" }]}
+                    onPress={closeFileModal}
+                    disabled={generatingSerial}
+                  >
+                    <Text style={styles.modalButtonText}>No</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              <>
+                <Text style={styles.modalTitle}>
+                  Serial asignado: {fileSerials[fileModal.questionId]}
+                </Text>
+                <View style={{ flexDirection: "row", marginTop: 10 }}>
+                  <TouchableOpacity
+                    style={[styles.modalButton, { backgroundColor: "#2563eb" }]}
+                    onPress={async () => {
+                      console.log(
+                        "🟢 Botón SUBIR ARCHIVO visible, pregunta:",
+                        fileModal.questionId,
+                        "Serial:",
+                        fileSerials[fileModal.questionId]
+                      );
+                      await handleFileUploadWithSerial(fileModal.questionId);
+                    }}
+                  >
+                    <Text style={styles.modalButtonText}>Subir archivo</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalButton, { backgroundColor: "#aaa" }]}
+                    onPress={closeFileModal}
+                  >
+                    <Text style={styles.modalButtonText}>Ok</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+      {/* Modal para mostrar el serial generado */}
+      <Modal
+        visible={showSerialModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeSerialModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>✅ Este es el serial asignado</Text>
+            <Text
+              style={{ fontWeight: "bold", fontSize: 18, marginVertical: 10 }}
+            >
+              {showSerialModal.serial}
+            </Text>
+            <TouchableOpacity
+              style={[styles.modalButton, { backgroundColor: "#2563eb" }]}
+              onPress={closeSerialModal}
+            >
+              <Text style={styles.modalButtonText}>Continuar ✅</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -2069,5 +2372,37 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     fontSize: width * 0.04,
     width: "100%",
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+  },
+  modalContent: {
+    width: "80%",
+    backgroundColor: "white",
+    borderRadius: 10,
+    padding: 20,
+    alignItems: "center",
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    marginBottom: 10,
+    textAlign: "center",
+  },
+  modalButton: {
+    flex: 1,
+    padding: 10,
+    borderRadius: 5,
+    alignItems: "center",
+    marginHorizontal: 5,
+  },
+  modalButtonText: {
+    color: "white",
+    fontSize: 15,
+    fontWeight: "bold",
+    textAlign: "center",
   },
 });

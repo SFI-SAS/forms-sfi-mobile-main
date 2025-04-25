@@ -45,14 +45,6 @@ export default function Home() {
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const inactivityTimer = useRef(null);
 
-  // Sincronización segura
-  const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [password, setPassword] = useState("");
-  const [syncQueue, setSyncQueue] = useState([]);
-  const [syncing, setSyncing] = useState(false);
-  const [pendingSync, setPendingSync] = useState(false);
-  const [pendingFormsForSync, setPendingFormsForSync] = useState([]);
-
   useFocusEffect(
     React.useCallback(() => {
       const disableBack = () => true; // Disable hardware back button
@@ -279,6 +271,7 @@ export default function Home() {
     router.push("/pending-forms");
   };
 
+  // Modifica la sincronización de formularios pendientes para enviar también el serial offline asociado a cada archivo
   useEffect(() => {
     const checkNetworkStatus = async () => {
       const state = await NetInfo.fetch();
@@ -293,6 +286,14 @@ export default function Home() {
         const pendingForms = storedPendingForms
           ? JSON.parse(storedPendingForms)
           : [];
+
+        // Cargar seriales offline si existen
+        let fileSerials = {};
+        try {
+          const serialsRaw = await AsyncStorage.getItem("file_serials_offline");
+          if (serialsRaw) fileSerials = JSON.parse(serialsRaw);
+        } catch {}
+
         for (const form of pendingForms) {
           try {
             const token = await AsyncStorage.getItem("authToken");
@@ -319,7 +320,7 @@ export default function Home() {
 
             // Submit each answer
             for (const response of form.responses) {
-              await fetch(
+              const answerRes = await fetch(
                 `https://0077-179-33-13-68.ngrok-free.app/responses/save-answers`,
                 {
                   method: "POST",
@@ -332,6 +333,37 @@ export default function Home() {
                   }),
                 }
               );
+              const answerJson = await answerRes.json();
+
+              // Si es archivo y hay serial offline, asociar el serial al answer_id devuelto
+              if (
+                response.file_path &&
+                fileSerials &&
+                fileSerials[response.question_id] &&
+                answerJson &&
+                answerJson.answer &&
+                answerJson.answer.answer_id
+              ) {
+                try {
+                  const serialPayload = {
+                    answer_id: answerJson.answer.answer_id,
+                    serial: fileSerials[response.question_id],
+                  };
+                  await fetch(
+                    "https://0077-179-33-13-68.ngrok-free.app/responses/file-serials/",
+                    {
+                      method: "POST",
+                      headers: requestOptions.headers,
+                      body: JSON.stringify(serialPayload),
+                    }
+                  );
+                } catch (serialErr) {
+                  console.error(
+                    "❌ Error asociando serial offline al answer:",
+                    serialErr
+                  );
+                }
+              }
             }
 
             // Remove the form from pending forms
@@ -424,164 +456,6 @@ export default function Home() {
       clearInterval(interval);
     };
   }, []);
-
-  // --- Sincronización segura ---
-  useEffect(() => {
-    const checkNetworkStatus = async () => {
-      const state = await NetInfo.fetch();
-      setIsOffline(!state.isConnected);
-
-      if (state.isConnected) {
-        await fetchUserForms();
-        fetchUserInfo(); // Fetch user information when online
-
-        // Synchronize pending forms when back online
-        const storedPendingForms = await AsyncStorage.getItem("pending_forms");
-        const pendingForms = storedPendingForms
-          ? JSON.parse(storedPendingForms)
-          : [];
-        setPendingFormsForSync(pendingForms);
-        if (pendingForms.length > 0) {
-          setPendingSync(true);
-        }
-      } else {
-        // SOLO cargar formularios locales, no consultar endpoint
-        await loadOfflineForms();
-        loadUserInfoOffline(); // Cargar info usuario offline
-      }
-    };
-
-    checkNetworkStatus();
-
-    const unsubscribe = NetInfo.addEventListener((state) => {
-      setIsOffline(!state.isConnected);
-      if (state.isConnected) {
-        AsyncStorage.getItem("pending_forms").then((stored) => {
-          const pendingForms = stored ? JSON.parse(stored) : [];
-          setPendingFormsForSync(pendingForms);
-          if (pendingForms.length > 0) setPendingSync(true);
-        });
-      }
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    if (pendingSync && !isOffline && pendingFormsForSync.length > 0) {
-      setShowPasswordModal(true);
-      setSyncQueue([...pendingFormsForSync]);
-      setPendingSync(false);
-    }
-  }, [pendingSync, isOffline, pendingFormsForSync]);
-
-  const handlePasswordSubmit = async () => {
-    setSyncing(true);
-    try {
-      const token = await AsyncStorage.getItem("authToken");
-      if (!token) throw new Error("No authentication token found");
-
-      // Validar contraseña
-      const res = await fetch(
-        "https://0077-179-33-13-68.ngrok-free.app/auth/validate-password",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ password }),
-        }
-      );
-      if (!res.ok) {
-        Alert.alert(
-          "Contraseña incorrecta",
-          "La contraseña es incorrecta. Intenta de nuevo."
-        );
-        setSyncing(false);
-        return;
-      }
-
-      // Sincronizar todos los formularios pendientes
-      const successfullySentForms = [];
-      for (const form of syncQueue) {
-        try {
-          await handleSubmitPendingForm(form, token);
-          successfullySentForms.push(form.id);
-        } catch (error) {
-          Alert.alert(
-            "Error",
-            `No se pudo sincronizar el formulario ID ${form.id}`
-          );
-        }
-      }
-      // Limpiar los enviados
-      const updatedPendingForms = pendingFormsForSync.filter(
-        (form) => !successfullySentForms.includes(form.id)
-      );
-      setPendingFormsForSync(updatedPendingForms);
-      await AsyncStorage.setItem(
-        "pending_forms",
-        JSON.stringify(updatedPendingForms)
-      );
-      setShowPasswordModal(false);
-      setPassword("");
-      setSyncQueue([]);
-      Alert.alert("Sincronización", "Formularios sincronizados correctamente.");
-    } catch (error) {
-      Alert.alert("Error", "No se pudo validar la contraseña o sincronizar.");
-    } finally {
-      setSyncing(false);
-    }
-  };
-
-  const handleSubmitPendingForm = async (form, tokenOverride = null) => {
-    try {
-      const token = tokenOverride || (await AsyncStorage.getItem("authToken"));
-      if (!token) throw new Error("No authentication token found");
-
-      const requestOptions = {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-      };
-
-      // Submit the form
-      const saveResponseRes = await fetch(
-        `https://0077-179-33-13-68.ngrok-free.app/responses/save-response/${form.id}?mode=offline`,
-        {
-          method: "POST",
-          headers: requestOptions.headers,
-        }
-      );
-
-      const saveResponseData = await saveResponseRes.json();
-      const responseId = saveResponseData.response_id;
-
-      // Submit each answer
-      for (const response of form.responses) {
-        await fetch(
-          `https://0077-179-33-13-68.ngrok-free.app/responses/save-answers`,
-          {
-            method: "POST",
-            headers: requestOptions.headers,
-            body: JSON.stringify({
-              response_id: responseId,
-              question_id: response.question_id,
-              answer_text: response.answer_text,
-              file_path: response.file_path,
-            }),
-          }
-        );
-      }
-
-      console.log(`✅ Formulario ID ${form.id} enviado correctamente.`);
-    } catch (error) {
-      console.error(`❌ Error al enviar formulario ID ${form.id}:`, error);
-      throw error;
-    }
-  };
 
   return (
     <View style={styles.container}>
@@ -723,123 +597,6 @@ export default function Home() {
           </TouchableOpacity>
         </View>
       </View>
-      {/* Modal para pedir contraseña de sincronización */}
-      <Modal
-        visible={showPasswordModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {
-          if (!syncing) setShowPasswordModal(false);
-        }}
-      >
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: "rgba(0,0,0,0.4)",
-            justifyContent: "center",
-            alignItems: "center",
-          }}
-        >
-          <View
-            style={{
-              backgroundColor: "#fff",
-              borderRadius: 10,
-              padding: 24,
-              width: width * 0.8,
-              alignItems: "center",
-              elevation: 5,
-            }}
-          >
-            <Text
-              style={{
-                fontWeight: "bold",
-                fontSize: width * 0.05,
-                marginBottom: 8,
-                color: "#222",
-              }}
-            >
-              Confirmar sincronización
-            </Text>
-            <Text
-              style={{
-                fontSize: width * 0.04,
-                color: "#444",
-                marginBottom: 12,
-                textAlign: "center",
-              }}
-            >
-              Por seguridad, ingresa tu contraseña para sincronizar los datos
-              pendientes.
-            </Text>
-            <TextInput
-              style={{
-                borderWidth: 1,
-                borderColor: "#bbb",
-                borderRadius: 6,
-                padding: 10,
-                width: "100%",
-                fontSize: width * 0.045,
-                marginBottom: 6,
-              }}
-              placeholder="Contraseña"
-              secureTextEntry
-              value={password}
-              onChangeText={setPassword}
-              editable={!syncing}
-            />
-            <View style={{ flexDirection: "row", marginTop: 10 }}>
-              <TouchableOpacity
-                style={{
-                  flex: 1,
-                  marginHorizontal: 4,
-                  padding: 12,
-                  borderRadius: 6,
-                  alignItems: "center",
-                  backgroundColor: "#2563eb",
-                }}
-                onPress={handlePasswordSubmit}
-                disabled={syncing || !password}
-              >
-                <Text
-                  style={{
-                    color: "white",
-                    fontWeight: "bold",
-                    fontSize: width * 0.045,
-                  }}
-                >
-                  {syncing ? "Sincronizando..." : "Sincronizar"}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={{
-                  flex: 1,
-                  marginHorizontal: 4,
-                  padding: 12,
-                  borderRadius: 6,
-                  alignItems: "center",
-                  backgroundColor: "#aaa",
-                }}
-                onPress={() => {
-                  if (!syncing) setShowPasswordModal(false);
-                  setPassword("");
-                  setSyncQueue([]);
-                }}
-                disabled={syncing}
-              >
-                <Text
-                  style={{
-                    color: "white",
-                    fontWeight: "bold",
-                    fontSize: width * 0.045,
-                  }}
-                >
-                  Cancelar
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
       {/* Modal de cierre de sesión por inactividad */}
       <Modal
         visible={showLogoutModal}

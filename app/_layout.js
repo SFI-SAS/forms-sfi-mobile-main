@@ -8,8 +8,8 @@ export default function Layout() {
       <Stack
         screenOptions={{
           headerStyle: { backgroundColor: "white" },
-          headerTintColor: "blue",
-          headerTitle: "ISOMETRIA",
+          headerTintColor: "black",
+          headerTitle: "SAFEMETRICS",
           headerTitleAlign: "center",
           headerLeft: () => <Logo />,
         }}

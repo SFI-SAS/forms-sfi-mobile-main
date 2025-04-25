@@ -25,11 +25,6 @@ export default function PendingForms() {
   const [pendingForms, setPendingForms] = useState([]);
   const [isOnline, setIsOnline] = useState(false);
   const router = useRouter();
-  const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [password, setPassword] = useState("");
-  const [syncQueue, setSyncQueue] = useState([]);
-  const [syncing, setSyncing] = useState(false);
-  const [pendingSync, setPendingSync] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const inactivityTimer = useRef(null);
 
@@ -54,7 +49,6 @@ export default function PendingForms() {
     };
 
     const reset = () => resetInactivityTimer();
-    const focusListener = () => reset();
     const keyboardListener = Keyboard.addListener("keyboardDidShow", reset);
     const interval = setInterval(reset, 1000 * 60 * 4);
 
@@ -76,81 +70,14 @@ export default function PendingForms() {
     fetchPendingForms();
   }, []);
 
+  // Corrige: elimina cualquier referencia a setPendingSync (no existe ni es necesaria)
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
       setIsOnline(state.isConnected);
-      if (state.isConnected && pendingForms.length > 0) {
-        setPendingSync(true);
-      }
+      // No uses setPendingSync aquí, simplemente actualiza isOnline
     });
     return () => unsubscribe();
   }, [pendingForms]);
-
-  useEffect(() => {
-    if (pendingSync && isOnline && pendingForms.length > 0) {
-      setShowPasswordModal(true);
-      setSyncQueue([...pendingForms]);
-      setPendingSync(false);
-    }
-  }, [pendingSync, isOnline, pendingForms]);
-
-  const handlePasswordSubmit = async () => {
-    setSyncing(true);
-    try {
-      const token = await AsyncStorage.getItem("authToken");
-      if (!token) throw new Error("No authentication token found");
-
-      const res = await fetch(
-        "https://0077-179-33-13-68.ngrok-free.app/auth/validate-password",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ password }),
-        }
-      );
-      if (!res.ok) {
-        Alert.alert(
-          "Contraseña incorrecta",
-          "La contraseña es incorrecta. Intenta de nuevo."
-        );
-        setSyncing(false);
-        return;
-      }
-
-      const successfullySentForms = [];
-      for (const form of syncQueue) {
-        try {
-          await handleSubmitPendingForm(form, token);
-          successfullySentForms.push(form.id);
-        } catch (error) {
-          Alert.alert(
-            "Error",
-            `No se pudo sincronizar el formulario ID ${form.id}`
-          );
-        }
-      }
-
-      const updatedPendingForms = pendingForms.filter(
-        (form) => !successfullySentForms.includes(form.id)
-      );
-      setPendingForms(updatedPendingForms);
-      await AsyncStorage.setItem(
-        "pending_forms",
-        JSON.stringify(updatedPendingForms)
-      );
-      setShowPasswordModal(false);
-      setPassword("");
-      setSyncQueue([]);
-      Alert.alert("Sincronización", "Formularios sincronizados correctamente.");
-    } catch (error) {
-      Alert.alert("Error", "No se pudo validar la contraseña o sincronizar.");
-    } finally {
-      setSyncing(false);
-    }
-  };
 
   const handleSubmitPendingForm = async (form, tokenOverride = null) => {
     try {
@@ -164,6 +91,13 @@ export default function PendingForms() {
         },
       };
 
+      // Cargar seriales offline si existen
+      let fileSerials = {};
+      try {
+        const serialsRaw = await AsyncStorage.getItem("file_serials_offline");
+        if (serialsRaw) fileSerials = JSON.parse(serialsRaw);
+      } catch {}
+
       const saveResponseRes = await fetch(
         `https://0077-179-33-13-68.ngrok-free.app/responses/save-response/${form.id}?mode=offline`,
         {
@@ -176,7 +110,8 @@ export default function PendingForms() {
       const responseId = saveResponseData.response_id;
 
       for (const response of form.responses) {
-        await fetch(
+        // Enviar la respuesta
+        const answerRes = await fetch(
           `https://0077-179-33-13-68.ngrok-free.app/responses/save-answers`,
           {
             method: "POST",
@@ -189,6 +124,37 @@ export default function PendingForms() {
             }),
           }
         );
+        const answerJson = await answerRes.json();
+
+        // Si es archivo y hay serial offline, asociar el serial al answer_id devuelto
+        if (
+          response.file_path &&
+          fileSerials &&
+          fileSerials[response.question_id] &&
+          answerJson &&
+          answerJson.answer &&
+          answerJson.answer.answer_id
+        ) {
+          try {
+            const serialPayload = {
+              answer_id: answerJson.answer.answer_id,
+              serial: fileSerials[response.question_id],
+            };
+            await fetch(
+              "https://0077-179-33-13-68.ngrok-free.app/responses/file-serials/",
+              {
+                method: "POST",
+                headers: requestOptions.headers,
+                body: JSON.stringify(serialPayload),
+              }
+            );
+          } catch (serialErr) {
+            console.error(
+              "❌ Error asociando serial offline al answer:",
+              serialErr
+            );
+          }
+        }
       }
 
       console.log(`✅ Formulario ID ${form.id} enviado correctamente.`);
@@ -212,9 +178,28 @@ export default function PendingForms() {
               <Text style={styles.formText}>Formulario ID: {form.id}</Text>
               <TouchableOpacity
                 style={styles.submitButton}
-                onPress={() => {
-                  setSyncQueue([form]);
-                  setShowPasswordModal(true);
+                onPress={async () => {
+                  try {
+                    await handleSubmitPendingForm(form);
+                    // Elimina el formulario de la lista local
+                    const updatedPendingForms = pendingForms.filter(
+                      (f) => f.id !== form.id
+                    );
+                    setPendingForms(updatedPendingForms);
+                    await AsyncStorage.setItem(
+                      "pending_forms",
+                      JSON.stringify(updatedPendingForms)
+                    );
+                    Alert.alert(
+                      "Sincronización",
+                      "Formulario enviado correctamente."
+                    );
+                  } catch (error) {
+                    Alert.alert(
+                      "Error",
+                      `No se pudo sincronizar el formulario ID ${form.id}`
+                    );
+                  }
                 }}
                 disabled={!isOnline}
               >
@@ -236,54 +221,6 @@ export default function PendingForms() {
           </Text>
         </TouchableOpacity>
       </ScrollView>
-      <Modal
-        visible={showPasswordModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {
-          if (!syncing) setShowPasswordModal(false);
-        }}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Confirmar sincronización</Text>
-            <Text style={styles.modalText}>
-              Por seguridad, ingresa tu contraseña para sincronizar los datos
-              pendientes.
-            </Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Contraseña"
-              secureTextEntry
-              value={password}
-              onChangeText={setPassword}
-              editable={!syncing}
-            />
-            <View style={{ flexDirection: "row", marginTop: 10 }}>
-              <TouchableOpacity
-                style={[styles.modalButton, { backgroundColor: "#2563eb" }]}
-                onPress={handlePasswordSubmit}
-                disabled={syncing || !password}
-              >
-                <Text style={styles.modalButtonText}>
-                  {syncing ? "Sincronizando..." : "Sincronizar"}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, { backgroundColor: "#aaa" }]}
-                onPress={() => {
-                  if (!syncing) setShowPasswordModal(false);
-                  setPassword("");
-                  setSyncQueue([]);
-                }}
-                disabled={syncing}
-              >
-                <Text style={styles.modalButtonText}>Cancelar</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
       <Modal
         visible={showLogoutModal}
         transparent
