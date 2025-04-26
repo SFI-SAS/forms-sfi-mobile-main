@@ -28,7 +28,7 @@ export const sendResponsesToAPI = async (formId, responses) => {
 
   try {
     const response = await fetch(
-      `https://0077-179-33-13-68.ngrok-free.app/response_user/submit_data`,
+      `https://api-forms.sfisas.com.co/response_user/submit_data`,
       {
         method: "POST",
         headers: {
@@ -83,7 +83,7 @@ export const getFormToAPI = async (form_id, accessToken) => {
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjZ29tZXpAc2Zpc2FzLmNvbSIsImV4cCI6MTc0MjQ3MjM2OH0.1NY0oc1vYVcqwziMMa8vmoF41XgpqIr-Rh0Cf6PMI-c";
   try {
     const response = await fetch(
-      `https://0077-179-33-13-68.ngrok-free.app/forms/${form_id}`,
+      `https://api-forms.sfisas.com.co/forms/${form_id}`,
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,

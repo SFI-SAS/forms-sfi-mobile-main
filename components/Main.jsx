@@ -67,7 +67,7 @@ export function Main() {
 
         if (savedToken && isLoggedOut !== "true") {
           const responseUser = await fetch(
-            `https://0077-179-33-13-68.ngrok-free.app/auth/validate-token`,
+            `https://api-forms.sfisas.com.co/auth/validate-token`,
             {
               method: "GET",
               headers: { Authorization: `Bearer ${savedToken}` },
@@ -154,7 +154,7 @@ export function Main() {
 
       // Primera petición: obtener token
       const response = await fetch(
-        `https://0077-179-33-13-68.ngrok-free.app/auth/token`,
+        `https://api-forms.sfisas.com.co/auth/token`,
         {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -189,7 +189,7 @@ export function Main() {
 
       // Validar el token usando GET
       const responseUser = await fetch(
-        `https://0077-179-33-13-68.ngrok-free.app/auth/validate-token`,
+        `https://api-forms.sfisas.com.co/auth/validate-token`,
         {
           method: "GET",
           headers: { Authorization: `Bearer ${token}` },
@@ -218,7 +218,10 @@ export function Main() {
       console.log(userData);
     } catch (error) {
       console.error("❌ API error:", error);
-      Alert.alert("Error al iniciar sesión", "Verifique su usuario y contraseña.");
+      Alert.alert(
+        "Error al iniciar sesión",
+        "Verifique su usuario y contraseña."
+      );
     }
   };
 
