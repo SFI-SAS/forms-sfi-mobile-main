@@ -9,9 +9,9 @@ export default function Layout() {
         screenOptions={{
           headerStyle: { backgroundColor: "white" },
           headerTintColor: "black",
-          headerTitle: "SAFEMETRICS",
+          headerTitle: () => <Logo />, // Logo centrado
           headerTitleAlign: "center",
-          headerLeft: () => <Logo />,
+          headerBackVisible: false, // Quita la flecha de volver atrás
         }}
       />
     </View>

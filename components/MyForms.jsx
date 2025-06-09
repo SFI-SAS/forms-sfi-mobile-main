@@ -27,9 +27,12 @@ export default function MyForms() {
   useFocusEffect(
     React.useCallback(() => {
       const disableBack = () => true;
-      BackHandler.addEventListener("hardwareBackPress", disableBack);
+      const subscription = BackHandler.addEventListener(
+        "hardwareBackPress",
+        disableBack
+      );
       return () => {
-        BackHandler.removeEventListener("hardwareBackPress", disableBack);
+        subscription.remove();
       };
     }, [])
   );
@@ -49,7 +52,7 @@ export default function MyForms() {
 
       // Obtener formularios enviados
       const response = await fetch(
-        `https://api-forms.sfisas.com.co/forms/users/completed_forms`,
+        `https://api-forms-sfi.service.saferut.com/forms/users/completed_forms`,
         {
           method: "GET",
           headers: { Authorization: `Bearer ${accessToken}` },

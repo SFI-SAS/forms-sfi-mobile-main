@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  Alert,
   StyleSheet,
   ScrollView,
   BackHandler,
@@ -47,11 +46,13 @@ export default function Home() {
 
   useFocusEffect(
     React.useCallback(() => {
-      const disableBack = () => true; // Disable hardware back button
-      BackHandler.addEventListener("hardwareBackPress", disableBack);
-
+      const disableBack = () => true;
+      const subscription = BackHandler.addEventListener(
+        "hardwareBackPress",
+        disableBack
+      );
       return () => {
-        BackHandler.removeEventListener("hardwareBackPress", disableBack);
+        subscription.remove();
       };
     }, [])
   );
@@ -86,7 +87,7 @@ export default function Home() {
       if (!token) throw new Error("No authentication token found");
 
       const response = await fetch(
-        "https://api-forms.sfisas.com.co/auth/validate-token",
+        "https://api-forms-sfi.service.saferut.com/auth/validate-token",
         {
           method: "GET",
           headers: { Authorization: `Bearer ${token}` },
@@ -117,7 +118,7 @@ export default function Home() {
       try {
         // 1. Preguntas del formulario
         const qRes = await fetch(
-          `https://api-forms.sfisas.com.co/forms/${form.id}`,
+          `https://api-forms-sfi.service.saferut.com/forms/${form.id}`,
           {
             method: "GET",
             headers: {
@@ -127,7 +128,6 @@ export default function Home() {
           }
         );
         const qData = await qRes.json();
-        console.log(qData);
         if (!qRes.ok)
           throw new Error(qData.detail || "Error fetching questions");
 
@@ -143,6 +143,11 @@ export default function Home() {
               options: question.options.map((option) => option.option_text),
             };
           }
+          // Para preguntas tipo tabla, las opciones se llenan con las relacionadas
+          if (question.question_type === "table") {
+            // Las opciones se llenarán después con las relacionadas
+            return { ...question, options: [] };
+          }
           return question;
         });
 
@@ -157,22 +162,24 @@ export default function Home() {
           if (question.question_type === "table") {
             try {
               const relRes = await fetch(
-                `https://api-forms.sfisas.com.co/questions/question-table-relation/answers/${question.id}`,
+                `https://api-forms-sfi.service.saferut.com/questions/question-table-relation/answers/${question.id}`,
                 {
                   method: "GET",
                   headers: { Authorization: `Bearer ${token}` },
                 }
               );
               const relData = await relRes.json();
-              allRelatedAnswers[question.id] = relData;
+              // relData.data es un array de objetos con { name }
+              // Guarda las opciones relacionadas para la pregunta
+              allRelatedAnswers[question.id] = Array.isArray(relData.data)
+                ? relData.data.map((item) => item.name)
+                : [];
             } catch (e) {
-              // Si falla, guarda vacío
-              allRelatedAnswers[question.id] = {};
+              allRelatedAnswers[question.id] = [];
             }
           }
         }
       } catch (e) {
-        // Si falla, sigue con el siguiente formulario
         continue;
       }
     }
@@ -195,7 +202,7 @@ export default function Home() {
       if (!token) throw new Error("No authentication token found");
 
       const response = await fetch(
-        "https://api-forms.sfisas.com.co/forms/users/form_by_user",
+        "https://api-forms-sfi.service.saferut.com/forms/users/form_by_user",
         {
           method: "GET",
           headers: {
@@ -218,10 +225,6 @@ export default function Home() {
       await fetchAndCacheQuestionsAndRelated(data, token);
     } catch (error) {
       console.error("❌ Error al obtener los formularios del usuario:", error);
-      Alert.alert(
-        "Error",
-        "No se pudieron cargar los formularios del usuario."
-      );
     } finally {
       setLoading(false);
     }
@@ -245,7 +248,9 @@ export default function Home() {
   const handleLogout = async () => {
     try {
       await AsyncStorage.setItem("isLoggedOut", "true");
-      router.push("/");
+      // Limpia el token si quieres forzar login limpio:
+      // await AsyncStorage.removeItem("authToken");
+      router.replace("/"); // Usa replace para evitar volver atrás con el botón de Android
     } catch (error) {
       Alert.alert("Error", "No se pudo cerrar sesión. Inténtalo de nuevo.");
     }
@@ -279,112 +284,12 @@ export default function Home() {
 
       if (state.isConnected) {
         await fetchUserForms();
-        fetchUserInfo(); // Fetch user information when online
-
-        // Synchronize pending forms when back online
-        const storedPendingForms = await AsyncStorage.getItem("pending_forms");
-        const pendingForms = storedPendingForms
-          ? JSON.parse(storedPendingForms)
-          : [];
-
-        // Cargar seriales offline si existen
-        let fileSerials = {};
-        try {
-          const serialsRaw = await AsyncStorage.getItem("file_serials_offline");
-          if (serialsRaw) fileSerials = JSON.parse(serialsRaw);
-        } catch {}
-
-        for (const form of pendingForms) {
-          try {
-            const token = await AsyncStorage.getItem("authToken");
-            if (!token) throw new Error("No authentication token found");
-
-            const requestOptions = {
-              headers: {
-                Authorization: `Bearer ${token}`,
-                "Content-Type": "application/json",
-              },
-            };
-
-            // Submit the form
-            const saveResponseRes = await fetch(
-              `https://api-forms.sfisas.com.co/responses/save-response/${form.id}?mode=offline`,
-              {
-                method: "POST",
-                headers: requestOptions.headers,
-              }
-            );
-
-            const saveResponseData = await saveResponseRes.json();
-            const responseId = saveResponseData.response_id;
-
-            // Submit each answer
-            for (const response of form.responses) {
-              const answerRes = await fetch(
-                `https://api-forms.sfisas.com.co/responses/save-answers`,
-                {
-                  method: "POST",
-                  headers: requestOptions.headers,
-                  body: JSON.stringify({
-                    response_id: responseId,
-                    question_id: response.question_id,
-                    answer_text: response.answer_text,
-                    file_path: response.file_path,
-                  }),
-                }
-              );
-              const answerJson = await answerRes.json();
-
-              // Si es archivo y hay serial offline, asociar el serial al answer_id devuelto
-              if (
-                response.file_path &&
-                fileSerials &&
-                fileSerials[response.question_id] &&
-                answerJson &&
-                answerJson.answer &&
-                answerJson.answer.answer_id
-              ) {
-                try {
-                  const serialPayload = {
-                    answer_id: answerJson.answer.answer_id,
-                    serial: fileSerials[response.question_id],
-                  };
-                  await fetch(
-                    "https://api-forms.sfisas.com.co/responses/file-serials/",
-                    {
-                      method: "POST",
-                      headers: requestOptions.headers,
-                      body: JSON.stringify(serialPayload),
-                    }
-                  );
-                } catch (serialErr) {
-                  console.error(
-                    "❌ Error asociando serial offline al answer:",
-                    serialErr
-                  );
-                }
-              }
-            }
-
-            // Remove the form from pending forms
-            const updatedPendingForms = pendingForms.filter(
-              (f) => f.id !== form.id
-            );
-            await AsyncStorage.setItem(
-              "pending_forms",
-              JSON.stringify(updatedPendingForms)
-            );
-          } catch (error) {
-            console.error(
-              "❌ Error al sincronizar formulario pendiente:",
-              error
-            );
-          }
-        }
+        fetchUserInfo();
+        // Ya NO sincroniza automáticamente los pending_forms aquí.
+        // Solo carga formularios y usuario.
       } else {
-        // SOLO cargar formularios locales, no consultar endpoint
         await loadOfflineForms();
-        loadUserInfoOffline(); // Cargar info usuario offline
+        loadUserInfoOffline();
       }
     };
 
@@ -392,13 +297,7 @@ export default function Home() {
 
     const unsubscribe = NetInfo.addEventListener((state) => {
       setIsOffline(!state.isConnected);
-      if (state.isConnected) {
-        AsyncStorage.getItem("pending_forms").then((stored) => {
-          const pendingForms = stored ? JSON.parse(stored) : [];
-          setPendingFormsForSync(pendingForms);
-          if (pendingForms.length > 0) setPendingSync(true);
-        });
-      }
+      // Ya NO sincroniza automáticamente los pending_forms aquí.
     });
 
     return () => unsubscribe();
@@ -695,7 +594,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: width * 0.045,
     fontWeight: "bold",
-    color: "#2563eb",
+    color: "#4B34C7",
     marginBottom: 2,
     textAlign: "center",
   },
@@ -755,20 +654,21 @@ const styles = StyleSheet.create({
   },
   formItem: {
     padding: width * 0.03,
-    backgroundColor: "#f0f0f0",
+    backgroundColor: "#12A0AF",
     borderRadius: width * 0.018,
     marginBottom: height * 0.012,
     borderColor: "#00000022",
+    color: "#ffffff",
     borderWidth: 1,
   },
   formText: {
     fontSize: width * 0.042,
     fontWeight: "bold",
-    color: "#222",
+    color: "#ffffff",
   },
   formDescription: {
     fontSize: width * 0.032,
-    color: "#555",
+    color: "#ffffff",
   },
   fixedButtonsContainer: {
     backgroundColor: "#fff",
@@ -788,7 +688,7 @@ const styles = StyleSheet.create({
     flex: 1,
     marginHorizontal: width * 0.01,
     paddingVertical: height * 0.012,
-    backgroundColor: "#2563eb",
+    backgroundColor: "#4B34C7",
     borderRadius: width * 0.018,
     alignItems: "center",
     borderColor: "#00000022",

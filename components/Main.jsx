@@ -45,13 +45,16 @@ export function Main() {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   };
 
+  // Corrige el patrón de BackHandler para evitar el warning de removeEventListener
   useFocusEffect(
     useCallback(() => {
-      const disableBack = () => true; // Disable hardware back button
-      BackHandler.addEventListener("hardwareBackPress", disableBack);
-
+      const disableBack = () => true;
+      const subscription = BackHandler.addEventListener(
+        "hardwareBackPress",
+        disableBack
+      );
       return () => {
-        BackHandler.removeEventListener("hardwareBackPress", disableBack);
+        subscription.remove();
       };
     }, [])
   );
@@ -67,7 +70,7 @@ export function Main() {
 
         if (savedToken && isLoggedOut !== "true") {
           const responseUser = await fetch(
-            `https://api-forms.sfisas.com.co/auth/validate-token`,
+            `https://api-forms-sfi.service.saferut.com/auth/validate-token`,
             {
               method: "GET",
               headers: { Authorization: `Bearer ${savedToken}` },
@@ -96,12 +99,6 @@ export function Main() {
     const handleNetworkChange = async (state) => {
       const wasOffline = isOffline;
       setIsOffline(!state.isConnected);
-
-      if (state.isConnected && wasOffline) {
-        Alert.alert("Internet Changes", "Synchronizing data...");
-        console.log("🔄 Synchronizing data...");
-        // Add synchronization logic here if needed
-      }
     };
 
     NetInfo.fetch().then((state) => setIsOffline(!state.isConnected));
@@ -147,14 +144,18 @@ export function Main() {
 
       // Construir la cadena de parámetros manualmente
       const params = encodeFormData({
+        grant_type: "password",
         username: username,
         password: password,
-        grant_type: "password",
+        scope: "",
+        client_id: "",
+        client_secret: "",
       });
+      console.log(params);
 
-      // Primera petición: obtener token
+      // El endpoint /auth/token espera POST con application/x-www-form-urlencoded y los campos grant_type, username, password, scope, client_id, client_secret
       const response = await fetch(
-        `https://api-forms.sfisas.com.co/auth/token`,
+        `https://api-forms-sfi.service.saferut.com/auth/token`,
         {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -185,11 +186,12 @@ export function Main() {
       }
 
       const token = json.access_token;
+
       await AsyncStorage.setItem("authToken", token); // Save token for offline access
 
       // Validar el token usando GET
       const responseUser = await fetch(
-        `https://api-forms.sfisas.com.co/auth/validate-token`,
+        `https://api-forms-sfi.service.saferut.com/auth/validate-token`,
         {
           method: "GET",
           headers: { Authorization: `Bearer ${token}` },
@@ -220,7 +222,9 @@ export function Main() {
       console.error("❌ API error:", error);
       Alert.alert(
         "Error al iniciar sesión",
-        "Verifique su usuario y contraseña."
+        error.message?.includes("Method Not Allowed")
+          ? "El endpoint /auth/token no permite POST. Consulta con el administrador del sistema."
+          : "Verifique su usuario y contraseña."
       );
     }
   };
@@ -321,7 +325,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: width * 0.08, // Tamaño de fuente dinámico (8% del ancho de la pantalla)
     fontWeight: "bold",
-    color: "#1f2937",
+    color: "#4B34C7",
     textAlign: "center",
     marginBottom: 20,
   },
@@ -331,7 +335,7 @@ const styles = StyleSheet.create({
   label: {
     fontSize: width * 0.04, // Tamaño de fuente dinámico (4% del ancho de la pantalla)
     fontWeight: "bold",
-    color: "#1f2937",
+    color: "#4B34C7",
     marginBottom: 4,
   },
   input: {
@@ -349,7 +353,7 @@ const styles = StyleSheet.create({
     marginLeft: 2,
   },
   button: {
-    backgroundColor: "#2563eb",
+    backgroundColor: "#12A0AF",
     paddingVertical: height * 0.02, // Altura dinámica (2% de la altura de la pantalla)
     borderRadius: 8,
     alignItems: "center",

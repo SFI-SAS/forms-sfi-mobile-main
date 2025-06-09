@@ -28,6 +28,8 @@ const { width, height } = Dimensions.get("window"); // Get screen dimensions
 const QUESTIONS_KEY = "offline_questions";
 const FORMS_METADATA_KEY = "offline_forms_metadata";
 const RELATED_ANSWERS_KEY = "offline_related_answers";
+const PENDING_SAVE_RESPONSE_KEY = "pending_save_response";
+const PENDING_SAVE_ANSWERS_KEY = "pending_save_answers";
 
 // Copia el SVG como string
 const spinnerSvg = `
@@ -112,9 +114,13 @@ export default function FormatScreen() {
 
   useFocusEffect(
     React.useCallback(() => {
-      const disableBack = () => true; // Disable hardware back button
+      const disableBack = () => true;
+      const subscription = BackHandler.addEventListener(
+        "hardwareBackPress",
+        disableBack
+      );
       return () => {
-        BackHandler.removeEventListener("hardwareBackPress", disableBack);
+        subscription.remove();
       };
     }, [])
   );
@@ -146,12 +152,20 @@ export default function FormatScreen() {
         if (q.question_type === "table") {
           const rel = offlineRelated[q.id];
           if (rel) {
-            if (rel.source === "pregunta_relacionada") {
-              tableAnswersObj[q.id] = Array.isArray(rel.respuestas)
-                ? rel.respuestas.map((item) => item.respuesta)
-                : [];
-            } else if (rel.source === "usuarios") {
-              tableAnswersObj[q.id] = Array.isArray(rel.data) ? rel.data : [];
+            // Si la fuente es "pregunta_relacionada", los datos están en rel.data (array de objetos con { name })
+            if (
+              rel.source === "pregunta_relacionada" &&
+              Array.isArray(rel.data)
+            ) {
+              tableAnswersObj[q.id] = rel.data.map((item) => item.name);
+            }
+            // Si la fuente es "usuarios", los datos están en rel.data (array de strings o nombres)
+            else if (rel.source === "usuarios" && Array.isArray(rel.data)) {
+              tableAnswersObj[q.id] = rel.data;
+            }
+            // Si la estructura es solo un array plano (compatibilidad)
+            else if (Array.isArray(rel)) {
+              tableAnswersObj[q.id] = rel;
             } else {
               tableAnswersObj[q.id] = [];
             }
@@ -392,7 +406,7 @@ export default function FormatScreen() {
         await new Promise((resolve) => setTimeout(resolve, 50));
 
         const res = await fetch(
-          `https://api-forms.sfisas.com.co/responses/save-answers/`,
+          `https://api-forms-sfi.service.saferut.com/responses/save-answers/`,
           {
             method: "POST",
             headers: requestOptions.headers,
@@ -418,7 +432,7 @@ export default function FormatScreen() {
             };
             console.log("🔗 Asociando serial al answer:", serialPayload);
             const serialRes = await fetch(
-              "https://api-forms.sfisas.com.co/responses/file-serials/",
+              "https://api-forms-sfi.service.saferut.com/responses/file-serials/",
               {
                 method: "POST",
                 headers: requestOptions.headers,
@@ -448,10 +462,6 @@ export default function FormatScreen() {
     try {
       const token = await AsyncStorage.getItem("authToken");
       if (!token) throw new Error("No authentication token found");
-
-      const mode = await NetInfo.fetch().then((state) =>
-        state.isConnected ? "online" : "offline"
-      );
 
       // Preparar todas las respuestas
       const allAnswers = [];
@@ -552,19 +562,61 @@ export default function FormatScreen() {
         return;
       }
 
+      const mode = await NetInfo.fetch().then((state) =>
+        state.isConnected ? "online" : "offline"
+      );
+
       if (mode === "offline") {
-        // Guardar en pending_forms
-        const storedPending = await AsyncStorage.getItem("pending_forms");
-        const pendingForms = storedPending ? JSON.parse(storedPending) : [];
-        pendingForms.push({
-          id,
-          responses: allAnswers,
+        // --- NUEVO: Guardar por separado para save-response y save-answers ---
+        // Estructura para save-response
+        const saveResponseData = {
+          form_id: id,
+          answers: allAnswers.map((a) => ({
+            question_id: a.question_id,
+            response: "", // string vacío para el primer envío
+            file_path: a.file_path || "",
+            repeated_id: "",
+          })),
+          mode: "offline",
           timestamp: Date.now(),
-        });
-        await AsyncStorage.setItem(
-          "pending_forms",
-          JSON.stringify(pendingForms)
+        };
+
+        // Estructura para save-answers (cada respuesta individual)
+        const saveAnswersData = allAnswers.map((a) => ({
+          form_id: id,
+          question_id: a.question_id,
+          answer_text: a.answer_text,
+          file_path: a.file_path || "",
+          timestamp: Date.now(),
+        }));
+
+        // Guardar en AsyncStorage por separado
+        // Guardar save-response
+        const storedPendingSaveResponse = await AsyncStorage.getItem(
+          PENDING_SAVE_RESPONSE_KEY
         );
+        const pendingSaveResponse = storedPendingSaveResponse
+          ? JSON.parse(storedPendingSaveResponse)
+          : [];
+        pendingSaveResponse.push(saveResponseData);
+        await AsyncStorage.setItem(
+          PENDING_SAVE_RESPONSE_KEY,
+          JSON.stringify(pendingSaveResponse)
+        );
+
+        // Guardar save-answers
+        const storedPendingSaveAnswers = await AsyncStorage.getItem(
+          PENDING_SAVE_ANSWERS_KEY
+        );
+        const pendingSaveAnswers = storedPendingSaveAnswers
+          ? JSON.parse(storedPendingSaveAnswers)
+          : [];
+        pendingSaveAnswers.push(...saveAnswersData);
+        await AsyncStorage.setItem(
+          PENDING_SAVE_ANSWERS_KEY,
+          JSON.stringify(pendingSaveAnswers)
+        );
+
         // Guardar también para MyForms offline
         await saveCompletedFormAnswers({
           formId: id,
@@ -572,6 +624,7 @@ export default function FormatScreen() {
           questions,
           mode: "offline",
         });
+
         Alert.alert(
           "Guardado Offline",
           "El formulario se guardó para envío automático cuando tengas conexión."
@@ -584,6 +637,14 @@ export default function FormatScreen() {
       // Log de depuración con todas las respuestas antes de enviar
       console.log("📝 Respuestas a enviar:", allAnswers);
 
+      // El backend espera un array de objetos con las claves: question_id, response, file_path, repeated_id
+      const allAnswersForApi = allAnswers.map((a) => ({
+        question_id: a.question_id,
+        response: "", // string vacío para el primer envío
+        file_path: a.file_path || "",
+        repeated_id: "", // string vacío si no aplica
+      }));
+
       // Definir requestOptions aquí
       const requestOptions = {
         headers: {
@@ -595,11 +656,11 @@ export default function FormatScreen() {
       // Crear registro de respuesta y obtener response_id
       console.log("📡 Creando registro de respuesta...");
       const saveResponseRes = await fetch(
-        `https://api-forms.sfisas.com.co/responses/save-response/${id}`,
+        `https://api-forms-sfi.service.saferut.com/responses/save-response/${id}?mode=${mode}`,
         {
           method: "POST",
           headers: requestOptions.headers,
-          body: JSON.stringify({ mode }),
+          body: JSON.stringify(allAnswersForApi),
         }
       );
 
@@ -608,7 +669,20 @@ export default function FormatScreen() {
       const responseId = saveResponseData.response_id;
 
       if (!responseId) {
-        throw new Error("No se pudo obtener el ID de respuesta");
+        let backendMsg = "";
+        if (Array.isArray(saveResponseData.detail)) {
+          backendMsg = saveResponseData.detail
+            .map((d) => (typeof d === "object" ? JSON.stringify(d) : String(d)))
+            .join("\n");
+        } else if (typeof saveResponseData.detail === "object") {
+          backendMsg = JSON.stringify(saveResponseData.detail);
+        } else {
+          backendMsg =
+            saveResponseData.detail || JSON.stringify(saveResponseData);
+        }
+        throw new Error(
+          "No se pudo obtener el ID de respuesta. Detalle: " + backendMsg
+        );
       }
 
       // Enviar todas las respuestas con el response_id
@@ -998,7 +1072,7 @@ export default function FormatScreen() {
 
       // Crear registro de respuesta y obtener response_id
       const saveResponseRes = await fetch(
-        `https://api-forms.sfisas.com.co/responses/save-response/${id}`,
+        `https://api-forms-sfi.service.saferut.com/responses/save-response/${id}`,
         {
           method: "POST",
           headers: requestOptions.headers,
@@ -1090,7 +1164,7 @@ export default function FormatScreen() {
       if (isOnline) {
         const token = await AsyncStorage.getItem("authToken");
         const res = await fetch(
-          "https://api-forms.sfisas.com.co/responses/file-serials/generate",
+          "https://api-forms-sfi.service.saferut.com/responses/file-serials/generate",
           {
             method: "POST",
             headers: {
@@ -2153,7 +2227,7 @@ const styles = StyleSheet.create({
   submitButton: {
     marginTop: height * 0.03,
     padding: height * 0.02,
-    backgroundColor: "#4F87DBFF",
+    backgroundColor: "#12A0AF",
     borderRadius: width * 0.02,
     alignItems: "center",
     borderColor: "#000000FF",
@@ -2250,7 +2324,7 @@ const styles = StyleSheet.create({
     marginRight: width * 0.03, // Dynamic margin
   },
   checkboxSelected: {
-    backgroundColor: "#20B46FFF",
+    backgroundColor: "#12A0AF",
     borderColor: "#020202FF",
   },
   checkboxCheckmark: {
@@ -2277,6 +2351,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: height * 0.01,
     width: width * 0.14, // Dynamic width
+
     borderColor: "#000000FF",
     borderWidth: 1,
   },

@@ -20,6 +20,8 @@ import { HomeIcon } from "./Icons"; // Adjust the import path as necessary
 
 const { width, height } = Dimensions.get("window"); // Get screen dimensions
 const INACTIVITY_TIMEOUT = 8 * 60 * 1000; // 8 minutos
+const PENDING_SAVE_RESPONSE_KEY = "pending_save_response";
+const PENDING_SAVE_ANSWERS_KEY = "pending_save_answers";
 
 export default function PendingForms() {
   const [pendingForms, setPendingForms] = useState([]);
@@ -30,11 +32,13 @@ export default function PendingForms() {
 
   useFocusEffect(
     React.useCallback(() => {
-      const disableBack = () => true; // Disable hardware back button
-      BackHandler.addEventListener("hardwareBackPress", disableBack);
-
+      const disableBack = () => true;
+      const subscription = BackHandler.addEventListener(
+        "hardwareBackPress",
+        disableBack
+      );
       return () => {
-        BackHandler.removeEventListener("hardwareBackPress", disableBack);
+        subscription.remove();
       };
     }, [])
   );
@@ -63,8 +67,43 @@ export default function PendingForms() {
 
   useEffect(() => {
     const fetchPendingForms = async () => {
+      // Unifica los formularios pendientes de la clave legacy y los nuevos de save-response
       const storedPendingForms = await AsyncStorage.getItem("pending_forms");
-      setPendingForms(storedPendingForms ? JSON.parse(storedPendingForms) : []);
+      const legacyPending = storedPendingForms
+        ? JSON.parse(storedPendingForms)
+        : [];
+
+      // También busca los formularios pendientes por save-response (nuevo flujo)
+      const storedPendingSaveResponse = await AsyncStorage.getItem(
+        PENDING_SAVE_RESPONSE_KEY
+      );
+      const pendingSaveResponse = storedPendingSaveResponse
+        ? JSON.parse(storedPendingSaveResponse)
+        : [];
+
+      // Unifica ambos, evitando duplicados por id
+      const idsLegacy = legacyPending.map((f) => f.id);
+
+      // Solo muestra formularios que aún no han sido enviados (no duplicados)
+      const unified = [
+        ...legacyPending.map((f) => ({
+          id: f.id,
+          title: f.title || "",
+          description: f.description || "",
+        })),
+        ...pendingSaveResponse
+          .filter((f) => !idsLegacy.includes(f.form_id))
+          .map((f) => ({
+            id: f.form_id,
+            title: f.title || "",
+            description: f.description || "",
+          })),
+      ];
+
+      setPendingForms(unified);
+
+      // DEBUG: log para ver qué se está mostrando
+      console.log("🟡 Formularios pendientes para mostrar:", unified);
     };
 
     fetchPendingForms();
@@ -73,14 +112,16 @@ export default function PendingForms() {
   // Corrige: elimina cualquier referencia a setPendingSync (no existe ni es necesaria)
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
+      // Solo actualiza el estado de conexión, NO intentes enviar formularios automáticamente
       setIsOnline(state.isConnected);
-      // No uses setPendingSync aquí, simplemente actualiza isOnline
     });
     return () => unsubscribe();
   }, [pendingForms]);
 
   const handleSubmitPendingForm = async (form, tokenOverride = null) => {
     try {
+      console.log("🟢 Botón ENVIAR presionado para formulario:", form);
+
       const token = tokenOverride || (await AsyncStorage.getItem("authToken"));
       if (!token) throw new Error("No authentication token found");
 
@@ -91,76 +132,95 @@ export default function PendingForms() {
         },
       };
 
-      // Cargar seriales offline si existen
-      let fileSerials = {};
-      try {
-        const serialsRaw = await AsyncStorage.getItem("file_serials_offline");
-        if (serialsRaw) fileSerials = JSON.parse(serialsRaw);
-      } catch {}
-
-      const saveResponseRes = await fetch(
-        `https://api-forms.sfisas.com.co/responses/save-response/${form.id}?mode=offline`,
-        {
-          method: "POST",
-          headers: requestOptions.headers,
-        }
+      // 1. Obtener datos pendientes de save-response y save-answers para este form.id
+      const storedPendingSaveResponse = await AsyncStorage.getItem(
+        PENDING_SAVE_RESPONSE_KEY
+      );
+      const pendingSaveResponse = storedPendingSaveResponse
+        ? JSON.parse(storedPendingSaveResponse)
+        : [];
+      const saveResponseData = pendingSaveResponse.find(
+        (r) => String(r.form_id) === String(form.id)
       );
 
-      const saveResponseData = await saveResponseRes.json();
-      const responseId = saveResponseData.response_id;
+      const storedPendingSaveAnswers = await AsyncStorage.getItem(
+        PENDING_SAVE_ANSWERS_KEY
+      );
+      const pendingSaveAnswers = storedPendingSaveAnswers
+        ? JSON.parse(storedPendingSaveAnswers)
+        : [];
+      const saveAnswersData = pendingSaveAnswers.filter(
+        (a) => String(a.form_id) === String(form.id)
+      );
 
-      for (const response of form.responses) {
-        // Enviar la respuesta
-        const answerRes = await fetch(
-          `https://api-forms.sfisas.com.co/responses/save-answers`,
+      // 2. Enviar save-response primero (solo para crear el response_id, modo offline)
+      let responseId = null;
+      if (saveResponseData) {
+        const saveResponseRes = await fetch(
+          `https://api-forms-sfi.service.saferut.com/responses/save-response/${form.id}?mode=offline`,
           {
             method: "POST",
             headers: requestOptions.headers,
-            body: JSON.stringify({
-              response_id: responseId,
-              question_id: response.question_id,
-              answer_text: response.answer_text,
-              file_path: response.file_path,
-            }),
+            body: JSON.stringify(saveResponseData.answers),
           }
         );
-        const answerJson = await answerRes.json();
+        const saveResponseJson = await saveResponseRes.json();
+        responseId = saveResponseJson.response_id;
+      }
 
-        // Si es archivo y hay serial offline, asociar el serial al answer_id devuelto
-        if (
-          response.file_path &&
-          fileSerials &&
-          fileSerials[response.question_id] &&
-          answerJson &&
-          answerJson.answer &&
-          answerJson.answer.answer_id
-        ) {
-          try {
-            const serialPayload = {
-              answer_id: answerJson.answer.answer_id,
-              serial: fileSerials[response.question_id],
-            };
-            await fetch(
-              "https://api-forms.sfisas.com.co/responses/file-serials/",
-              {
-                method: "POST",
-                headers: requestOptions.headers,
-                body: JSON.stringify(serialPayload),
-              }
-            );
-          } catch (serialErr) {
-            console.error(
-              "❌ Error asociando serial offline al answer:",
-              serialErr
-            );
-          }
+      // 3. Enviar cada respuesta individualmente a save-answers (igual que online)
+      if (responseId && saveAnswersData.length > 0) {
+        for (const answer of saveAnswersData) {
+          // Enviar cada respuesta con el response_id generado
+          const answerRes = await fetch(
+            `https://api-forms-sfi.service.saferut.com/responses/save-answers/`,
+            {
+              method: "POST",
+              headers: requestOptions.headers,
+              body: JSON.stringify({
+                response_id: responseId,
+                question_id: answer.question_id,
+                answer_text: answer.answer_text,
+                file_path: answer.file_path,
+              }),
+            }
+          );
+          // Puedes agregar logs aquí si necesitas depurar
         }
       }
 
-      console.log(`✅ Formulario ID ${form.id} enviado correctamente.`);
+      // Limpieza de datos enviados
+      const newPendingSaveResponse = pendingSaveResponse.filter(
+        (r) => String(r.form_id) !== String(form.id)
+      );
+      await AsyncStorage.setItem(
+        PENDING_SAVE_RESPONSE_KEY,
+        JSON.stringify(newPendingSaveResponse)
+      );
+      const newPendingSaveAnswers = pendingSaveAnswers.filter(
+        (a) => String(a.form_id) !== String(form.id)
+      );
+      await AsyncStorage.setItem(
+        PENDING_SAVE_ANSWERS_KEY,
+        JSON.stringify(newPendingSaveAnswers)
+      );
+
+      // Elimina el formulario de la lista local
+      const updatedPendingForms = pendingForms.filter(
+        (f) => String(f.id) !== String(form.id)
+      );
+      setPendingForms(updatedPendingForms);
+      await AsyncStorage.setItem(
+        "pending_forms",
+        JSON.stringify(updatedPendingForms)
+      );
+      Alert.alert("Sincronización", "Formulario enviado correctamente.");
     } catch (error) {
-      console.error(`❌ Error al enviar formulario ID ${form.id}:`, error);
-      throw error;
+      console.error("❌ Error en handleSubmitPendingForm:", error);
+      Alert.alert(
+        "Error",
+        `No se pudo sincronizar el formulario ID ${form.id}`
+      );
     }
   };
 
@@ -176,10 +236,22 @@ export default function PendingForms() {
           pendingForms.map((form, index) => (
             <View key={index} style={styles.formItem}>
               <Text style={styles.formText}>Formulario ID: {form.id}</Text>
+              {form.title ? (
+                <Text style={styles.formTitle}>Título: {form.title}</Text>
+              ) : null}
+              {form.description ? (
+                <Text style={styles.formDescription}>
+                  Descripción: {form.description}
+                </Text>
+              ) : null}
               <TouchableOpacity
                 style={styles.submitButton}
                 onPress={async () => {
                   try {
+                    console.log(
+                      "🟢 Botón ENVIAR presionado para formulario:",
+                      form
+                    );
                     await handleSubmitPendingForm(form);
                     // Elimina el formulario de la lista local
                     const updatedPendingForms = pendingForms.filter(
@@ -271,6 +343,17 @@ const styles = StyleSheet.create({
     marginBottom: height * 0.02,
   },
   formText: { fontSize: width * 0.05, fontWeight: "bold" },
+  formTitle: {
+    fontSize: width * 0.045,
+    fontWeight: "bold",
+    color: "#2563eb",
+    marginBottom: 2,
+  },
+  formDescription: {
+    fontSize: width * 0.04,
+    color: "#555",
+    marginBottom: 4,
+  },
   submitButton: {
     marginTop: height * 0.01,
     padding: height * 0.02,

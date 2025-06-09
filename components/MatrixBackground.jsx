@@ -56,7 +56,7 @@ const MatrixBackground = () => {
 const styles = StyleSheet.create({
   matrixText: {
     position: "absolute",
-    color: "#2563eb", // Color azul para el estilo Matrix
+    color: "#12A0AF", // Color azul para el estilo Matrix
     fontSize: 18,
     fontFamily: "Lucida console",
     fontWeight: "bold",

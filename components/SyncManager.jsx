@@ -17,7 +17,7 @@ const SyncManager = () => {
           try {
             const token = await AsyncStorage.getItem("authToken");
             const response = await fetch(
-              `https://api-forms.sfisas.com.co/save-response/${form.id}?mode=offline`,
+              `https://api-forms-sfi.service.saferut.com/save-response/${form.id}?mode=offline`,
               {
                 method: "POST",
                 headers: {
