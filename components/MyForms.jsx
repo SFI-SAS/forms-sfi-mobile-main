@@ -8,13 +8,17 @@ import {
   Alert,
   BackHandler,
   Modal,
+  Dimensions,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { HomeIcon } from "./Icons";
+import { LinearGradient } from "expo-linear-gradient";
 
-const INACTIVITY_TIMEOUT = 8 * 60 * 1000; // 8 minutos
+const { width, height } = Dimensions.get("window");
+
+const INACTIVITY_TIMEOUT = 10 * 60 * 1000; // 10 minutos
 
 export default function MyForms() {
   const [submittedForms, setSubmittedForms] = useState([]);
@@ -101,6 +105,7 @@ export default function MyForms() {
     if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
     inactivityTimer.current = setTimeout(async () => {
       await AsyncStorage.setItem("isLoggedOut", "true");
+      await AsyncStorage.removeItem("authToken");
       setShowLogoutModal(true);
     }, INACTIVITY_TIMEOUT);
   };
@@ -127,238 +132,334 @@ export default function MyForms() {
   }, []);
 
   return (
-    <ScrollView style={styles.container}>
-      <Text style={styles.header}>Formularios Enviados</Text>
-      {submittedForms.length === 0 ? (
-        <Text style={styles.noFormsText}>
-          No hay formularios enviados disponibles.
-        </Text>
-      ) : (
-        submittedForms.map((form, index) => (
-          <View key={form.id} style={styles.formItem}>
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "space-between",
-              }}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={styles.formText}>Formulario ID: {form.id}</Text>
-                <Text style={styles.formDescription}>
-                  Título: {form.title || "Sin título"}
-                </Text>
-                {/* Indicador de modo de envío */}
-                <Text
-                  style={[
-                    styles.formMode,
-                    form.mode === "offline"
-                      ? styles.formModeOffline
-                      : styles.formModeOnline,
-                  ]}
-                >
-                  {form.mode === "offline"
-                    ? "Enviado Offline"
-                    : "Enviado Online"}
-                </Text>
-              </View>
-              <TouchableOpacity
-                style={styles.viewResponsesButton}
-                onPress={() => toggleExpand(form.id)}
-              >
-                <Text style={styles.viewResponsesButtonText}>
-                  {expandedForms[form.id]
-                    ? "Ocultar respuestas"
-                    : "Ver respuestas"}
-                </Text>
-              </TouchableOpacity>
-            </View>
-            {/* Respuestas expandibles */}
-            {expandedForms[form.id] && (
-              <View style={styles.responsesContainer}>
-                {Array.isArray(responsesByForm[form.id]) &&
-                responsesByForm[form.id].length > 0 ? (
-                  responsesByForm[form.id].map((dilig, idx) => (
-                    <View key={idx} style={styles.diligCard}>
-                      <Text style={styles.diligHeader}>
-                        Diligenciamiento #{idx + 1}
-                      </Text>
-                      <Text style={styles.diligMeta}>
-                        Fecha: {dilig.submission_date || "Desconocida"} - Hora:{" "}
-                        {dilig.submission_time || "Desconocida"}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.formMode,
-                          dilig.mode === "offline"
-                            ? styles.formModeOffline
-                            : styles.formModeOnline,
-                        ]}
-                      >
-                        {dilig.mode === "offline" ? "Offline" : "Online"}
-                      </Text>
-                      {Array.isArray(dilig.answers) &&
-                      dilig.answers.length > 0 ? (
-                        dilig.answers.map((ans, i) => (
-                          <View key={i} style={styles.answerRow}>
-                            <Text style={styles.answerQuestion}>
-                              {ans.question_text}:
-                            </Text>
-                            <Text style={styles.answerValue}>
-                              {ans.answer_text || ans.file_path || "-"}
-                            </Text>
-                          </View>
-                        ))
-                      ) : (
-                        <Text style={styles.noAnswersText}>
-                          Sin respuestas.
+    <LinearGradient colors={["#4B34C7", "#4B34C7"]} style={{ flex: 1 }}>
+      <View style={{ flex: 1 }}>
+        <View style={styles.formsScrollWrapper}>
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={{
+              paddingBottom: 24,
+              paddingHorizontal: 0,
+            }}
+            showsVerticalScrollIndicator={false}
+          >
+            <Text style={styles.header}>Formularios Enviados</Text>
+            {submittedForms.length === 0 ? (
+              <Text style={styles.noFormsText}>
+                No hay formularios enviados disponibles.
+              </Text>
+            ) : (
+              submittedForms.map((form, index) => (
+                <View key={form.id} style={styles.formCardWrapper}>
+                  <View style={styles.formCard}>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                      }}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.formText}>
+                          Formulario ID: {form.id}
                         </Text>
-                      )}
+                        <Text style={styles.formDescription}>
+                          Título: {form.title || "Sin título"}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.formMode,
+                            form.mode === "offline"
+                              ? styles.formModeOffline
+                              : styles.formModeOnline,
+                          ]}
+                        >
+                          {form.mode === "offline"
+                            ? "Enviado Offline"
+                            : "Enviado Online"}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.viewResponsesButton}
+                        onPress={() => toggleExpand(form.id)}
+                      >
+                        <Text style={styles.viewResponsesButtonText}>
+                          {expandedForms[form.id]
+                            ? "Ocultar respuestas"
+                            : "Ver respuestas"}
+                        </Text>
+                      </TouchableOpacity>
                     </View>
-                  ))
-                ) : (
-                  <Text style={styles.noAnswersText}>
-                    No hay respuestas para este formulario.
-                  </Text>
-                )}
-              </View>
+                    {expandedForms[form.id] && (
+                      <View style={styles.responsesContainer}>
+                        {Array.isArray(responsesByForm[form.id]) &&
+                        responsesByForm[form.id].length > 0 ? (
+                          responsesByForm[form.id].map((dilig, idx) => (
+                            <View key={idx} style={styles.diligCard}>
+                              <Text style={styles.diligHeader}>
+                                Diligenciamiento #{idx + 1}
+                              </Text>
+                              <Text style={styles.diligMeta}>
+                                Fecha: {dilig.submission_date || "Desconocida"}{" "}
+                                - Hora: {dilig.submission_time || "Desconocida"}
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.formMode,
+                                  dilig.mode === "offline"
+                                    ? styles.formModeOffline
+                                    : styles.formModeOnline,
+                                ]}
+                              >
+                                {dilig.mode === "offline"
+                                  ? "Offline"
+                                  : "Online"}
+                              </Text>
+                              {Array.isArray(dilig.answers) &&
+                              dilig.answers.length > 0 ? (
+                                dilig.answers.map((ans, i) => (
+                                  <View key={i} style={styles.answerRow}>
+                                    <Text style={styles.answerQuestion}>
+                                      {ans.question_text}:
+                                    </Text>
+                                    <Text style={styles.answerValue}>
+                                      {ans.answer_text || ans.file_path || "-"}
+                                    </Text>
+                                  </View>
+                                ))
+                              ) : (
+                                <Text style={styles.noAnswersText}>
+                                  Sin respuestas.
+                                </Text>
+                              )}
+                            </View>
+                          ))
+                        ) : (
+                          <Text style={styles.noAnswersText}>
+                            No hay respuestas para este formulario.
+                          </Text>
+                        )}
+                      </View>
+                    )}
+                  </View>
+                </View>
+              ))
             )}
-          </View>
-        ))
-      )}
-      <TouchableOpacity
-        style={styles.backButton}
-        onPress={() => router.push("/home")}
-      >
-        <Text style={styles.backButtonText}>
-          <HomeIcon color={"white"} />
-          {"  "}
-          Home
-        </Text>
-      </TouchableOpacity>
-      {/* Modal de cierre de sesión por inactividad */}
-      <Modal
-        visible={showLogoutModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowLogoutModal(false)}
-      >
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: "rgba(0,0,0,0.4)",
-            justifyContent: "center",
-            alignItems: "center",
-          }}
+          </ScrollView>
+        </View>
+        {/* Modal de cierre de sesión por inactividad */}
+        <Modal
+          visible={showLogoutModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowLogoutModal(false)}
         >
           <View
             style={{
-              backgroundColor: "#fff",
-              borderRadius: 10,
-              padding: 24,
-              width: "80%",
+              flex: 1,
+              backgroundColor: "rgba(0,0,0,0.4)",
+              justifyContent: "center",
               alignItems: "center",
-              elevation: 5,
             }}
           >
-            <Text
+            <View
               style={{
-                fontWeight: "bold",
-                fontSize: 20,
-                marginBottom: 8,
-                color: "#222",
-              }}
-            >
-              Sesión cerrada por inactividad
-            </Text>
-            <Text
-              style={{
-                fontSize: 16,
-                color: "#444",
-                marginBottom: 12,
-                textAlign: "center",
-              }}
-            >
-              Por seguridad, la sesión se cerró automáticamente tras 8 minutos
-              sin actividad.
-            </Text>
-            <TouchableOpacity
-              style={{
-                backgroundColor: "#2563eb",
-                borderRadius: 6,
-                padding: 12,
+                backgroundColor: "#fff",
+                borderRadius: 10,
+                padding: 24,
+                width: "80%",
                 alignItems: "center",
-                width: "100%",
-              }}
-              onPress={() => {
-                setShowLogoutModal(false);
-                router.push("/");
+                elevation: 5,
               }}
             >
               <Text
-                style={{ color: "white", fontWeight: "bold", fontSize: 18 }}
+                style={{
+                  fontWeight: "bold",
+                  fontSize: 20,
+                  marginBottom: 8,
+                  color: "#222",
+                }}
               >
-                Ir al inicio de sesión
+                Sesión cerrada por inactividad
               </Text>
-            </TouchableOpacity>
+              <Text
+                style={{
+                  fontSize: 16,
+                  color: "#444",
+                  marginBottom: 12,
+                  textAlign: "center",
+                }}
+              >
+                Por seguridad, la sesión se cerró automáticamente tras 2 minutos
+                sin actividad.
+              </Text>
+              <TouchableOpacity
+                style={{
+                  backgroundColor: "#2563eb",
+                  borderRadius: 6,
+                  padding: 12,
+                  alignItems: "center",
+                  width: "100%",
+                }}
+                onPress={() => {
+                  setShowLogoutModal(false);
+                  router.replace("/");
+                }}
+              >
+                <Text
+                  style={{ color: "white", fontWeight: "bold", fontSize: 18 }}
+                >
+                  Ir al inicio de sesión
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
-      </Modal>
-    </ScrollView>
+        </Modal>
+      </View>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, backgroundColor: "#ffffff" },
-  header: { fontSize: 20, fontWeight: "bold", marginBottom: 10 },
-  noFormsText: { fontSize: 16, color: "#555", textAlign: "center" },
-  formItem: {
-    padding: 10,
-    backgroundColor: "#f0f0f0",
-    borderRadius: 5,
-    marginBottom: 10,
+  container: { flex: 1, padding: 20, backgroundColor: "#f7fafc" },
+  header: {
+    fontSize: width * 0.06,
+    fontWeight: "bold",
+    marginBottom: height * 0.02,
+    color: "#4B34C7",
+    textAlign: "center",
+    letterSpacing: 0.5,
+    textShadowColor: "#12A0AF22",
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
   },
-  formText: { fontSize: 16, fontWeight: "bold" },
-  formDescription: { fontSize: 14, color: "#555" },
-  formMode: { fontSize: 13, fontWeight: "bold", marginTop: 2 },
-  formModeOnline: { color: "green" },
-  formModeOffline: { color: "orange" },
+  noFormsText: {
+    fontSize: width * 0.045,
+    color: "#12A0AF",
+    textAlign: "center",
+    fontStyle: "italic",
+    marginVertical: 16,
+  },
+  formsScrollWrapper: {
+    flex: 1,
+    marginHorizontal: width * 0.03,
+    marginTop: 12,
+    marginBottom: 0,
+    borderRadius: width * 0.035,
+    overflow: "hidden",
+    maxHeight: height - (height * 0.07 + height * 0.1),
+    backgroundColor: "#fff",
+    borderWidth: 1.5,
+    borderColor: "#12A0AF",
+    shadowColor: "#4B34C7",
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  formCardWrapper: {
+    marginBottom: height * 0.018,
+    borderRadius: width * 0.035,
+    overflow: "visible",
+    shadowColor: "#12A0AF",
+    shadowOpacity: 0.13,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+    backgroundColor: "transparent",
+    // Espacio en todos los bordes respecto al padre
+    marginTop: 10,
+    marginLeft: 10,
+    marginRight: 10,
+  },
+  formCard: {
+    backgroundColor: "#f7fafc",
+    borderRadius: width * 0.035,
+    padding: width * 0.04,
+    borderWidth: 1.5,
+    borderColor: "#4B34C7",
+    // Sombra ya está en el wrapper
+  },
+  formText: {
+    fontSize: width * 0.05,
+    fontWeight: "bold",
+    color: "#12A0AF",
+    marginBottom: 2,
+    letterSpacing: 0.2,
+  },
+  formDescription: {
+    fontSize: width * 0.04,
+    color: "#4B34C7",
+    marginBottom: 4,
+    fontStyle: "italic",
+  },
+  formMode: {
+    fontSize: 13,
+    fontWeight: "bold",
+    marginTop: 2,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    alignSelf: "flex-start",
+    overflow: "hidden",
+  },
+  formModeOnline: {
+    color: "#fff",
+    backgroundColor: "#12A0AF",
+  },
+  formModeOffline: {
+    color: "#fff",
+    backgroundColor: "#EB9525FF",
+  },
   viewResponsesButton: {
-    backgroundColor: "#2563eb",
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 5,
+    backgroundColor: "#4B34C7",
+    paddingVertical: 7,
+    paddingHorizontal: 16,
+    borderRadius: 8,
     marginLeft: 8,
     alignSelf: "flex-start",
+    shadowColor: "#12A0AF",
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   viewResponsesButtonText: {
-    color: "white",
+    color: "#fff",
     fontWeight: "bold",
     fontSize: 13,
+    letterSpacing: 0.2,
   },
   responsesContainer: {
     marginTop: 10,
-    backgroundColor: "#eaf1fb",
-    borderRadius: 5,
-    padding: 8,
+    backgroundColor: "#e6fafd",
+    borderRadius: 8,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: "#12A0AF44",
   },
   diligCard: {
     backgroundColor: "#fff",
-    borderRadius: 4,
-    padding: 8,
+    borderRadius: 6,
+    padding: 10,
     marginBottom: 10,
-    borderColor: "#b0c4de",
+    borderColor: "#12A0AF",
     borderWidth: 1,
+    shadowColor: "#4B34C7",
+    shadowOpacity: 0.07,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   diligHeader: {
     fontWeight: "bold",
     fontSize: 15,
     marginBottom: 2,
-    color: "#1a237e",
+    color: "#4B34C7",
   },
   diligMeta: {
     fontSize: 13,
-    color: "#555",
+    color: "#12A0AF",
     marginBottom: 2,
   },
   answerRow: {
@@ -369,7 +470,7 @@ const styles = StyleSheet.create({
   answerQuestion: {
     fontWeight: "bold",
     fontSize: 13,
-    color: "#333",
+    color: "#4B34C7",
     marginRight: 4,
     flexShrink: 1,
     maxWidth: "50%",
@@ -385,16 +486,5 @@ const styles = StyleSheet.create({
     color: "#888",
     fontStyle: "italic",
     marginVertical: 4,
-  },
-  backButton: {
-    marginTop: 20,
-    padding: 10,
-    backgroundColor: "blue",
-    borderRadius: 5,
-    alignItems: "center",
-  },
-  backButtonText: {
-    color: "white",
-    fontWeight: "bold",
   },
 });

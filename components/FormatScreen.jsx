@@ -23,6 +23,8 @@ import { useFocusEffect } from "@react-navigation/native";
 import { SvgXml } from "react-native-svg";
 import { HomeIcon } from "./Icons"; // Adjust the import path as necessary
 import { Ionicons } from "@expo/vector-icons"; // Para iconos si se desea
+import { LinearGradient } from "expo-linear-gradient";
+
 const { width, height } = Dimensions.get("window"); // Get screen dimensions
 
 const QUESTIONS_KEY = "offline_questions";
@@ -36,7 +38,7 @@ const spinnerSvg = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><path fill="#000000FF" stroke="#EE4138FF" stroke-width="15" transform-origin="center" d="m148 84.7 13.8-8-10-17.3-13.8 8a50 50 0 0 0-27.4-15.9v-16h-20v16A50 50 0 0 0 63 67.4l-13.8-8-10 17.3 13.8 8a50 50 0 0 0 0 31.7l-13.8 8 10 17.3 13.8-8a50 50 0 0 0 27.5 15.9v16h20v-16a50 50 0 0 0 27.4-15.9l13.8 8 10-17.3-13.8-8a50 50 0 0 0 0-31.7Zm-47.5 50.8a35 35 0 1 1 0-70 35 35 0 0 1 0 70Z"><animateTransform type="rotate" attributeName="transform" calcMode="spline" dur="1.8" values="0;120" keyTimes="0;1" keySplines="0 0 1 1" repeatCount="indefinite"></animateTransform></path></svg>
 `;
 
-const INACTIVITY_TIMEOUT = 8 * 60 * 1000; // 8 minutos
+const INACTIVITY_TIMEOUT = 10 * 60 * 1000; // 10 minutos
 
 const saveCompletedFormAnswers = async ({
   formId,
@@ -1266,31 +1268,335 @@ export default function FormatScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-      >
-        <Text style={styles.header}>{title.toLocaleUpperCase()}</Text>
-        <Text style={styles.subHeader}>ID: 00{id}</Text>
-        <Text style={styles.instructions}>
-          Responde las preguntas a continuación:
-        </Text>
-        <Text style={styles.instructions}>
-          Recuerda que puedes subir archivos (si es necesario).
-        </Text>
+    <LinearGradient colors={["#4B34C7", "#4B34C7"]} style={{ flex: 1 }}>
+      <View style={styles.container}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Text style={styles.header}>{title.toLocaleUpperCase()}</Text>
+          <Text style={styles.subHeader}>ID: 00{id}</Text>
+          <Text style={styles.instructions}>
+            Responde las preguntas a continuación:
+          </Text>
+          <Text style={styles.instructions}>
+            Recuerda que puedes subir archivos (si es necesario).
+          </Text>
 
-        {/* Preguntas NO repetidas */}
-        {questions.some((q) => !q.is_repeated) && (
-          <View style={styles.questionsContainer}>
-            {/* ...existing code... */}
-            {loading ? (
-              <Text style={styles.loadingText}>Cargando preguntas...</Text>
-            ) : (
-              questions
-                .filter((question) => !question.is_repeated)
-                .map((question) => {
-                  const isLocked = nonRepeatedLocked;
+          {/* Preguntas NO repetidas */}
+          {questions.some((q) => !q.is_repeated) && (
+            <View style={styles.questionsContainer}>
+              {/* ...existing code... */}
+              {loading ? (
+                <Text style={styles.loadingText}>Cargando preguntas...</Text>
+              ) : (
+                questions
+                  .filter((question) => !question.is_repeated)
+                  .map((question) => {
+                    const isLocked = nonRepeatedLocked;
+                    return (
+                      <View key={question.id} style={styles.questionContainer}>
+                        {/* Mostrar el texto de la pregunta siempre */}
+                        <Text style={styles.questionLabel}>
+                          {question.question_text}
+                          {question.required && (
+                            <Text style={styles.requiredText}> *</Text>
+                          )}
+                        </Text>
+                        {/* Text */}
+                        {question.question_type === "text" && (
+                          <>
+                            {textAnswers[question.id]?.map((field, index) => (
+                              <View
+                                key={index}
+                                style={styles.dynamicFieldContainer}
+                              >
+                                <TextInput
+                                  style={styles.input}
+                                  placeholder="Escribe tu respuesta"
+                                  value={field}
+                                  onChangeText={(text) =>
+                                    !isLocked &&
+                                    handleTextChange(question.id, index, text)
+                                  }
+                                  editable={!isLocked}
+                                />
+                              </View>
+                            ))}
+                          </>
+                        )}
+                        {/* File */}
+                        {question.question_type === "file" && (
+                          <View
+                            style={{
+                              flexDirection: "column",
+                              alignItems: "flex-start",
+                              width: "100%",
+                            }}
+                          >
+                            <TouchableOpacity
+                              style={[
+                                styles.fileButton,
+                                fileUris[question.id] && {
+                                  backgroundColor: "#20B46F",
+                                }, // Verde si ya hay archivo
+                              ]}
+                              onPress={() => {
+                                console.log(
+                                  "🟢 Botón archivo presionado para pregunta:",
+                                  question.id
+                                );
+                                !isLocked && openFileModal(question.id);
+                              }}
+                              disabled={isLocked}
+                            >
+                              <Text style={styles.fileButtonText}>
+                                {fileUris[question.id]
+                                  ? "Archivo seleccionado"
+                                  : "Subir archivo"}
+                              </Text>
+                            </TouchableOpacity>
+                            {/* Mostrar serial SIEMPRE debajo del campo */}
+                            {fileSerials[question.id] && (
+                              <View style={{ marginTop: 6, marginLeft: 2 }}>
+                                <Text
+                                  style={{
+                                    color: "#2563eb",
+                                    fontWeight: "bold",
+                                    fontSize: 13,
+                                  }}
+                                >
+                                  Serial asignado: {fileSerials[question.id]}
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+                        )}
+                        {/* Table */}
+                        {question.question_type === "table" && (
+                          <>
+                            {tableAnswersState[question.id]?.map(
+                              (field, index) => (
+                                <View
+                                  key={index}
+                                  style={styles.dynamicFieldContainer}
+                                >
+                                  <View style={styles.pickerSearchWrapper}>
+                                    <TextInput
+                                      style={styles.pickerSearchInput}
+                                      placeholder="Buscar opción..."
+                                      value={
+                                        pickerSearch[
+                                          `${question.id}_${index}`
+                                        ] || ""
+                                      }
+                                      onChangeText={(text) =>
+                                        setPickerSearch((prev) => ({
+                                          ...prev,
+                                          [`${question.id}_${index}`]: text,
+                                        }))
+                                      }
+                                      editable={!isLocked}
+                                    />
+                                  </View>
+                                  <Picker
+                                    selectedValue={field}
+                                    onValueChange={(selectedValue) =>
+                                      !isLocked &&
+                                      handleTableSelectChange(
+                                        question.id,
+                                        index,
+                                        selectedValue
+                                      )
+                                    }
+                                    style={styles.picker}
+                                    enabled={!isLocked}
+                                  >
+                                    <Picker.Item
+                                      label="Selecciona una opción"
+                                      value=""
+                                    />
+                                    {Array.isArray(tableAnswers[question.id]) &&
+                                      tableAnswers[question.id]
+                                        .filter((option) =>
+                                          (pickerSearch[
+                                            `${question.id}_${index}`
+                                          ] || "") === ""
+                                            ? true
+                                            : option
+                                                .toLowerCase()
+                                                .includes(
+                                                  pickerSearch[
+                                                    `${question.id}_${index}`
+                                                  ]?.toLowerCase() || ""
+                                                )
+                                        )
+                                        .map((option, i) => (
+                                          <Picker.Item
+                                            key={i}
+                                            label={option}
+                                            value={option}
+                                          />
+                                        ))}
+                                  </Picker>
+                                </View>
+                              )
+                            )}
+                          </>
+                        )}
+                        {/* Multiple choice */}
+                        {question.question_type === "multiple_choice" &&
+                          question.options && (
+                            <View>
+                              {question.options.map((option, index) => (
+                                <View
+                                  key={index}
+                                  style={styles.checkboxContainer}
+                                >
+                                  <TouchableOpacity
+                                    style={[
+                                      styles.checkbox,
+                                      answers[question.id]?.includes(option) &&
+                                        styles.checkboxSelected,
+                                    ]}
+                                    onPress={() =>
+                                      !isLocked &&
+                                      setAnswers((prev) => {
+                                        const currentAnswers =
+                                          prev[question.id] || [];
+                                        const updatedAnswers =
+                                          currentAnswers.includes(option)
+                                            ? currentAnswers.filter(
+                                                (o) => o !== option
+                                              )
+                                            : [...currentAnswers, option];
+                                        return {
+                                          ...prev,
+                                          [question.id]: updatedAnswers,
+                                        };
+                                      })
+                                    }
+                                    disabled={isLocked}
+                                  >
+                                    {answers[question.id]?.includes(option) && (
+                                      <Text style={styles.checkboxCheckmark}>
+                                        ✔
+                                      </Text>
+                                    )}
+                                  </TouchableOpacity>
+                                  <Text style={styles.checkboxLabel}>
+                                    {option}
+                                  </Text>
+                                </View>
+                              ))}
+                            </View>
+                          )}
+                        {/* One choice */}
+                        {question.question_type === "one_choice" &&
+                          question.options && (
+                            <View>
+                              {question.options.map((option, index) => (
+                                <View
+                                  key={index}
+                                  style={styles.checkboxContainer}
+                                >
+                                  <TouchableOpacity
+                                    style={[
+                                      styles.checkbox,
+                                      answers[question.id] === option &&
+                                        styles.checkboxSelected,
+                                    ]}
+                                    onPress={() =>
+                                      !isLocked &&
+                                      setAnswers((prev) => ({
+                                        ...prev,
+                                        [question.id]: option,
+                                      }))
+                                    }
+                                    disabled={isLocked}
+                                  >
+                                    {answers[question.id] === option && (
+                                      <Text style={styles.checkboxCheckmark}>
+                                        ✔
+                                      </Text>
+                                    )}
+                                  </TouchableOpacity>
+                                  <Text style={styles.checkboxLabel}>
+                                    {option}
+                                  </Text>
+                                </View>
+                              ))}
+                            </View>
+                          )}
+                        {/* Number */}
+                        {question.question_type === "number" && (
+                          <TextInput
+                            style={styles.input}
+                            placeholder="Escribe un número"
+                            keyboardType="numeric"
+                            value={answers[question.id]?.[0] || ""}
+                            onChangeText={(value) =>
+                              !isLocked &&
+                              setAnswers((prev) => ({
+                                ...prev,
+                                [question.id]: [value],
+                              }))
+                            }
+                            editable={!isLocked}
+                          />
+                        )}
+                        {/* Date */}
+                        {question.question_type === "date" && (
+                          <>
+                            <TouchableOpacity
+                              style={styles.dateButton}
+                              onPress={() =>
+                                !isLocked &&
+                                setDatePickerVisible((prev) => ({
+                                  ...prev,
+                                  [question.id]: true,
+                                }))
+                              }
+                              disabled={isLocked}
+                            >
+                              <Text style={styles.dateButtonText}>
+                                {answers[question.id] || "Seleccionar fecha"}
+                              </Text>
+                            </TouchableOpacity>
+                            {datePickerVisible[question.id] && (
+                              <DateTimePicker
+                                value={
+                                  answers[question.id]
+                                    ? new Date(answers[question.id])
+                                    : new Date()
+                                }
+                                mode="date"
+                                display="default"
+                                onChange={(event, selectedDate) =>
+                                  !isLocked &&
+                                  handleDateChange(question.id, selectedDate)
+                                }
+                              />
+                            )}
+                          </>
+                        )}
+                      </View>
+                    );
+                  })
+              )}
+            </View>
+          )}
+
+          {/* Preguntas REPETIDAS */}
+          {isRepeatedQuestions.length > 0 && (
+            <View style={[styles.questionsContainer, { marginTop: 20 }]}>
+              {/* ...existing code... */}
+              {loading ? (
+                <Text style={styles.loadingText}>Cargando preguntas...</Text>
+              ) : (
+                isRepeatedQuestions.map((question) => {
+                  const isLocked = false;
+                  const allowAddRemove = isRepeatedQuestions.length === 1;
                   return (
                     <View key={question.id} style={styles.questionContainer}>
                       {/* Mostrar el texto de la pregunta siempre */}
@@ -1318,8 +1624,26 @@ export default function FormatScreen() {
                                 }
                                 editable={!isLocked}
                               />
+                              {allowAddRemove && (
+                                <TouchableOpacity
+                                  style={styles.removeButton}
+                                  onPress={() =>
+                                    handleRemoveTextField(question.id, index)
+                                  }
+                                >
+                                  <Text style={styles.removeButtonText}>-</Text>
+                                </TouchableOpacity>
+                              )}
                             </View>
                           ))}
+                          {allowAddRemove && (
+                            <TouchableOpacity
+                              style={styles.addButton}
+                              onPress={() => handleAddTextField(question.id)}
+                            >
+                              <Text style={styles.addButtonText}>+</Text>
+                            </TouchableOpacity>
+                          )}
                         </>
                       )}
                       {/* File */}
@@ -1336,15 +1660,11 @@ export default function FormatScreen() {
                               styles.fileButton,
                               fileUris[question.id] && {
                                 backgroundColor: "#20B46F",
-                              }, // Verde si ya hay archivo
+                              },
                             ]}
-                            onPress={() => {
-                              console.log(
-                                "🟢 Botón archivo presionado para pregunta:",
-                                question.id
-                              );
-                              !isLocked && openFileModal(question.id);
-                            }}
+                            onPress={() =>
+                              !isLocked && openFileModal(question.id)
+                            }
                             disabled={isLocked}
                           >
                             <Text style={styles.fileButtonText}>
@@ -1353,7 +1673,6 @@ export default function FormatScreen() {
                                 : "Subir archivo"}
                             </Text>
                           </TouchableOpacity>
-                          {/* Mostrar serial SIEMPRE debajo del campo */}
                           {fileSerials[question.id] && (
                             <View style={{ marginTop: 6, marginLeft: 2 }}>
                               <Text
@@ -1435,8 +1754,31 @@ export default function FormatScreen() {
                                         />
                                       ))}
                                 </Picker>
+                                {allowAddRemove && (
+                                  <TouchableOpacity
+                                    style={styles.removeButton}
+                                    onPress={() =>
+                                      handleRemoveTableAnswer(
+                                        question.id,
+                                        index
+                                      )
+                                    }
+                                  >
+                                    <Text style={styles.removeButtonText}>
+                                      -
+                                    </Text>
+                                  </TouchableOpacity>
+                                )}
                               </View>
                             )
+                          )}
+                          {allowAddRemove && (
+                            <TouchableOpacity
+                              style={styles.addButton}
+                              onPress={() => handleAddTableAnswer(question.id)}
+                            >
+                              <Text style={styles.addButtonText}>+</Text>
+                            </TouchableOpacity>
                           )}
                         </>
                       )}
@@ -1579,602 +1921,100 @@ export default function FormatScreen() {
                     </View>
                   );
                 })
-            )}
-          </View>
-        )}
+              )}
+            </View>
+          )}
 
-        {/* Preguntas REPETIDAS */}
-        {isRepeatedQuestions.length > 0 && (
-          <View style={[styles.questionsContainer, { marginTop: 20 }]}>
-            {/* ...existing code... */}
-            {loading ? (
-              <Text style={styles.loadingText}>Cargando preguntas...</Text>
-            ) : (
-              isRepeatedQuestions.map((question) => {
-                const isLocked = false;
-                const allowAddRemove = isRepeatedQuestions.length === 1;
-                return (
-                  <View key={question.id} style={styles.questionContainer}>
-                    {/* Mostrar el texto de la pregunta siempre */}
-                    <Text style={styles.questionLabel}>
-                      {question.question_text}
-                      {question.required && (
-                        <Text style={styles.requiredText}> *</Text>
-                      )}
-                    </Text>
-                    {/* Text */}
-                    {question.question_type === "text" && (
-                      <>
-                        {textAnswers[question.id]?.map((field, index) => (
-                          <View
-                            key={index}
-                            style={styles.dynamicFieldContainer}
-                          >
-                            <TextInput
-                              style={styles.input}
-                              placeholder="Escribe tu respuesta"
-                              value={field}
-                              onChangeText={(text) =>
-                                !isLocked &&
-                                handleTextChange(question.id, index, text)
-                              }
-                              editable={!isLocked}
-                            />
-                            {allowAddRemove && (
-                              <TouchableOpacity
-                                style={styles.removeButton}
-                                onPress={() =>
-                                  handleRemoveTextField(question.id, index)
-                                }
-                              >
-                                <Text style={styles.removeButtonText}>-</Text>
-                              </TouchableOpacity>
-                            )}
-                          </View>
-                        ))}
-                        {allowAddRemove && (
-                          <TouchableOpacity
-                            style={styles.addButton}
-                            onPress={() => handleAddTextField(question.id)}
-                          >
-                            <Text style={styles.addButtonText}>+</Text>
-                          </TouchableOpacity>
-                        )}
-                      </>
-                    )}
-                    {/* File */}
-                    {question.question_type === "file" && (
-                      <View
-                        style={{
-                          flexDirection: "column",
-                          alignItems: "flex-start",
-                          width: "100%",
-                        }}
-                      >
-                        <TouchableOpacity
-                          style={[
-                            styles.fileButton,
-                            fileUris[question.id] && {
-                              backgroundColor: "#20B46F",
-                            },
-                          ]}
-                          onPress={() =>
-                            !isLocked && openFileModal(question.id)
-                          }
-                          disabled={isLocked}
-                        >
-                          <Text style={styles.fileButtonText}>
-                            {fileUris[question.id]
-                              ? "Archivo seleccionado"
-                              : "Subir archivo"}
-                          </Text>
-                        </TouchableOpacity>
-                        {fileSerials[question.id] && (
-                          <View style={{ marginTop: 6, marginLeft: 2 }}>
-                            <Text
-                              style={{
-                                color: "#2563eb",
-                                fontWeight: "bold",
-                                fontSize: 13,
-                              }}
-                            >
-                              Serial asignado: {fileSerials[question.id]}
+          {/* Mostrar grupos de respuestas enviadas en modo progresivo */}
+          {isRepeatedQuestions.length > 1 &&
+            submittedRepeatedGroups.length > 0 && (
+              <View style={styles.submittedGroupsContainer}>
+                <Text style={styles.submittedGroupsTitle}>
+                  Formularios diligenciados:
+                </Text>
+                <View style={{ maxHeight: height * 0.25 }}>
+                  <ScrollView
+                    contentContainerStyle={{ paddingBottom: 10 }}
+                    nestedScrollEnabled
+                  >
+                    {submittedRepeatedGroups.map((group, idx) => (
+                      <View key={idx} style={styles.submittedGroupCard}>
+                        <Text style={styles.submittedGroupHeader}>
+                          Formulario diligenciado #{idx + 1}
+                        </Text>
+                        {isRepeatedQuestions.map((q) => (
+                          <View key={q.id} style={styles.submittedGroupRow}>
+                            <Text style={styles.submittedGroupQuestion}>
+                              {q.question_text}:
                             </Text>
-                          </View>
-                        )}
-                      </View>
-                    )}
-                    {/* Table */}
-                    {question.question_type === "table" && (
-                      <>
-                        {tableAnswersState[question.id]?.map((field, index) => (
-                          <View
-                            key={index}
-                            style={styles.dynamicFieldContainer}
-                          >
-                            <View style={styles.pickerSearchWrapper}>
-                              <TextInput
-                                style={styles.pickerSearchInput}
-                                placeholder="Buscar opción..."
-                                value={
-                                  pickerSearch[`${question.id}_${index}`] || ""
-                                }
-                                onChangeText={(text) =>
-                                  setPickerSearch((prev) => ({
-                                    ...prev,
-                                    [`${question.id}_${index}`]: text,
-                                  }))
-                                }
-                                editable={!isLocked}
-                              />
-                            </View>
-                            <Picker
-                              selectedValue={field}
-                              onValueChange={(selectedValue) =>
-                                !isLocked &&
-                                handleTableSelectChange(
-                                  question.id,
-                                  index,
-                                  selectedValue
-                                )
-                              }
-                              style={styles.picker}
-                              enabled={!isLocked}
-                            >
-                              <Picker.Item
-                                label="Selecciona una opción"
-                                value=""
-                              />
-                              {Array.isArray(tableAnswers[question.id]) &&
-                                tableAnswers[question.id]
-                                  .filter((option) =>
-                                    (pickerSearch[`${question.id}_${index}`] ||
-                                      "") === ""
-                                      ? true
-                                      : option
-                                          .toLowerCase()
-                                          .includes(
-                                            pickerSearch[
-                                              `${question.id}_${index}`
-                                            ]?.toLowerCase() || ""
-                                          )
-                                  )
-                                  .map((option, i) => (
-                                    <Picker.Item
-                                      key={i}
-                                      label={option}
-                                      value={option}
-                                    />
-                                  ))}
-                            </Picker>
-                            {allowAddRemove && (
-                              <TouchableOpacity
-                                style={styles.removeButton}
-                                onPress={() =>
-                                  handleRemoveTableAnswer(question.id, index)
-                                }
-                              >
-                                <Text style={styles.removeButtonText}>-</Text>
-                              </TouchableOpacity>
-                            )}
-                          </View>
-                        ))}
-                        {allowAddRemove && (
-                          <TouchableOpacity
-                            style={styles.addButton}
-                            onPress={() => handleAddTableAnswer(question.id)}
-                          >
-                            <Text style={styles.addButtonText}>+</Text>
-                          </TouchableOpacity>
-                        )}
-                      </>
-                    )}
-                    {/* Multiple choice */}
-                    {question.question_type === "multiple_choice" &&
-                      question.options && (
-                        <View>
-                          {question.options.map((option, index) => (
-                            <View key={index} style={styles.checkboxContainer}>
-                              <TouchableOpacity
-                                style={[
-                                  styles.checkbox,
-                                  answers[question.id]?.includes(option) &&
-                                    styles.checkboxSelected,
-                                ]}
-                                onPress={() =>
-                                  !isLocked &&
-                                  setAnswers((prev) => {
-                                    const currentAnswers =
-                                      prev[question.id] || [];
-                                    const updatedAnswers =
-                                      currentAnswers.includes(option)
-                                        ? currentAnswers.filter(
-                                            (o) => o !== option
-                                          )
-                                        : [...currentAnswers, option];
-                                    return {
-                                      ...prev,
-                                      [question.id]: updatedAnswers,
-                                    };
-                                  })
-                                }
-                                disabled={isLocked}
-                              >
-                                {answers[question.id]?.includes(option) && (
-                                  <Text style={styles.checkboxCheckmark}>
-                                    ✔
-                                  </Text>
-                                )}
-                              </TouchableOpacity>
-                              <Text style={styles.checkboxLabel}>{option}</Text>
-                            </View>
-                          ))}
-                        </View>
-                      )}
-                    {/* One choice */}
-                    {question.question_type === "one_choice" &&
-                      question.options && (
-                        <View>
-                          {question.options.map((option, index) => (
-                            <View key={index} style={styles.checkboxContainer}>
-                              <TouchableOpacity
-                                style={[
-                                  styles.checkbox,
-                                  answers[question.id] === option &&
-                                    styles.checkboxSelected,
-                                ]}
-                                onPress={() =>
-                                  !isLocked &&
-                                  setAnswers((prev) => ({
-                                    ...prev,
-                                    [question.id]: option,
-                                  }))
-                                }
-                                disabled={isLocked}
-                              >
-                                {answers[question.id] === option && (
-                                  <Text style={styles.checkboxCheckmark}>
-                                    ✔
-                                  </Text>
-                                )}
-                              </TouchableOpacity>
-                              <Text style={styles.checkboxLabel}>{option}</Text>
-                            </View>
-                          ))}
-                        </View>
-                      )}
-                    {/* Number */}
-                    {question.question_type === "number" && (
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Escribe un número"
-                        keyboardType="numeric"
-                        value={answers[question.id]?.[0] || ""}
-                        onChangeText={(value) =>
-                          !isLocked &&
-                          setAnswers((prev) => ({
-                            ...prev,
-                            [question.id]: [value],
-                          }))
-                        }
-                        editable={!isLocked}
-                      />
-                    )}
-                    {/* Date */}
-                    {question.question_type === "date" && (
-                      <>
-                        <TouchableOpacity
-                          style={styles.dateButton}
-                          onPress={() =>
-                            !isLocked &&
-                            setDatePickerVisible((prev) => ({
-                              ...prev,
-                              [question.id]: true,
-                            }))
-                          }
-                          disabled={isLocked}
-                        >
-                          <Text style={styles.dateButtonText}>
-                            {answers[question.id] || "Seleccionar fecha"}
-                          </Text>
-                        </TouchableOpacity>
-                        {datePickerVisible[question.id] && (
-                          <DateTimePicker
-                            value={
-                              answers[question.id]
-                                ? new Date(answers[question.id])
-                                : new Date()
-                            }
-                            mode="date"
-                            display="default"
-                            onChange={(event, selectedDate) =>
-                              !isLocked &&
-                              handleDateChange(question.id, selectedDate)
-                            }
-                          />
-                        )}
-                      </>
-                    )}
-                  </View>
-                );
-              })
-            )}
-            {/* Botón de envío progresivo SOLO si hay más de una pregunta repetida */}
-            {isRepeatedQuestions.length > 1 && (
-              <TouchableOpacity
-                style={styles.submitButton}
-                onPress={submitting ? null : handleProgressiveSubmit}
-                disabled={submitting}
-              >
-                {submitting ? (
-                  <>
-                    <Animated.View style={{ transform: [{ rotate: spin }] }}>
-                      <SvgXml xml={spinnerSvg} width={40} height={40} />
-                    </Animated.View>
-                    <Text style={styles.submitButtonText}>Enviando...</Text>
-                  </>
-                ) : (
-                  <Text style={styles.submitButtonText}>Siguiente ➡</Text>
-                )}
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
-
-        {/* Mostrar grupos de respuestas enviadas en modo progresivo */}
-        {isRepeatedQuestions.length > 1 &&
-          submittedRepeatedGroups.length > 0 && (
-            <View style={styles.submittedGroupsContainer}>
-              <Text style={styles.submittedGroupsTitle}>
-                Formularios diligenciados:
-              </Text>
-              <View style={{ maxHeight: height * 0.25 }}>
-                <ScrollView
-                  contentContainerStyle={{ paddingBottom: 10 }}
-                  nestedScrollEnabled
-                >
-                  {submittedRepeatedGroups.map((group, idx) => (
-                    <View key={idx} style={styles.submittedGroupCard}>
-                      <Text style={styles.submittedGroupHeader}>
-                        Formulario diligenciado #{idx + 1}
-                      </Text>
-                      {isRepeatedQuestions.map((q) => (
-                        <View key={q.id} style={styles.submittedGroupRow}>
-                          <Text style={styles.submittedGroupQuestion}>
-                            {q.question_text}:
-                          </Text>
-                          <View style={styles.submittedGroupAnswerBox}>
-                            {Array.isArray(group[q.id])
-                              ? group[q.id]
-                                  .filter((ans) => ans && ans !== "")
-                                  .map((ans, i) => (
+                            <View style={styles.submittedGroupAnswerBox}>
+                              {Array.isArray(group[q.id])
+                                ? group[q.id]
+                                    .filter((ans) => ans && ans !== "")
+                                    .map((ans, i) => (
+                                      <Text
+                                        key={i}
+                                        style={styles.submittedGroupAnswer}
+                                        numberOfLines={1}
+                                        ellipsizeMode="tail"
+                                      >
+                                        {ans}
+                                      </Text>
+                                    ))
+                                : group[q.id] && (
                                     <Text
-                                      key={i}
                                       style={styles.submittedGroupAnswer}
                                       numberOfLines={1}
                                       ellipsizeMode="tail"
                                     >
-                                      {ans}
+                                      {group[q.id]}
                                     </Text>
-                                  ))
-                              : group[q.id] && (
-                                  <Text
-                                    style={styles.submittedGroupAnswer}
-                                    numberOfLines={1}
-                                    ellipsizeMode="tail"
-                                  >
-                                    {group[q.id]}
-                                  </Text>
-                                )}
+                                  )}
+                            </View>
                           </View>
-                        </View>
-                      ))}
-                    </View>
-                  ))}
-                </ScrollView>
+                        ))}
+                      </View>
+                    ))}
+                  </ScrollView>
+                </View>
               </View>
-            </View>
+            )}
+
+          {/* Botón de envío normal si solo hay una pregunta is_repeated */}
+          {isRepeatedQuestions.length <= 1 && (
+            <TouchableOpacity
+              style={styles.submitButton}
+              onPress={submitting ? null : handleSubmitForm}
+              disabled={submitting}
+            >
+              {submitting ? (
+                <>
+                  <Animated.View style={{ transform: [{ rotate: spin }] }}>
+                    <SvgXml xml={spinnerSvg} width={40} height={40} />
+                  </Animated.View>
+                  <Text style={styles.submitButtonText}>Enviando...</Text>
+                </>
+              ) : (
+                <Text style={styles.submitButtonText}>Guardar Formulario</Text>
+              )}
+            </TouchableOpacity>
           )}
 
-        {/* Botón de envío normal si solo hay una pregunta is_repeated */}
-        {isRepeatedQuestions.length <= 1 && (
           <TouchableOpacity
-            style={styles.submitButton}
-            onPress={submitting ? null : handleSubmitForm}
+            style={styles.backButton}
+            onPress={() => router.push("/home")}
             disabled={submitting}
           >
-            {submitting ? (
-              <>
-                <Animated.View style={{ transform: [{ rotate: spin }] }}>
-                  <SvgXml xml={spinnerSvg} width={40} height={40} />
-                </Animated.View>
-                <Text style={styles.submitButtonText}>Enviando...</Text>
-              </>
-            ) : (
-              <Text style={styles.submitButtonText}>Guardar Formulario</Text>
-            )}
+            <Text style={styles.backButtonText}>
+              <HomeIcon color={"white"} />
+              {"  "}
+              Home
+            </Text>
           </TouchableOpacity>
-        )}
-
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.push("/home")}
-          disabled={submitting}
-        >
-          <Text style={styles.backButtonText}>
-            <HomeIcon color={"white"} />
-            {"  "}
-            Home
-          </Text>
-        </TouchableOpacity>
-      </ScrollView>
-      {/* Modal de cierre de sesión por inactividad */}
-      <Modal
-        visible={showLogoutModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowLogoutModal(false)}
-      >
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: "rgba(0,0,0,0.4)",
-            justifyContent: "center",
-            alignItems: "center",
-          }}
-        >
-          <View
-            style={{
-              backgroundColor: "#fff",
-              borderRadius: 10,
-              padding: 24,
-              width: width * 0.8,
-              alignItems: "center",
-              elevation: 5,
-            }}
-          >
-            <Text
-              style={{
-                fontWeight: "bold",
-                fontSize: width * 0.05,
-                marginBottom: 8,
-                color: "#222",
-              }}
-            >
-              Sesión cerrada por inactividad
-            </Text>
-            <Text
-              style={{
-                fontSize: width * 0.04,
-                color: "#444",
-                marginBottom: 12,
-                textAlign: "center",
-              }}
-            >
-              Por seguridad, la sesión se cerró automáticamente.
-            </Text>
-            <TouchableOpacity
-              style={{
-                backgroundColor: "#2563eb",
-                borderRadius: 6,
-                padding: 12,
-                alignItems: "center",
-                width: "100%",
-              }}
-              onPress={() => {
-                setShowLogoutModal(false);
-                router.push("/");
-              }}
-            >
-              <Text
-                style={{
-                  color: "white",
-                  fontWeight: "bold",
-                  fontSize: width * 0.045,
-                }}
-              >
-                Volver a iniciar sesión
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-      {/* Modal para generación de serial y subida de archivo */}
-      <Modal
-        visible={fileModal.visible}
-        transparent
-        animationType="fade"
-        onRequestClose={closeFileModal}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            {!fileSerials[fileModal.questionId] ? (
-              <>
-                <Text style={styles.modalTitle}>
-                  ¿Desea generar un serial para este archivo?
-                </Text>
-                <View style={{ flexDirection: "row", marginTop: 10 }}>
-                  <TouchableOpacity
-                    style={[styles.modalButton, { backgroundColor: "#2563eb" }]}
-                    onPress={async () => {
-                      console.log(
-                        "🟢 Opción SÍ para generar serial, pregunta:",
-                        fileModal.questionId
-                      );
-                      await generateSerial(fileModal.questionId);
-                    }}
-                    disabled={generatingSerial}
-                  >
-                    <Text style={styles.modalButtonText}>
-                      {generatingSerial ? "Generando..." : "Sí"}
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.modalButton, { backgroundColor: "#aaa" }]}
-                    onPress={closeFileModal}
-                    disabled={generatingSerial}
-                  >
-                    <Text style={styles.modalButtonText}>No</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            ) : (
-              <>
-                <Text style={styles.modalTitle}>
-                  Serial asignado: {fileSerials[fileModal.questionId]}
-                </Text>
-                <View style={{ flexDirection: "row", marginTop: 10 }}>
-                  <TouchableOpacity
-                    style={[styles.modalButton, { backgroundColor: "#2563eb" }]}
-                    onPress={async () => {
-                      console.log(
-                        "🟢 Botón SUBIR ARCHIVO visible, pregunta:",
-                        fileModal.questionId,
-                        "Serial:",
-                        fileSerials[fileModal.questionId]
-                      );
-                      await handleFileUploadWithSerial(fileModal.questionId);
-                    }}
-                  >
-                    <Text style={styles.modalButtonText}>Subir archivo</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.modalButton, { backgroundColor: "#aaa" }]}
-                    onPress={closeFileModal}
-                  >
-                    <Text style={styles.modalButtonText}>Ok</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            )}
-          </View>
-        </View>
-      </Modal>
-      {/* Modal para mostrar el serial generado */}
-      <Modal
-        visible={showSerialModal.visible}
-        transparent
-        animationType="fade"
-        onRequestClose={closeSerialModal}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>✅ Este es el serial asignado</Text>
-            <Text
-              style={{ fontWeight: "bold", fontSize: 18, marginVertical: 10 }}
-            >
-              {showSerialModal.serial}
-            </Text>
-            <TouchableOpacity
-              style={[styles.modalButton, { backgroundColor: "#2563eb" }]}
-              onPress={closeSerialModal}
-            >
-              <Text style={styles.modalButtonText}>Continuar ✅</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-    </View>
+        </ScrollView>
+        {/* ...existing modals... */}
+      </View>
+    </LinearGradient>
   );
 }
 

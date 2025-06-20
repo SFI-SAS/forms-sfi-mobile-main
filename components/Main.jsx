@@ -68,6 +68,7 @@ export function Main() {
         console.log("🔑 Token recuperado:", savedToken);
         console.log("🚪 Estado de sesión:", isLoggedOut);
 
+        // Solo permite acceso automático si isLoggedOut !== "true"
         if (savedToken && isLoggedOut !== "true") {
           const responseUser = await fetch(
             `https://api-forms-sfi.service.saferut.com/auth/validate-token`,
@@ -89,7 +90,9 @@ export function Main() {
             params: { name: userData.name, email: userData.email }, // Pasar datos como props
           });
         } else {
-          console.warn("⚠️ No hay token guardado o usuario cerró sesión.");
+          // Si está deslogueado, limpia token por seguridad
+          await AsyncStorage.removeItem("authToken");
+          await AsyncStorage.setItem("isLoggedOut", "true");
         }
       } catch (error) {
         console.error("❌ Error obteniendo el token:", error);
@@ -187,7 +190,8 @@ export function Main() {
 
       const token = json.access_token;
 
-      await AsyncStorage.setItem("authToken", token); // Save token for offline access
+      await AsyncStorage.setItem("authToken", token);
+      await AsyncStorage.setItem("isLoggedOut", "false"); // Mark the session as logged in
 
       // Validar el token usando GET
       const responseUser = await fetch(

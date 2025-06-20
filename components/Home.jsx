@@ -6,23 +6,23 @@ import {
   StyleSheet,
   ScrollView,
   BackHandler,
-  Dimensions, // Import Dimensions
-  Animated, // Import Animated
-  Easing, // Import Easing
+  Dimensions,
+  Animated,
+  Easing,
   Image,
   Modal,
-  TextInput,
-  Keyboard,
+  Alert,
+  Platform,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 import { useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
-import { Logo } from "./Logo";
-import { SvgXml } from "react-native-svg"; // Import SvgXml
+import { SvgXml } from "react-native-svg";
 import { HomeIcon, InfoIcon } from "../components/Icons";
+import { LinearGradient } from "expo-linear-gradient";
 
-const { width, height } = Dimensions.get("window"); // Get screen dimensions
+const { width, height } = Dimensions.get("window");
 
 // Spinner SVG igual que en FormatScreen
 const spinnerSvg = `
@@ -32,9 +32,248 @@ const spinnerSvg = `
 const QUESTIONS_KEY = "offline_questions";
 const FORMS_METADATA_KEY = "offline_forms_metadata";
 const RELATED_ANSWERS_KEY = "offline_related_answers";
-const INACTIVITY_TIMEOUT = 8 * 60 * 1000; // 8 minutos
+const INACTIVITY_TIMEOUT = 10 * 60 * 1000; // 10 minutos
 
-export default function Home() {
+// --- COMPONENTES REUTILIZABLES ---
+
+// Avatar circular con iniciales
+const UserAvatar = ({ name }) => {
+  const initials =
+    name && typeof name === "string"
+      ? name
+          .split(" ")
+          .map((n) => n[0])
+          .join("")
+          .slice(0, 2)
+          .toUpperCase()
+      : "U";
+  return (
+    <View style={styles.avatarCircle}>
+      <Text style={styles.avatarText}>{initials}</Text>
+    </View>
+  );
+};
+
+// Tarjeta de usuario con fondo degradado MUY blanco (90%) a verde (10%) y detalles visuales
+const UserCard = ({ userInfo, isOffline, loadingUser, spinAnimUser }) => (
+  <LinearGradient
+    colors={[
+      "#fff",
+      "#fff",
+      "#e6fafd",
+      "#e6fafd",
+      "#e6fafd",
+      "#e6fafd",
+      "#12A0AF",
+    ]}
+    locations={[0, 0.7, 0.85, 0.92, 0.96, 0.98, 1]}
+    start={{ x: 0.6, y: 0 }}
+    end={{ x: 0.5, y: 1 }}
+    style={styles.userCardGradient}
+  >
+    <View style={styles.userCardRow}>
+      <UserAvatar name={userInfo?.name} />
+      <View style={{ flex: 1, marginLeft: 12 }}>
+        <Text style={styles.userNameGreen} numberOfLines={1}>
+          {userInfo?.name || ""}
+        </Text>
+        {loadingUser ? (
+          <View style={styles.userLoadingRow}>
+            <Animated.View style={{ transform: [{ rotate: spinAnimUser }] }}>
+              <SvgXml
+                xml={spinnerSvg.replace("#000000FF", "#12A0AF")}
+                backgroundColor="#12A0AF"
+                width={28}
+                height={28}
+              />
+            </Animated.View>
+            <Text style={styles.userLoadingTextGreen}>Cargando datos...</Text>
+          </View>
+        ) : (
+          // Mostrar la información del usuario en columnas (una debajo de la otra)
+          <View style={styles.userInfoColumn}>
+            <View style={styles.userInfoRow}>
+              <Text style={styles.userInfoLabelGreen}>Email: </Text>
+              <Text style={styles.userInfoValueGreen}>{userInfo?.email}</Text>
+            </View>
+            <View style={styles.userInfoRow}>
+              <Text style={styles.userInfoLabelGreen}>Doc: </Text>
+              <Text style={styles.userInfoValueGreen}>
+                {userInfo?.num_document}
+              </Text>
+            </View>
+            <View style={styles.userInfoRow}>
+              <Text style={styles.userInfoLabelGreen}>Tel: </Text>
+              <Text style={styles.userInfoValueGreen}>
+                {userInfo?.telephone}
+              </Text>
+            </View>
+            <View style={styles.userInfoRow}>
+              <Text style={styles.userInfoLabelGreen}>Tipo: </Text>
+              <Text style={styles.userInfoValueGreen}>
+                {userInfo?.user_type}
+              </Text>
+            </View>
+          </View>
+        )}
+      </View>
+      <View style={styles.statusPillWrapper}>
+        <Text
+          style={[
+            styles.statusPill,
+            isOffline ? styles.statusOffline : styles.statusOnline,
+          ]}
+        >
+          {isOffline ? "Offline" : "Online"}
+        </Text>
+      </View>
+    </View>
+  </LinearGradient>
+);
+
+// Tarjeta de formulario con sombra y diseño moderno
+const FormCard = ({ form, onPress }) => (
+  <TouchableOpacity
+    style={styles.formCard}
+    onPress={onPress}
+    activeOpacity={0.85}
+  >
+    <View style={styles.formCardHeader}>
+      <Image
+        source={require("../assets/form_icon.png")}
+        style={styles.formCardIcon}
+        resizeMode="contain"
+      />
+      <Text style={styles.formCardTitle} numberOfLines={1}>
+        {form.title}
+      </Text>
+    </View>
+    <Text style={styles.formCardDesc} numberOfLines={2}>
+      {form.description}
+    </Text>
+  </TouchableOpacity>
+);
+
+// Barra de tabs inferior fija, ahora incluye Home y maneja navegación global
+const BottomTabBar = ({ activeTab, onTabPress }) => (
+  <View style={styles.tabBarContainer}>
+    <TabBarButton
+      icon={<HomeIcon color={activeTab === "home" ? "#12A0AF" : "#4B34C7"} />}
+      label="Inicio"
+      active={activeTab === "home"}
+      onPress={() => onTabPress("home")}
+    />
+    <TabBarButton
+      icon={
+        <Image
+          source={require("../assets/fact_check_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24.png")}
+          style={[
+            styles.tabBarIcon,
+            activeTab === "my-forms" && { tintColor: "#12A0AF" },
+          ]}
+        />
+      }
+      label="Diligenciados"
+      active={activeTab === "my-forms"}
+      onPress={() => onTabPress("my-forms")}
+    />
+    <TabBarButton
+      icon={
+        <Image
+          source={require("../assets/sync_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24.png")}
+          style={[
+            styles.tabBarIcon,
+            activeTab === "pending-forms" && { tintColor: "#12A0AF" },
+          ]}
+        />
+      }
+      label="Pendientes"
+      active={activeTab === "pending-forms"}
+      onPress={() => onTabPress("pending-forms")}
+    />
+    <TabBarButton
+      icon={
+        <Image
+          source={require("../assets/logout_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24 (1).png")}
+          style={[
+            styles.tabBarIcon,
+            activeTab === "logout" && { tintColor: "#ef4444" },
+          ]}
+        />
+      }
+      label="Salir"
+      active={activeTab === "logout"}
+      onPress={() => onTabPress("logout")}
+      danger
+    />
+  </View>
+);
+
+const TabBarButton = ({ icon, label, active, onPress, danger }) => (
+  <TouchableOpacity
+    style={[
+      styles.tabBarButton,
+      active && styles.tabBarButtonActive,
+      danger && styles.tabBarButtonDanger,
+    ]}
+    onPress={onPress}
+    activeOpacity={0.8}
+  >
+    {typeof icon === "string" ? (
+      <Image source={icon} style={styles.tabBarIcon} />
+    ) : (
+      icon
+    )}
+    <Text
+      style={[
+        styles.tabBarLabel,
+        active && styles.tabBarLabelActive,
+        danger && styles.tabBarLabelDanger,
+      ]}
+    >
+      {label}
+    </Text>
+  </TouchableOpacity>
+);
+
+// --- FIN COMPONENTES REUTILIZABLES ---
+
+// NUEVO: Componente padre que renderiza la tab-bar SIEMPRE y maneja navegación global
+export function AppWithTabBar() {
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState("home");
+
+  // Redirección global según tab seleccionada
+  const handleTabPress = (tab) => {
+    setActiveTab(tab);
+    if (tab === "home") router.replace("/home");
+    if (tab === "my-forms") router.replace("/my-forms");
+    if (tab === "pending-forms") router.replace("/pending-forms");
+    if (tab === "logout") router.replace("/"); // o lógica de logout
+  };
+
+  // Detecta ruta actual para mantener el tab activo
+  useEffect(() => {
+    const path = router.asPath || router.pathname || "";
+    if (path.includes("my-forms")) setActiveTab("my-forms");
+    else if (path.includes("pending-forms")) setActiveTab("pending-forms");
+    else if (path === "/" || path.includes("home")) setActiveTab("home");
+    // No cambia para logout, se activa solo al presionar
+  }, [router.asPath, router.pathname]);
+
+  return (
+    <View style={{ flex: 1 }}>
+      {/* Aquí renderiza la pantalla actual */}
+      <Home activeTab={activeTab} onTabPress={handleTabPress} />
+      <View style={styles.tabBarAbsolute}>
+        <BottomTabBar activeTab={activeTab} onTabPress={handleTabPress} />
+      </View>
+    </View>
+  );
+}
+
+// Modifica Home para recibir activeTab y onTabPress como props
+export default function Home({ activeTab, onTabPress }) {
   const router = useRouter();
   const [userForms, setUserForms] = useState([]);
   const [isOffline, setIsOffline] = useState(false);
@@ -42,6 +281,8 @@ export default function Home() {
   const [userInfo, setUserInfo] = useState(null); // State to store user information
   const [spinAnim] = useState(new Animated.Value(0)); // Spinner animation state
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [loadingUser, setLoadingUser] = useState(true);
+  const [spinAnimUser] = useState(new Animated.Value(0));
   const inactivityTimer = useRef(null);
 
   useFocusEffect(
@@ -73,15 +314,20 @@ export default function Home() {
 
   // Carga la info de usuario desde AsyncStorage
   const loadUserInfoOffline = async () => {
+    setLoadingUser(true);
     try {
       const stored = await AsyncStorage.getItem(USER_INFO_KEY);
       if (stored) setUserInfo(JSON.parse(stored));
     } catch (e) {
       console.error("❌ Error cargando userInfo offline:", e);
+    } finally {
+      setLoadingUser(false);
     }
   };
 
+  // Carga la info de usuario desde el servidor
   const fetchUserInfo = async () => {
+    setLoadingUser(true);
     try {
       const token = await AsyncStorage.getItem("authToken");
       if (!token) throw new Error("No authentication token found");
@@ -105,6 +351,8 @@ export default function Home() {
       console.error("❌ Error fetching user information:", error);
       // Si falla online, intenta cargar offline
       loadUserInfoOffline();
+    } finally {
+      setLoadingUser(false);
     }
   };
 
@@ -319,7 +567,24 @@ export default function Home() {
     }
   }, [loading]);
 
-  const spin = spinAnim.interpolate({
+  // Animación de spinner para usuario
+  useEffect(() => {
+    if (loadingUser) {
+      Animated.loop(
+        Animated.timing(spinAnimUser, {
+          toValue: 1,
+          duration: 1200,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+      ).start();
+    } else {
+      spinAnimUser.stopAnimation();
+      spinAnimUser.setValue(0);
+    }
+  }, [loadingUser]);
+
+  const spin = spinAnimUser.interpolate({
     inputRange: [0, 1],
     outputRange: ["0deg", "360deg"],
   });
@@ -329,6 +594,7 @@ export default function Home() {
     if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
     inactivityTimer.current = setTimeout(async () => {
       await AsyncStorage.setItem("isLoggedOut", "true");
+      await AsyncStorage.removeItem("authToken");
       setShowLogoutModal(true);
     }, INACTIVITY_TIMEOUT);
   };
@@ -356,361 +622,486 @@ export default function Home() {
     };
   }, []);
 
-  return (
-    <View style={styles.container}>
-      <View style={styles.headerCard}>
-        <Text style={styles.headerTitle}>Datos del usuario</Text>
+  // --- NOTIFICACIONES NATIVAS ---
+  // useEffect(() => {
+  //   // Solo ejecutar notificaciones si NO estamos en Expo Go
+  //   const isExpoGo =
+  //     typeof Constants !== "undefined" && Constants.appOwnership === "expo";
+  //   if (isExpoGo) return;
 
-        {userInfo && (
-          <View style={styles.headerUserRow}>
-            <View style={styles.headerUserCol}>
-              <Text
-                style={styles.headerUserName}
-                numberOfLines={1}
-                ellipsizeMode="tail"
-              >
-                {userInfo.name}
-              </Text>
-              <Text style={styles.headerUserMiniLabel}>Email</Text>
-              <Text
-                style={styles.headerUserMiniValue}
-                numberOfLines={1}
-                ellipsizeMode="middle"
-              >
-                {userInfo.email}
-              </Text>
-              <Text style={styles.headerUserMiniLabel}>Doc</Text>
-              <Text
-                style={styles.headerUserMiniValue}
-                numberOfLines={1}
-                ellipsizeMode="middle"
-              >
-                {userInfo.num_document}
-              </Text>
-            </View>
-            <View style={styles.headerUserCol}>
-              <Text style={styles.headerUserMiniLabel}>Tel</Text>
-              <Text
-                style={styles.headerUserMiniValue}
-                numberOfLines={1}
-                ellipsizeMode="middle"
-              >
-                {userInfo.telephone}
-              </Text>
-              <Text style={styles.headerUserMiniLabel}>Tipo</Text>
-              <Text
-                style={styles.headerUserMiniValue}
-                numberOfLines={1}
-                ellipsizeMode="tail"
-              >
-                {userInfo.user_type}
-              </Text>
-              <Text
-                style={[
-                  styles.headerUserStatus,
-                  isOffline ? styles.offlineText : styles.onlineText,
-                ]}
-              >
-                {isOffline ? "Offline ◉" : "Online ◉"}
-              </Text>
-            </View>
-          </View>
-        )}
-      </View>
-      <Text style={styles.headerTitle}>
-        Formatos asignados para este usuario
-      </Text>
-      <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
-        {loading ? (
-          <View style={{ alignItems: "center", marginVertical: 30 }}>
-            <Animated.View style={{ transform: [{ rotate: spin }] }}>
-              <SvgXml xml={spinnerSvg} width={40} height={40} />
-            </Animated.View>
-            <Text style={styles.loadingText}>Cargando...</Text>
-          </View>
-        ) : (
-          <View style={styles.formsScrollWrapper}>
-            <ScrollView
-              style={styles.formsContainer}
-              contentContainerStyle={{ paddingBottom: 10 }}
-              showsVerticalScrollIndicator={true}
-            >
-              {userForms &&
-                userForms.map(
-                  (form) =>
-                    form && (
-                      <TouchableOpacity
-                        key={form.id}
-                        style={styles.formItem}
-                        onPress={() => handleFormPress(form)}
-                      >
-                        <Text
-                          style={styles.formText}
-                          numberOfLines={1}
-                          ellipsizeMode="tail"
-                        >
-                          {form.title}
-                        </Text>
-                        <Text
-                          style={styles.formDescription}
-                          numberOfLines={2}
-                          ellipsizeMode="tail"
-                        >
-                          {form.description}
-                        </Text>
-                      </TouchableOpacity>
-                    )
-                )}
-            </ScrollView>
-          </View>
-        )}
-      </ScrollView>
-      <View style={styles.fixedButtonsContainer}>
-        <View style={styles.buttonsRow}>
-          <TouchableOpacity
-            onPress={handleNavigateToMyForms}
-            style={styles.buttonMini}
-          >
-            <Text style={styles.buttonMiniText}>Diligenciados </Text>
-            <Image
-              source={require("../assets/fact_check_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24.png")}
-            />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={handleNavigateToPendingForms}
-            style={styles.buttonMini}
-          >
-            <Text style={styles.buttonMiniText}>Pendientes </Text>
-            <Image
-              source={require("../assets/sync_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24.png")}
-            />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={handleLogout}
-            style={styles.logoutButtonMini}
-          >
-            <Text style={styles.buttonMiniText}>Salir </Text>
-            <Image
-              source={require("../assets/logout_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24 (1).png")}
-            />
-          </TouchableOpacity>
-        </View>
-      </View>
-      {/* Modal de cierre de sesión por inactividad */}
-      <Modal
-        visible={showLogoutModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowLogoutModal(false)}
-      >
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: "rgba(0,0,0,0.4)",
-            justifyContent: "center",
-            alignItems: "center",
+  //   const checkPendingFormsAndNotify = async () => {
+  //     try {
+  //       const pending = await AsyncStorage.getItem("pending_forms");
+  //       if (pending) {
+  //         const pendingArr = JSON.parse(pending);
+  //         if (Array.isArray(pendingArr) && pendingArr.length > 0) {
+  //           await Notifications.scheduleNotificationAsync({
+  //             content: {
+  //               title: "Tienes formularios pendientes",
+  //               body: `Hay ${pendingArr.length} formularios sin enviar. ¡No olvides sincronizarlos!`,
+  //               sound: true,
+  //               priority: Notifications.AndroidNotificationPriority.HIGH,
+  //             },
+  //             trigger: null,
+  //           });
+  //         }
+  //       }
+  //     } catch (e) {
+  //       // Silenciar errores de notificación
+  //     }
+  //   };
+  //   checkPendingFormsAndNotify();
+  // }, []);
+
+  return (
+    <LinearGradient
+      colors={["#4B34C7", "#4B34C7"]}
+      style={styles.fullBackground}
+    >
+      <View style={styles.container}>
+        {/* Fondo decorativo superior eliminado, ahora todo el fondo es morado */}
+        <Text style={styles.sectionTitleWhite}>Bienvenido</Text>
+        <UserCard
+          userInfo={userInfo}
+          isOffline={isOffline}
+          loadingUser={loadingUser}
+          spinAnimUser={spin}
+        />
+        <Text style={styles.sectionTitleWhite}>Formatos asignados</Text>
+        <ScrollView
+          contentContainerStyle={{
+            flexGrow: 1,
+            paddingBottom: height * 0.11, // Espacio para la tab-bar
           }}
+          style={{ flex: 1 }}
+        >
+          {loading ? (
+            <View style={{ alignItems: "center", marginVertical: 30 }}>
+              <Animated.View style={{ transform: [{ rotate: spin }] }}>
+                <SvgXml
+                  xml={spinnerSvg.replace("#000000FF", "#fff")}
+                  width={40}
+                  height={40}
+                />
+              </Animated.View>
+              <Text style={styles.loadingTextWhite}>Cargando...</Text>
+            </View>
+          ) : (
+            <View style={styles.formsScrollWrapper}>
+              <LinearGradient
+                colors={[
+                  "#fff",
+                  "#fff",
+                  "#e6fafd",
+                  "#e6fafd",
+                  "#e6fafd",
+                  "#e6fafd",
+                  "#12A0AF",
+                ]}
+                locations={[0, 0.7, 0.85, 0.92, 0.96, 0.98, 1]}
+                start={{ x: 0.6, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={styles.formsGradientBg}
+              >
+                <ScrollView
+                  style={styles.formsContainer}
+                  contentContainerStyle={{
+                    paddingBottom: 10,
+                    paddingHorizontal: width * 0.03, // Espacio lateral interno
+                  }}
+                  showsVerticalScrollIndicator={false}
+                  horizontal={false}
+                >
+                  {userForms &&
+                    userForms.map(
+                      (form) =>
+                        form && (
+                          <View style={styles.formCardWrapper} key={form.id}>
+                            <FormCard
+                              form={form}
+                              onPress={() => handleFormPress(form)}
+                            />
+                          </View>
+                        )
+                    )}
+                </ScrollView>
+              </LinearGradient>
+            </View>
+          )}
+        </ScrollView>
+        {/* Barra de tabs inferior */}
+        {/* <View style={styles.tabBarAbsolute}>
+          <BottomTabBar onTabPress={handleTabPress} activeTab={activeTab} />
+        </View> */}
+        {/* Modal de cierre de sesión por inactividad */}
+        <Modal
+          visible={showLogoutModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowLogoutModal(false)}
         >
           <View
             style={{
-              backgroundColor: "#fff",
-              borderRadius: 10,
-              padding: 24,
-              width: width * 0.8,
+              flex: 1,
+              backgroundColor: "rgba(0,0,0,0.4)",
+              justifyContent: "center",
               alignItems: "center",
-              elevation: 5,
             }}
           >
-            <Text
+            <View
               style={{
-                fontWeight: "bold",
-                fontSize: width * 0.05,
-                marginBottom: 8,
-                color: "#222",
-              }}
-            >
-              Sesión cerrada por inactividad
-            </Text>
-            <Text
-              style={{
-                fontSize: width * 0.04,
-                color: "#444",
-                marginBottom: 12,
-                textAlign: "center",
-              }}
-            >
-              Por seguridad, la sesión se cerró automáticamente tras 8 minutos
-              sin actividad.
-            </Text>
-            <TouchableOpacity
-              style={{
-                backgroundColor: "#2563eb",
-                borderRadius: 6,
-                padding: 12,
+                backgroundColor: "#fff",
+                borderRadius: 10,
+                padding: 24,
+                width: width * 0.8,
                 alignItems: "center",
-                width: "100%",
-              }}
-              onPress={() => {
-                setShowLogoutModal(false);
-                // Redirige al login
-                router.push("/");
+                elevation: 5,
               }}
             >
               <Text
                 style={{
-                  color: "white",
                   fontWeight: "bold",
-                  fontSize: width * 0.045,
+                  fontSize: width * 0.05,
+                  marginBottom: 8,
+                  color: "#222",
                 }}
               >
-                Ir al inicio de sesión
+                Sesión cerrada por inactividad
               </Text>
-            </TouchableOpacity>
+              <Text
+                style={{
+                  fontSize: width * 0.04,
+                  color: "#444",
+                  marginBottom: 12,
+                  textAlign: "center",
+                }}
+              >
+                Por seguridad, la sesión se cerró automáticamente tras 2 minutos
+                sin actividad.
+              </Text>
+              <TouchableOpacity
+                style={{
+                  backgroundColor: "#2563eb",
+                  borderRadius: 6,
+                  padding: 12,
+                  alignItems: "center",
+                  width: "100%",
+                }}
+                onPress={() => {
+                  setShowLogoutModal(false);
+                  router.replace("/");
+                }}
+              >
+                <Text
+                  style={{
+                    color: "white",
+                    fontWeight: "bold",
+                    fontSize: width * 0.045,
+                  }}
+                >
+                  Ir al inicio de sesión
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
-      </Modal>
-    </View>
+        </Modal>
+      </View>
+    </LinearGradient>
   );
 }
 
+// --- NUEVOS ESTILOS MODERNOS ---
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: width * 0.01, backgroundColor: "#f8f8f8" },
-  headerCard: {
-    backgroundColor: "#fff",
-    borderRadius: width * 0.025,
-    padding: width * 0.02,
-    marginBottom: height * 0.005,
-    marginTop: height * 0.005,
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowRadius: 2,
-    shadowOffset: { width: 0, height: 1 },
-    borderColor: "#e0e0e0",
-    borderWidth: 1,
-    minHeight: height * 0.11,
-    justifyContent: "center",
-  },
-  headerTitle: {
-    fontSize: width * 0.045,
-    fontWeight: "bold",
-    color: "#4B34C7",
-    marginBottom: 2,
-    textAlign: "center",
-  },
-  headerUserRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: width * 0.02,
-  },
-  headerUserCol: {
+  fullBackground: {
     flex: 1,
-    minWidth: width * 0.22,
-    maxWidth: width * 0.5,
-    paddingRight: width * 0.01,
   },
-  headerUserName: {
-    fontSize: width * 0.038,
+  container: {
+    flex: 1,
+    backgroundColor: "transparent",
+    position: "relative",
+    paddingBottom: 0,
+  },
+  topBackground: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: width,
+    height: height * 0.22,
+    backgroundColor: "#4B34C7",
+    borderBottomLeftRadius: width * 0.15,
+    borderBottomRightRadius: width * 0.15,
+    zIndex: 0,
+    opacity: 0.95,
+  },
+  sectionTitle: {
+    fontSize: width * 0.055,
     fontWeight: "bold",
     color: "#222",
-    marginBottom: 1,
+    marginTop: height * 0.04,
+    marginBottom: 8,
+    textAlign: "center",
+    letterSpacing: 0.2,
+    zIndex: 1,
   },
-  headerUserMiniLabel: {
-    fontSize: width * 0.028,
+  sectionTitleWhite: {
+    fontSize: width * 0.055,
+    fontWeight: "bold",
+    color: "#fff",
+    marginTop: height * 0.04,
+    marginBottom: 8,
+    textAlign: "center",
+    letterSpacing: 0.2,
+    zIndex: 1,
+    textShadowColor: "#0002",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  // --- UserCard ---
+  userCardGradient: {
+    borderRadius: width * 0.04,
+    marginHorizontal: width * 0.04,
+    marginBottom: height * 0.02,
+    padding: width * 0.04,
+    shadowColor: "#000",
+    shadowOpacity: 0.09,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+    zIndex: 2,
+    flexDirection: "column",
+    minHeight: height * 0.16,
+  },
+  userCardRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  avatarCircle: {
+    width: width * 0.14,
+    height: width * 0.14,
+    borderRadius: width * 0.07,
+    backgroundColor: "#12A0AF",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+    shadowColor: "#12A0AF",
+    shadowOpacity: 0.18,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  avatarText: {
+    color: "#fff",
+    fontWeight: "bold",
+    fontSize: width * 0.055,
+    letterSpacing: 1,
+  },
+  userName: {
+    fontSize: width * 0.045,
+    fontWeight: "bold",
+    color: "#222",
+    marginBottom: 2,
+    letterSpacing: 0.2,
+  },
+  userNameGreen: {
+    fontSize: width * 0.045,
+    fontWeight: "bold",
+    color: "#12A0AF",
+    marginBottom: 4,
+    letterSpacing: 0.2,
+    textShadowColor: "#fff8",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  userInfoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  userInfoColumn: {
+    flexDirection: "column",
+    marginTop: 4,
+  },
+  userInfoLabel: {
+    fontSize: width * 0.032,
     color: "#888",
     fontWeight: "bold",
-    marginTop: 1,
   },
-  headerUserMiniValue: {
-    fontSize: width * 0.031,
+  userInfoLabelGreen: {
+    fontSize: width * 0.032,
+    color: "#12A0AF",
+    fontWeight: "bold",
+  },
+  userInfoValue: {
+    fontSize: width * 0.032,
     color: "#444",
-    marginBottom: 1,
+    marginLeft: 2,
+    flexShrink: 1,
   },
-  headerUserStatus: {
+  userInfoValueGreen: {
+    fontSize: width * 0.032,
+    color: "#222",
+    marginLeft: 2,
+    flexShrink: 1,
+  },
+  statusPillWrapper: {
+    alignItems: "flex-end",
+    justifyContent: "flex-start",
+    marginLeft: 8,
+  },
+  statusPill: {
     fontSize: width * 0.032,
     fontWeight: "bold",
-    marginTop: 2,
-  },
-  onlineText: {
-    color: "green",
-  },
-  offlineText: {
-    color: "red",
-  },
-  loadingText: {
-    fontSize: width * 0.045,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 16,
+    overflow: "hidden",
     textAlign: "center",
-    marginVertical: height * 0.02,
+    marginTop: 2,
+    color: "#fff",
   },
+  statusOnline: {
+    backgroundColor: "#22c55e",
+  },
+  statusOffline: {
+    backgroundColor: "#ef4444",
+  },
+  // --- FormCard ---
   formsScrollWrapper: {
     flex: 1,
-    maxHeight: height * 0.5,
+    marginHorizontal: width * 0.03,
     marginBottom: height * 0.01,
+    borderRadius: width * 0.035,
+    overflow: "hidden",
+    maxHeight: height - (height * 0.11 + height * 0.18), // 0.11 tab-bar, 0.18 aprox header/user
+  },
+  formsGradientBg: {
+    flex: 1,
+    borderRadius: width * 0.035,
+    paddingVertical: 8,
+    paddingHorizontal: 2,
+    // No shadow, solo fondo difuminado
   },
   formsContainer: {
     flexGrow: 0,
     maxHeight: height * 0.5,
   },
-  formItem: {
-    padding: width * 0.03,
-    backgroundColor: "#12A0AF",
-    borderRadius: width * 0.018,
-    marginBottom: height * 0.012,
-    borderColor: "#00000022",
-    color: "#ffffff",
-    borderWidth: 1,
+  formCardWrapper: {
+    marginBottom: height * 0.018,
+    borderRadius: width * 0.035,
+    overflow: "visible",
+    shadowColor: "#000",
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+    backgroundColor: "transparent",
   },
-  formText: {
+  formCard: {
+    backgroundColor: "#fff",
+    borderRadius: width * 0.035,
+    padding: width * 0.04,
+    borderWidth: 1,
+    borderColor: "#e0e0e0",
+    // Sombra ya está en el wrapper
+  },
+  formCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  formCardIcon: {
+    width: width * 0.08,
+    height: width * 0.08,
+    marginRight: 10,
+    tintColor: "#12A0AF",
+  },
+  formCardTitle: {
     fontSize: width * 0.042,
     fontWeight: "bold",
-    color: "#ffffff",
+    color: "#4B34C7",
+    flex: 1,
   },
-  formDescription: {
+  formCardDesc: {
     fontSize: width * 0.032,
-    color: "#ffffff",
+    color: "#444",
+    marginTop: 2,
   },
-  fixedButtonsContainer: {
+  // --- TabBar ---
+  tabBarAbsolute: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 100,
+    backgroundColor: "transparent",
+  },
+  tabBarContainer: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "center",
     backgroundColor: "#fff",
-    paddingTop: 4,
-    paddingBottom: 4,
     borderTopWidth: 1,
-    borderColor: "#eee",
+    borderColor: "#e5e7eb",
+    paddingVertical: 6,
+    paddingBottom: Platform.OS === "ios" ? 18 : 8,
+    elevation: 12,
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: -2 },
+    zIndex: 10,
   },
-  buttonsRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: width * 0.02,
-    marginHorizontal: width * 0.01,
-  },
-  buttonMini: {
+  tabBarButton: {
     flex: 1,
-    marginHorizontal: width * 0.01,
-    paddingVertical: height * 0.012,
-    backgroundColor: "#4B34C7",
-    borderRadius: width * 0.018,
     alignItems: "center",
-    borderColor: "#00000022",
-    borderWidth: 1,
-    flexDirection: "row",
     justifyContent: "center",
+    paddingVertical: 6,
+    borderRadius: 12,
+    flexDirection: "column",
+    marginHorizontal: 4,
   },
-  buttonMiniText: {
-    color: "white",
+  tabBarButtonActive: {
+    backgroundColor: "#4B34C722",
+  },
+  tabBarButtonDanger: {
+    backgroundColor: "#ef444422",
+  },
+  tabBarIcon: {
+    width: width * 0.07,
+    height: width * 0.07,
+    marginBottom: 2,
+    tintColor: "#4B34C7",
+  },
+  tabBarLabel: {
+    fontSize: width * 0.032,
+    color: "#4B34C7",
     fontWeight: "bold",
-    fontSize: width * 0.038,
   },
-  logoutButtonMini: {
-    flex: 1,
-    marginHorizontal: width * 0.01,
-    paddingVertical: height * 0.012,
-    backgroundColor: "red",
-    borderRadius: width * 0.018,
-    alignItems: "center",
-    borderColor: "#00000022",
-    borderWidth: 1,
+  tabBarLabelActive: {
+    color: "#12A0AF",
+  },
+  tabBarLabelDanger: {
+    color: "#ef4444",
+  },
+  // --- Otros ---
+  loadingText: {
+    fontSize: width * 0.045,
+    textAlign: "center",
+    marginVertical: height * 0.02,
+    color: "#4B34C7",
+  },
+  userLoadingRow: {
     flexDirection: "row",
-    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 8,
+    gap: 8,
   },
+  userLoadingTextGreen: {
+    color: "#12A0AF",
+    fontSize: width * 0.035,
+    marginLeft: 8,
+    fontWeight: "bold",
+    letterSpacing: 0.2,
+  },
+  // ...otros estilos existentes si es necesario...
 });

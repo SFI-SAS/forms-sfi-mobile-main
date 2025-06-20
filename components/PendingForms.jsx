@@ -17,9 +17,10 @@ import NetInfo from "@react-native-community/netinfo";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router"; // Add this import
 import { HomeIcon } from "./Icons"; // Adjust the import path as necessary
+import { LinearGradient } from "expo-linear-gradient";
 
-const { width, height } = Dimensions.get("window"); // Get screen dimensions
-const INACTIVITY_TIMEOUT = 8 * 60 * 1000; // 8 minutos
+const { width, height } = Dimensions.get("window");
+const INACTIVITY_TIMEOUT = 10 * 60 * 1000; // 10 minutos
 const PENDING_SAVE_RESPONSE_KEY = "pending_save_response";
 const PENDING_SAVE_ANSWERS_KEY = "pending_save_answers";
 
@@ -48,6 +49,7 @@ export default function PendingForms() {
       if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
       inactivityTimer.current = setTimeout(async () => {
         await AsyncStorage.setItem("isLoggedOut", "true");
+        await AsyncStorage.removeItem("authToken");
         setShowLogoutModal(true);
       }, INACTIVITY_TIMEOUT);
     };
@@ -225,189 +227,263 @@ export default function PendingForms() {
   };
 
   return (
-    <View style={{ flex: 1 }}>
-      <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
-        <Text style={styles.header}>Formularios Pendientes</Text>
-        {pendingForms.length === 0 ? (
-          <Text style={styles.noPendingText}>
-            No hay formularios en estado offline pendientes.
-          </Text>
-        ) : (
-          pendingForms.map((form, index) => (
-            <View key={index} style={styles.formItem}>
-              <Text style={styles.formText}>Formulario ID: {form.id}</Text>
-              {form.title ? (
-                <Text style={styles.formTitle}>Título: {form.title}</Text>
-              ) : null}
-              {form.description ? (
-                <Text style={styles.formDescription}>
-                  Descripción: {form.description}
-                </Text>
-              ) : null}
+    <LinearGradient colors={["#4B34C7", "#4B34C7"]} style={{ flex: 1 }}>
+      <View style={{ flex: 1 }}>
+        <View style={styles.formsScrollWrapper}>
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={{
+              paddingBottom: 24,
+              paddingHorizontal: 0,
+            }}
+            showsVerticalScrollIndicator={false}
+          >
+            <Text style={styles.header}>Formularios Diligenciados Offline</Text>
+            {pendingForms.length === 0 ? (
+              <Text style={styles.noPendingText}>
+                No hay formularios en estado offline pendientes.
+              </Text>
+            ) : (
+              pendingForms.map((form, index) => (
+                <View key={index} style={styles.formCardWrapper}>
+                  <View style={styles.formCard}>
+                    <Text style={styles.formText}>
+                      Formulario ID: {form.id}
+                    </Text>
+                    {form.title ? (
+                      <Text style={styles.formTitle}>Título: {form.title}</Text>
+                    ) : null}
+                    {form.description ? (
+                      <Text style={styles.formDescription}>
+                        Descripción: {form.description}
+                      </Text>
+                    ) : null}
+                    <TouchableOpacity
+                      style={
+                        isOnline ? styles.submitButton : styles.Offlinebutton
+                      }
+                      onPress={async () => {
+                        try {
+                          await handleSubmitPendingForm(form);
+                          const updatedPendingForms = pendingForms.filter(
+                            (f) => f.id !== form.id
+                          );
+                          setPendingForms(updatedPendingForms);
+                          await AsyncStorage.setItem(
+                            "pending_forms",
+                            JSON.stringify(updatedPendingForms)
+                          );
+                          Alert.alert(
+                            "Sincronización",
+                            "Formulario enviado correctamente."
+                          );
+                        } catch (error) {
+                          Alert.alert(
+                            "Error",
+                            `No se pudo sincronizar el formulario ID ${form.id}`
+                          );
+                        }
+                      }}
+                      disabled={!isOnline}
+                    >
+                      <Text style={styles.submitButtonText}>
+                        {isOnline ? "Enviar " : "Sin conexión"}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))
+            )}
+          </ScrollView>
+        </View>
+        <Modal
+          visible={showLogoutModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowLogoutModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>
+                Sesión cerrada por inactividad
+              </Text>
+              <Text style={styles.modalText}>
+                Por seguridad, la sesión se cerró automáticamente tras 2 minutos
+                sin actividad.
+              </Text>
               <TouchableOpacity
-                style={styles.submitButton}
-                onPress={async () => {
-                  try {
-                    console.log(
-                      "🟢 Botón ENVIAR presionado para formulario:",
-                      form
-                    );
-                    await handleSubmitPendingForm(form);
-                    // Elimina el formulario de la lista local
-                    const updatedPendingForms = pendingForms.filter(
-                      (f) => f.id !== form.id
-                    );
-                    setPendingForms(updatedPendingForms);
-                    await AsyncStorage.setItem(
-                      "pending_forms",
-                      JSON.stringify(updatedPendingForms)
-                    );
-                    Alert.alert(
-                      "Sincronización",
-                      "Formulario enviado correctamente."
-                    );
-                  } catch (error) {
-                    Alert.alert(
-                      "Error",
-                      `No se pudo sincronizar el formulario ID ${form.id}`
-                    );
-                  }
+                style={[styles.modalButton, { backgroundColor: "#2563eb" }]}
+                onPress={() => {
+                  setShowLogoutModal(false);
+                  router.replace("/");
                 }}
-                disabled={!isOnline}
               >
-                <Text style={styles.submitButtonText}>
-                  {isOnline ? "Enviar" : "Sin conexión"}
+                <Text style={styles.modalButtonText}>
+                  Ir al inicio de sesión
                 </Text>
               </TouchableOpacity>
             </View>
-          ))
-        )}
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.push("/home")}
-        >
-          <Text style={styles.backButtonText}>
-            <HomeIcon color={"white"} />
-            {"  "}
-            Home
-          </Text>
-        </TouchableOpacity>
-      </ScrollView>
-      <Modal
-        visible={showLogoutModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowLogoutModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>
-              Sesión cerrada por inactividad
-            </Text>
-            <Text style={styles.modalText}>
-              Por seguridad, la sesión se cerró automáticamente tras 8 minutos
-              sin actividad.
-            </Text>
-            <TouchableOpacity
-              style={[styles.modalButton, { backgroundColor: "#2563eb" }]}
-              onPress={() => {
-                setShowLogoutModal(false);
-                router.push("/");
-              }}
-            >
-              <Text style={styles.modalButtonText}>Ir al inicio de sesión</Text>
-            </TouchableOpacity>
           </View>
-        </View>
-      </Modal>
-    </View>
+        </Modal>
+      </View>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: width * 0.05, backgroundColor: "#ffffff" },
+  container: { flex: 1, padding: width * 0.05, backgroundColor: "#f7fafc" },
   header: {
     fontSize: width * 0.06,
     fontWeight: "bold",
     marginBottom: height * 0.02,
+    color: "#4B34C7",
+    textAlign: "center",
+    letterSpacing: 0.5,
+    textShadowColor: "#12A0AF22",
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
   },
   noPendingText: {
     fontSize: width * 0.045,
-    color: "#555",
+    color: "#12A0AF",
     textAlign: "center",
+    fontStyle: "italic",
+    marginVertical: 16,
   },
-  formItem: {
+  formsScrollWrapper: {
+    flex: 1,
+    marginHorizontal: width * 0.03,
+    marginTop: 12,
+    marginBottom: 0,
+    borderRadius: width * 0.035,
+    overflow: "hidden",
+    maxHeight: height - (height * 0.07 + height * 0.1),
+    backgroundColor: "#fff",
+    borderWidth: 1.5,
+    borderColor: "#12A0AF",
+    shadowColor: "#4B34C7",
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  formCardWrapper: {
+    marginBottom: height * 0.018,
+    borderRadius: width * 0.035,
+    overflow: "visible",
+    shadowColor: "#12A0AF",
+    shadowOpacity: 0.13,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+    backgroundColor: "transparent",
+    // Espacio en todos los bordes respecto al padre
+    marginTop: 10,
+    marginLeft: 10,
+    marginRight: 10,
+  },
+  formCard: {
+    backgroundColor: "#f7fafc",
+    borderRadius: width * 0.035,
     padding: width * 0.04,
-    backgroundColor: "#f0f0f0",
-    borderRadius: width * 0.02,
-    marginBottom: height * 0.02,
+    borderWidth: 1.5,
+    borderColor: "#4B34C7",
   },
-  formText: { fontSize: width * 0.05, fontWeight: "bold" },
+  formText: {
+    fontSize: width * 0.05,
+    fontWeight: "bold",
+    color: "#12A0AF",
+    marginBottom: 2,
+    letterSpacing: 0.2,
+  },
   formTitle: {
     fontSize: width * 0.045,
     fontWeight: "bold",
-    color: "#2563eb",
+    color: "#4B34C7",
     marginBottom: 2,
+    letterSpacing: 0.2,
   },
   formDescription: {
     fontSize: width * 0.04,
-    color: "#555",
+    color: "#12A0AF",
     marginBottom: 4,
+    fontStyle: "italic",
   },
   submitButton: {
     marginTop: height * 0.01,
     padding: height * 0.02,
-    backgroundColor: "#2563eb",
+    backgroundColor: "#12A0AF",
     borderRadius: width * 0.02,
     alignItems: "center",
+    borderWidth: 1.5,
+    borderColor: "#4B34C7",
+    shadowColor: "#12A0AF",
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  Offlinebutton: {
+    marginTop: height * 0.01,
+    padding: height * 0.02,
+    backgroundColor: "#EB2525FF",
+    borderRadius: width * 0.02,
+    alignItems: "center",
+    borderWidth: 1.5,
+    borderColor: "#4B34C7",
+    shadowColor: "#EB2525FF",
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   submitButtonText: {
     color: "white",
     fontWeight: "bold",
     fontSize: width * 0.045,
-  },
-  backButton: {
-    marginTop: height * 0.03,
-    padding: height * 0.02,
-    backgroundColor: "blue",
-    borderRadius: width * 0.02,
-    alignItems: "center",
-  },
-  backButtonText: {
-    color: "white",
-    fontWeight: "bold",
-    fontSize: width * 0.045,
+    letterSpacing: 0.2,
   },
   modalOverlay: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    backgroundColor: "rgba(18,160,175,0.13)",
   },
   modalContent: {
     width: "80%",
-    backgroundColor: "white",
-    borderRadius: 10,
-    padding: 20,
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 24,
     alignItems: "center",
+    borderWidth: 2,
+    borderColor: "#12A0AF",
+    shadowColor: "#4B34C7",
+    shadowOpacity: 0.13,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: "bold",
     marginBottom: 10,
+    color: "#4B34C7",
+    textAlign: "center",
   },
   modalText: {
     fontSize: 16,
     textAlign: "center",
     marginBottom: 20,
+    color: "#12A0AF",
   },
   modalInput: {
     width: "100%",
     padding: 10,
     borderWidth: 1,
-    borderColor: "#ccc",
+    borderColor: "#12A0AF",
     borderRadius: 5,
     marginBottom: 20,
+    backgroundColor: "#e6fafd",
   },
   modalButton: {
     flex: 1,
@@ -415,6 +491,7 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     alignItems: "center",
     marginHorizontal: 5,
+    backgroundColor: "#12A0AF",
   },
   modalButtonText: {
     color: "white",
