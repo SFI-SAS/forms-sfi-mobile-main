@@ -7,61 +7,239 @@ import {
   TouchableOpacity,
   Dimensions,
   ActivityIndicator,
+  Alert,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import { MaterialIcons } from "@expo/vector-icons";
+import NetInfo from "@react-native-community/netinfo";
+import { useRouter } from "expo-router";
 
 const { width, height } = Dimensions.get("window");
+const APPROVALS_OFFLINE_KEY = "approvals_offline";
+const APPROVALS_OFFLINE_ACTIONS_KEY = "approvals_offline_actions"; // NUEVO
 
 export default function Approvals() {
   const [loading, setLoading] = useState(true);
-  const [pending, setPending] = useState([]);
-  const [approved, setApproved] = useState([]);
-  const [rejected, setRejected] = useState([]);
+  const [allApprovals, setAllApprovals] = useState([]);
   const [show, setShow] = useState("pending"); // "pending" | "approved" | "rejected"
-  const [search, setSearch] = useState("");
+  const [isOffline, setIsOffline] = useState(false);
+  const [pendingApprovalActions, setPendingApprovalActions] = useState([]);
+  const router = useRouter();
 
   useEffect(() => {
-    fetchApprovals();
+    loadApprovals();
+    loadPendingApprovalActions();
   }, []);
 
-  const fetchApprovals = async () => {
+  // Cargar aprobaciones desde API o memoria
+  const loadApprovals = async () => {
     setLoading(true);
     try {
-      const token = await AsyncStorage.getItem("authToken");
-      if (!token) throw new Error("No authentication token found");
+      const net = await NetInfo.fetch();
+      setIsOffline(!net.isConnected);
 
-      // Simula endpoints, ajusta según tu API real
-      const res = await fetch(
-        "https://api-forms-sfi.service.saferut.com/approvals/user-pending",
-        {
-          headers: { Authorization: `Bearer ${token}` },
+      if (net.isConnected) {
+        const token = await AsyncStorage.getItem("authToken");
+        if (!token) throw new Error("No authentication token found");
+
+        const res = await fetch(
+          "https://api-forms-sfi.service.saferut.com/forms/user/assigned-forms-with-responses",
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
+        const data = await res.json();
+        console.log("🟢 Aprobaciones recibidas:", data);
+        setAllApprovals(data || []);
+        await AsyncStorage.setItem(APPROVALS_OFFLINE_KEY, JSON.stringify(data));
+      } else {
+        // Modo offline
+        const stored = await AsyncStorage.getItem(APPROVALS_OFFLINE_KEY);
+        if (stored) {
+          const offlineData = JSON.parse(stored);
+          setAllApprovals(offlineData);
+          console.log("🟠 Aprobaciones cargadas offline:", offlineData);
+        } else {
+          setAllApprovals([]);
         }
-      );
-      const data = await res.json();
-      setPending(data.pending || []);
-      setApproved(data.approved || []);
-      setRejected(data.rejected || []);
+      }
     } catch (e) {
-      setPending([]);
-      setApproved([]);
-      setRejected([]);
+      setAllApprovals([]);
+      console.error("❌ Error cargando aprobaciones:", e);
     } finally {
       setLoading(false);
     }
   };
 
-  // Filtra por búsqueda
-  const filterList = (list) =>
-    list.filter(
+  const loadPendingApprovalActions = async () => {
+    try {
+      const stored = await AsyncStorage.getItem(APPROVALS_OFFLINE_ACTIONS_KEY);
+      setPendingApprovalActions(stored ? JSON.parse(stored) : []);
+    } catch (e) {
+      setPendingApprovalActions([]);
+    }
+  };
+
+  // Filtrar por estado de aprobación
+  const filterByStatus = (status) =>
+    allApprovals.filter(
       (item) =>
-        item.title?.toLowerCase().includes(search.toLowerCase()) ||
-        item.user?.toLowerCase().includes(search.toLowerCase())
+        item.your_approval_status && item.your_approval_status.status === status
     );
 
   // Contadores
-  const total = pending.length + approved.length + rejected.length;
+  const pending = filterByStatus("pendiente");
+  const approved = filterByStatus("aprobado");
+  const rejected = filterByStatus("rechazado");
+  const total = allApprovals.length;
+
+  // Guardar acción offline (aprobación/rechazo)
+  const saveOfflineApprovalAction = async (
+    response_id,
+    action,
+    message = ""
+  ) => {
+    try {
+      const key = APPROVALS_OFFLINE_ACTIONS_KEY;
+      const stored = await AsyncStorage.getItem(key);
+      const arr = stored ? JSON.parse(stored) : [];
+      // El cuerpo debe ser igual al del endpoint
+      const now = new Date();
+      const reviewed_at = now.toISOString();
+      // Busca el formulario para obtener la secuencia
+      const form = allApprovals.find(
+        (f) => String(f.response_id) === String(response_id)
+      );
+      const selectedSequence = form?.your_approval_status?.sequence_number || 1;
+      arr.push({
+        response_id,
+        body: {
+          status: action,
+          reviewed_at,
+          message,
+          selectedSequence,
+        },
+        timestamp: Date.now(),
+      });
+      await AsyncStorage.setItem(key, JSON.stringify(arr));
+      setPendingApprovalActions(arr);
+      console.log("🟠 Acción de aprobación offline guardada:", {
+        response_id,
+        action,
+        message,
+        selectedSequence,
+      });
+    } catch (e) {
+      console.error("❌ Error guardando acción offline:", e);
+    }
+  };
+
+  // Sincronizar acciones pendientes cuando hay internet
+  useEffect(() => {
+    const syncPendingActions = async () => {
+      const net = await NetInfo.fetch();
+      if (!net.isConnected) return;
+      const stored = await AsyncStorage.getItem(APPROVALS_OFFLINE_ACTIONS_KEY);
+      const actions = stored ? JSON.parse(stored) : [];
+      if (actions.length === 0) return;
+      const token = await AsyncStorage.getItem("authToken");
+      if (!token) return;
+      let remaining = [];
+      for (const action of actions) {
+        try {
+          const res = await fetch(
+            `https://api-forms-sfi.service.saferut.com/forms/update-response-approval/${action.response_id}`,
+            {
+              method: "PUT",
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(action.body),
+            }
+          );
+          const data = await res.json();
+          if (res.ok) {
+            console.log("🟢 Acción de aprobación sincronizada:", action);
+            // Elimina de la lista de pendientes
+          } else {
+            console.error("❌ Error al sincronizar acción:", data);
+            remaining.push(action);
+          }
+        } catch (e) {
+          console.error("❌ Error al sincronizar acción:", e);
+          remaining.push(action);
+        }
+      }
+      await AsyncStorage.setItem(
+        APPROVALS_OFFLINE_ACTIONS_KEY,
+        JSON.stringify(remaining)
+      );
+      setPendingApprovalActions(remaining);
+      // Recargar aprobaciones para actualizar las listas
+      loadApprovals();
+    };
+    syncPendingActions();
+  }, [isOffline]);
+
+  // Botón aprobar/rechazar
+  const handleApproveReject = async (item, action) => {
+    const message = ""; // Puedes pedir mensaje si lo deseas
+    if (isOffline) {
+      await saveOfflineApprovalAction(item.response_id, action, message);
+      Alert.alert(
+        "Guardado Offline",
+        `La acción de ${action === "aprobado" ? "aprobación" : "rechazo"} se guardó para sincronizar cuando tengas conexión.`
+      );
+      // Opcional: actualizar UI localmente
+      loadApprovals();
+    } else {
+      try {
+        const token = await AsyncStorage.getItem("authToken");
+        if (!token) throw new Error("No authentication token found");
+        const now = new Date();
+        const reviewed_at = now.toISOString();
+        const selectedSequence =
+          item.your_approval_status?.sequence_number || 1;
+        const body = {
+          status: action,
+          reviewed_at,
+          message,
+          selectedSequence,
+        };
+        const res = await fetch(
+          `https://api-forms-sfi.service.saferut.com/forms/update-response-approval/${item.response_id}`,
+          {
+            method: "PUT",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(body),
+          }
+        );
+        const data = await res.json();
+        if (res.ok) {
+          Alert.alert(
+            "Éxito",
+            `Formulario ${action === "aprobado" ? "aprobado" : "rechazado"} correctamente.`
+          );
+          // Actualiza la lista localmente
+          loadApprovals();
+        } else {
+          throw new Error(data?.detail || "Error en la aprobación");
+        }
+      } catch (e) {
+        Alert.alert(
+          "Error",
+          "No se pudo enviar la aprobación. Se guardará para sincronizar offline."
+        );
+        await saveOfflineApprovalAction(item.response_id, action, message);
+        loadApprovals();
+      }
+    }
+  };
 
   return (
     <LinearGradient colors={["#f7fafc", "#e6fafd"]} style={{ flex: 1 }}>
@@ -75,13 +253,6 @@ export default function Approvals() {
             </Text>
           </View>
         </View>
-        {/* Buscador */}
-        {/* <TextInput
-          style={styles.searchInput}
-          placeholder="Buscar por nombre del formato o usuario..."
-          value={search}
-          onChangeText={setSearch}
-        /> */}
         {/* Contadores */}
         <View style={styles.countersRow}>
           <CounterBox
@@ -117,41 +288,48 @@ export default function Approvals() {
             onPress={() => {}}
           />
         </View>
-        {/* Botones de filtro */}
-        <View style={styles.filterRow}>
-          <TouchableOpacity
-            style={[
-              styles.filterButton,
-              show === "approved" && styles.filterButtonActiveApproved,
-            ]}
-            onPress={() => setShow("approved")}
-          >
+        {/* Lista de pendientes de envío de aprobación/rechazo */}
+        {pendingApprovalActions.length > 0 && (
+          <View style={{ marginBottom: 12, marginTop: 8 }}>
             <Text
-              style={[
-                styles.filterButtonText,
-                show === "approved" && styles.filterButtonTextActiveApproved,
-              ]}
+              style={{ color: "#ef4444", fontWeight: "bold", marginBottom: 4 }}
             >
-              Ver aprobados ({approved.length})
+              Pendientes de envío de aprobación/rechazo:
             </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.filterButton,
-              show === "rejected" && styles.filterButtonActiveRejected,
-            ]}
-            onPress={() => setShow("rejected")}
-          >
-            <Text
-              style={[
-                styles.filterButtonText,
-                show === "rejected" && styles.filterButtonTextActiveRejected,
-              ]}
-            >
-              Ver rechazados ({rejected.length})
-            </Text>
-          </TouchableOpacity>
-        </View>
+            {pendingApprovalActions.map((action, idx) => (
+              <View
+                key={idx}
+                style={{
+                  backgroundColor: "#fff7f7",
+                  borderColor: "#ef4444",
+                  borderWidth: 1,
+                  borderRadius: 8,
+                  padding: 8,
+                  marginBottom: 6,
+                }}
+              >
+                <Text style={{ color: "#222" }}>
+                  Formulario ID: {action.response_id} - Acción:{" "}
+                  <Text
+                    style={{
+                      fontWeight: "bold",
+                      color:
+                        action.body.status === "aprobado"
+                          ? "#22c55e"
+                          : "#ef4444",
+                    }}
+                  >
+                    {action.body.status}
+                  </Text>
+                </Text>
+                <Text style={{ color: "#888", fontSize: 12 }}>
+                  Guardado offline el:{" "}
+                  {new Date(action.timestamp).toLocaleString()}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
         {/* Lista de formatos */}
         <View style={styles.listContainer}>
           {loading ? (
@@ -165,7 +343,7 @@ export default function Approvals() {
                 paddingVertical: 10,
               }}
             >
-              {show === "pending" && filterList(pending).length === 0 && (
+              {show === "pending" && pending.length === 0 && (
                 <View style={styles.emptyBox}>
                   <MaterialIcons
                     name="celebration"
@@ -180,10 +358,23 @@ export default function Approvals() {
                 </View>
               )}
               {show === "pending" &&
-                filterList(pending).map((item, idx) => (
-                  <ApprovalCard key={idx} item={item} />
+                pending.map((item, idx) => (
+                  <ApprovalCard
+                    key={idx}
+                    item={item}
+                    onApprove={() => handleApproveReject(item, "aprobado")}
+                    onReject={() => handleApproveReject(item, "rechazado")}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/approval-detail",
+                        params: { response_id: item.response_id },
+                        // Puedes pasar más datos si lo deseas
+                        // params: { ...item }
+                      })
+                    }
+                  />
                 ))}
-              {show === "approved" && filterList(approved).length === 0 && (
+              {show === "approved" && approved.length === 0 && (
                 <View style={styles.emptyBox}>
                   <MaterialIcons
                     name="check-circle"
@@ -198,10 +389,20 @@ export default function Approvals() {
                 </View>
               )}
               {show === "approved" &&
-                filterList(approved).map((item, idx) => (
-                  <ApprovalCard key={idx} item={item} approved />
+                approved.map((item, idx) => (
+                  <ApprovalCard
+                    key={idx}
+                    item={item}
+                    approved
+                    onPress={() =>
+                      router.push({
+                        pathname: "/approval-detail",
+                        params: { response_id: item.response_id },
+                      })
+                    }
+                  />
                 ))}
-              {show === "rejected" && filterList(rejected).length === 0 && (
+              {show === "rejected" && rejected.length === 0 && (
                 <View style={styles.emptyBox}>
                   <MaterialIcons
                     name="cancel"
@@ -216,8 +417,18 @@ export default function Approvals() {
                 </View>
               )}
               {show === "rejected" &&
-                filterList(rejected).map((item, idx) => (
-                  <ApprovalCard key={idx} item={item} rejected />
+                rejected.map((item, idx) => (
+                  <ApprovalCard
+                    key={idx}
+                    item={item}
+                    rejected
+                    onPress={() =>
+                      router.push({
+                        pathname: "/approval-detail",
+                        params: { response_id: item.response_id },
+                      })
+                    }
+                  />
                 ))}
             </ScrollView>
           )}
@@ -244,9 +455,18 @@ function CounterBox({ icon, color, label, value, active, onPress }) {
   );
 }
 
-function ApprovalCard({ item, approved, rejected }) {
+function ApprovalCard({
+  item,
+  approved,
+  rejected,
+  onApprove,
+  onReject,
+  onPress,
+}) {
   return (
-    <View
+    <TouchableOpacity
+      activeOpacity={0.85}
+      onPress={onPress}
       style={[
         styles.approvalCard,
         approved && { borderColor: "#22c55e" },
@@ -263,27 +483,44 @@ function ApprovalCard({ item, approved, rejected }) {
           style={{ marginRight: 10 }}
         />
         <View>
-          <Text style={styles.approvalTitle}>{item.title}</Text>
+          <Text style={styles.approvalTitle}>{item.form_title}</Text>
           <Text style={styles.approvalMeta}>
-            Usuario: {item.user || "Desconocido"}
+            Usuario: {item.submitted_by?.name || "Desconocido"}
           </Text>
           <Text style={styles.approvalMeta}>
-            Fecha: {item.date || "Sin fecha"}
+            Fecha: {item.submitted_at?.split("T")[0] || "Sin fecha"}
+          </Text>
+          <Text style={styles.approvalMeta}>
+            Estado: {item.your_approval_status?.status}
           </Text>
         </View>
       </View>
-      {/* Aquí puedes agregar botones de aprobar/rechazar si es pendiente */}
+      {/* Mostrar respuestas del formulario */}
+      <View style={{ marginTop: 8 }}>
+        {Array.isArray(item.answers) &&
+          item.answers.map((ans, i) => (
+            <View key={i} style={{ flexDirection: "row", marginBottom: 2 }}>
+              <Text style={{ fontWeight: "bold", color: "#4B34C7" }}>
+                {ans.question_text}:
+              </Text>
+              <Text style={{ marginLeft: 4, color: "#222" }}>
+                {ans.answer_text || ans.file_path || "-"}
+              </Text>
+            </View>
+          ))}
+      </View>
+      {/* Botones de aprobar/rechazar solo si está pendiente */}
       {!approved && !rejected && (
         <View style={styles.actionRow}>
-          <TouchableOpacity style={styles.approveBtn}>
+          <TouchableOpacity style={styles.approveBtn} onPress={onApprove}>
             <Text style={styles.actionBtnText}>Aprobar</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.rejectBtn}>
+          <TouchableOpacity style={styles.rejectBtn} onPress={onReject}>
             <Text style={styles.actionBtnText}>Rechazar</Text>
           </TouchableOpacity>
         </View>
       )}
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -304,16 +541,6 @@ const styles = StyleSheet.create({
     fontSize: width * 0.035,
     color: "#12A0AF",
     marginTop: 2,
-  },
-  searchInput: {
-    backgroundColor: "#f3f4f6",
-    borderColor: "#d1d5db",
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 10,
-    fontSize: width * 0.04,
-    marginBottom: 10,
-    marginTop: 6,
   },
   countersRow: {
     flexDirection: "row",
@@ -339,36 +566,6 @@ const styles = StyleSheet.create({
     fontSize: width * 0.032,
     color: "#444",
     marginTop: 2,
-  },
-  filterRow: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    marginBottom: 8,
-    gap: 8,
-  },
-  filterButton: {
-    backgroundColor: "#f3f4f6",
-    borderRadius: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    marginLeft: 8,
-  },
-  filterButtonActiveApproved: {
-    backgroundColor: "#22c55e22",
-  },
-  filterButtonActiveRejected: {
-    backgroundColor: "#ef444422",
-  },
-  filterButtonText: {
-    color: "#222",
-    fontWeight: "bold",
-    fontSize: width * 0.035,
-  },
-  filterButtonTextActiveApproved: {
-    color: "#22c55e",
-  },
-  filterButtonTextActiveRejected: {
-    color: "#ef4444",
   },
   listContainer: {
     flex: 1,

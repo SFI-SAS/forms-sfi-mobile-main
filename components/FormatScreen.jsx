@@ -62,6 +62,7 @@ const saveCompletedFormAnswers = async ({
     const stored = await AsyncStorage.getItem(key);
     const arr = stored ? JSON.parse(stored) : [];
     arr.push({
+      form_id: formId, // <-- Agrega el form_id explícitamente aquí
       answers: answers.map((a) => ({
         ...a,
         question_text: questionTextMap[a.question_id] || "",

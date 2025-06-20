@@ -9,21 +9,23 @@ import {
   BackHandler,
   Modal,
   Dimensions,
+  ActivityIndicator,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
-import { HomeIcon } from "./Icons";
 import { LinearGradient } from "expo-linear-gradient";
 
 const { width, height } = Dimensions.get("window");
-
-const INACTIVITY_TIMEOUT = 10 * 60 * 1000; // 10 minutos
+const RESPONSES_OFFLINE_KEY = "responses_with_answers_offline";
+const RESPONSES_DETAIL_OFFLINE_KEY = "responses_detail_offline"; // NUEVO
 
 export default function MyForms() {
-  const [submittedForms, setSubmittedForms] = useState([]);
-  const [responsesByForm, setResponsesByForm] = useState({});
+  const [forms, setForms] = useState([]);
   const [expandedForms, setExpandedForms] = useState({});
+  const [responsesByForm, setResponsesByForm] = useState({});
+  const [responsesDetail, setResponsesDetail] = useState({}); // { [formId]: [responses] }
+  const [loading, setLoading] = useState(true);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const inactivityTimer = useRef(null);
   const router = useRouter();
@@ -47,48 +49,109 @@ export default function MyForms() {
 
   // Cargar formularios enviados y sus respuestas (offline primero, si no online)
   const handleViewForms = async () => {
+    setLoading(true);
     try {
       const accessToken = await AsyncStorage.getItem("authToken");
       if (!accessToken) {
-        console.error("Error: No hay token de acceso disponible.");
+        setLoading(false);
         return;
       }
 
-      // Obtener formularios enviados
-      const response = await fetch(
-        `https://api-forms-sfi.service.saferut.com/forms/users/completed_forms`,
+      // 1. Obtener la lista de formularios asignados al usuario
+      const formsRes = await fetch(
+        "https://api-forms-sfi.service.saferut.com/forms/users/form_by_user",
         {
           method: "GET",
           headers: { Authorization: `Bearer ${accessToken}` },
         }
       );
-      if (!response.ok)
-        throw new Error("Error al cargar formularios enviados.");
-      const data = await response.json();
-      setSubmittedForms(data || []);
+      const formsData = await formsRes.json();
+      if (!Array.isArray(formsData)) {
+        setForms([]);
+        setResponsesByForm({});
+        setLoading(false);
+        Alert.alert(
+          "Error",
+          "No se pudieron cargar los formularios asignados."
+        );
+        return;
+      }
 
-      // Obtener respuestas por formulario desde AsyncStorage (offline)
-      if (Array.isArray(data) && data.length > 0) {
-        const responsesObj = {};
-        for (const form of data) {
-          const key = `completed_form_answers_${form.id}`;
-          try {
-            const stored = await AsyncStorage.getItem(key);
-            if (stored) {
-              responsesObj[form.id] = JSON.parse(stored);
-            } else {
-              // Si no hay en memoria, intenta online (opcional)
-              responsesObj[form.id] = [];
+      // 2. Para cada formulario, obtener sus respuestas (si existen)
+      const grouped = {};
+      const formsList = [];
+      for (const form of formsData) {
+        try {
+          const res = await fetch(
+            `https://api-forms-sfi.service.saferut.com/responses/get_responses/?form_id=${form.id}`,
+            {
+              method: "GET",
+              headers: { Authorization: `Bearer ${accessToken}` },
             }
-          } catch {
-            responsesObj[form.id] = [];
+          );
+          const responses = await res.json();
+          // Solo agrega el formulario si tiene respuestas
+          if (Array.isArray(responses) && responses.length > 0) {
+            grouped[form.id] = responses;
+            formsList.push({
+              id: form.id,
+              form_title: form.title || "Sin título",
+              form_description: form.description || "",
+              submitted_by: responses[0]?.submitted_by || {},
+            });
+          }
+        } catch (e) {
+          // Si falla la consulta de respuestas, ignora ese formulario
+        }
+      }
+
+      setResponsesByForm(grouped);
+      setForms(formsList);
+
+      // DEBUG: Mostrar forms y grouped en el state
+      setTimeout(() => {
+        console.log("📋 State forms:", formsList);
+        console.log("📋 State grouped:", grouped);
+      }, 1000);
+
+      // NUEVO: Cargar detalles de respuestas por form_id usando el endpoint correcto
+      const detailStored = await AsyncStorage.getItem(
+        RESPONSES_DETAIL_OFFLINE_KEY
+      );
+      let detailData = detailStored ? JSON.parse(detailStored) : {};
+
+      for (const form of formsList) {
+        if (!detailData[form.id]) {
+          try {
+            // Usa el endpoint con query param form_id
+            const res = await fetch(
+              `https://api-forms-sfi.service.saferut.com/responses/get_responses/?form_id=${form.id}`,
+              {
+                method: "GET",
+                headers: { Authorization: `Bearer ${accessToken}` },
+              }
+            );
+            const detailResp = await res.json();
+            if (Array.isArray(detailResp)) {
+              detailData[form.id] = detailResp;
+            }
+          } catch (e) {
+            // Si falla online, ignora y sigue
           }
         }
-        setResponsesByForm(responsesObj);
       }
+      setResponsesDetail(detailData);
+      await AsyncStorage.setItem(
+        RESPONSES_DETAIL_OFFLINE_KEY,
+        JSON.stringify(detailData)
+      );
     } catch (error) {
       console.error("❌ Error al cargar formularios enviados:", error);
+      setForms([]);
+      setResponsesByForm({});
       Alert.alert("Error", "No se pudieron cargar los formularios enviados.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -103,19 +166,18 @@ export default function MyForms() {
   // --- Inactividad: logout automático ---
   const resetInactivityTimer = async () => {
     if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
-    inactivityTimer.current = setTimeout(async () => {
-      await AsyncStorage.setItem("isLoggedOut", "true");
-      await AsyncStorage.removeItem("authToken");
-      setShowLogoutModal(true);
-    }, INACTIVITY_TIMEOUT);
+    inactivityTimer.current = setTimeout(
+      async () => {
+        await AsyncStorage.setItem("isLoggedOut", "true");
+        await AsyncStorage.removeItem("authToken");
+        setShowLogoutModal(true);
+      },
+      10 * 60 * 1000
+    );
   };
 
   useEffect(() => {
     const reset = () => resetInactivityTimer();
-    const touchListener = () => reset();
-    const focusListener = () => reset();
-
-    // React Native events
     const subscription = BackHandler.addEventListener(
       "hardwareBackPress",
       reset
@@ -140,105 +202,249 @@ export default function MyForms() {
             contentContainerStyle={{
               paddingBottom: 24,
               paddingHorizontal: 0,
+              minHeight: height * 0.7, // Asegura espacio para contenido
             }}
-            showsVerticalScrollIndicator={false}
+            showsVerticalScrollIndicator={true}
           >
             <Text style={styles.header}>Formularios Enviados</Text>
-            {submittedForms.length === 0 ? (
+            {loading ? (
+              <ActivityIndicator size="large" color="#12A0AF" />
+            ) : forms.length === 0 ? (
               <Text style={styles.noFormsText}>
                 No hay formularios enviados disponibles.
               </Text>
             ) : (
-              submittedForms.map((form, index) => (
+              forms.map((form, index) => (
                 <View key={form.id} style={styles.formCardWrapper}>
                   <View style={styles.formCard}>
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                      }}
+                    <Text
+                      style={styles.formText}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
                     >
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.formText}>
-                          Formulario ID: {form.id}
-                        </Text>
-                        <Text style={styles.formDescription}>
-                          Título: {form.title || "Sin título"}
-                        </Text>
-                        <Text
-                          style={[
-                            styles.formMode,
-                            form.mode === "offline"
-                              ? styles.formModeOffline
-                              : styles.formModeOnline,
-                          ]}
-                        >
-                          {form.mode === "offline"
-                            ? "Enviado Offline"
-                            : "Enviado Online"}
-                        </Text>
-                      </View>
-                      <TouchableOpacity
-                        style={styles.viewResponsesButton}
-                        onPress={() => toggleExpand(form.id)}
-                      >
-                        <Text style={styles.viewResponsesButtonText}>
-                          {expandedForms[form.id]
-                            ? "Ocultar respuestas"
-                            : "Ver respuestas"}
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
+                      Formulario ID: {form.id}
+                    </Text>
+                    <Text
+                      style={styles.formTitle}
+                      numberOfLines={2}
+                      ellipsizeMode="tail"
+                    >
+                      {form.form_title || "Sin título"}
+                    </Text>
+                    <Text
+                      style={styles.formDescription}
+                      numberOfLines={2}
+                      ellipsizeMode="tail"
+                    >
+                      {form.form_description || ""}
+                    </Text>
+                    <Text style={styles.formMeta} numberOfLines={1}>
+                      Respondido por: {form.submitted_by?.name || "-"}
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.viewResponsesButton}
+                      onPress={() => toggleExpand(form.id)}
+                    >
+                      <Text style={styles.viewResponsesButtonText}>
+                        {expandedForms[form.id]
+                          ? "Ocultar respuestas"
+                          : "Ver respuestas"}
+                      </Text>
+                    </TouchableOpacity>
                     {expandedForms[form.id] && (
                       <View style={styles.responsesContainer}>
-                        {Array.isArray(responsesByForm[form.id]) &&
-                        responsesByForm[form.id].length > 0 ? (
-                          responsesByForm[form.id].map((dilig, idx) => (
-                            <View key={idx} style={styles.diligCard}>
-                              <Text style={styles.diligHeader}>
-                                Diligenciamiento #{idx + 1}
-                              </Text>
-                              <Text style={styles.diligMeta}>
-                                Fecha: {dilig.submission_date || "Desconocida"}{" "}
-                                - Hora: {dilig.submission_time || "Desconocida"}
-                              </Text>
-                              <Text
-                                style={[
-                                  styles.formMode,
-                                  dilig.mode === "offline"
-                                    ? styles.formModeOffline
-                                    : styles.formModeOnline,
-                                ]}
+                        <ScrollView
+                          style={{ maxHeight: height * 0.35 }}
+                          contentContainerStyle={{ paddingBottom: 8 }}
+                          nestedScrollEnabled
+                          showsVerticalScrollIndicator={true}
+                        >
+                          {Array.isArray(responsesByForm[form.id]) &&
+                          responsesByForm[form.id].length > 0 ? (
+                            responsesByForm[form.id].map((resp, idx) => (
+                              <View
+                                key={resp.response_id || idx}
+                                style={styles.diligCard}
                               >
-                                {dilig.mode === "offline"
-                                  ? "Offline"
-                                  : "Online"}
-                              </Text>
-                              {Array.isArray(dilig.answers) &&
-                              dilig.answers.length > 0 ? (
-                                dilig.answers.map((ans, i) => (
-                                  <View key={i} style={styles.answerRow}>
-                                    <Text style={styles.answerQuestion}>
-                                      {ans.question_text}:
-                                    </Text>
-                                    <Text style={styles.answerValue}>
-                                      {ans.answer_text || ans.file_path || "-"}
-                                    </Text>
-                                  </View>
-                                ))
-                              ) : (
-                                <Text style={styles.noAnswersText}>
-                                  Sin respuestas.
+                                <Text
+                                  style={styles.diligHeader}
+                                  numberOfLines={1}
+                                  ellipsizeMode="tail"
+                                >
+                                  Diligenciamiento #{idx + 1}
                                 </Text>
-                              )}
-                            </View>
-                          ))
-                        ) : (
-                          <Text style={styles.noAnswersText}>
-                            No hay respuestas para este formulario.
-                          </Text>
-                        )}
+                                <Text
+                                  style={styles.diligMeta}
+                                  numberOfLines={1}
+                                >
+                                  Fecha: {resp.submitted_at || "Desconocida"}
+                                </Text>
+                                <Text
+                                  style={styles.diligMeta}
+                                  numberOfLines={1}
+                                >
+                                  Estado de aprobación:{" "}
+                                  <Text
+                                    style={{
+                                      color:
+                                        resp.approval_status === "aprobado"
+                                          ? "#22c55e"
+                                          : resp.approval_status === "rechazado"
+                                            ? "#ef4444"
+                                            : "#fbbf24",
+                                      fontWeight: "bold",
+                                    }}
+                                  >
+                                    {resp.approval_status || "-"}
+                                  </Text>
+                                </Text>
+                                {resp.message ? (
+                                  <Text
+                                    style={styles.diligMeta}
+                                    numberOfLines={2}
+                                    ellipsizeMode="tail"
+                                  >
+                                    Mensaje: {resp.message}
+                                  </Text>
+                                ) : null}
+                                <View style={{ marginTop: 6 }}>
+                                  {Array.isArray(resp.answers) &&
+                                  resp.answers.length > 0 ? (
+                                    <ScrollView
+                                      style={{ maxHeight: height * 0.15 }}
+                                      nestedScrollEnabled
+                                      showsVerticalScrollIndicator={true}
+                                    >
+                                      {resp.answers.map((ans, i) => (
+                                        <View
+                                          key={i}
+                                          style={{
+                                            flexDirection: "row",
+                                            marginBottom: 2,
+                                            flexWrap: "wrap",
+                                            alignItems: "flex-start",
+                                          }}
+                                        >
+                                          <Text
+                                            style={{
+                                              fontWeight: "bold",
+                                              color: "#4B34C7",
+                                              maxWidth: width * 0.4,
+                                            }}
+                                            numberOfLines={1}
+                                            ellipsizeMode="tail"
+                                          >
+                                            {ans.question_text}:
+                                          </Text>
+                                          <Text
+                                            style={{
+                                              marginLeft: 4,
+                                              color: "#222",
+                                              maxWidth: width * 0.45,
+                                            }}
+                                            numberOfLines={2}
+                                            ellipsizeMode="tail"
+                                          >
+                                            {ans.answer_text ||
+                                              ans.file_path ||
+                                              "-"}
+                                          </Text>
+                                        </View>
+                                      ))}
+                                    </ScrollView>
+                                  ) : (
+                                    <Text style={styles.noAnswersText}>
+                                      Sin respuestas.
+                                    </Text>
+                                  )}
+                                </View>
+                                {Array.isArray(resp.approvals) &&
+                                  resp.approvals.length > 0 && (
+                                    <View style={{ marginTop: 8 }}>
+                                      <Text
+                                        style={{
+                                          fontWeight: "bold",
+                                          color: "#2563eb",
+                                        }}
+                                      >
+                                        Detalle de aprobaciones:
+                                      </Text>
+                                      <ScrollView
+                                        style={{ maxHeight: height * 0.12 }}
+                                        nestedScrollEnabled
+                                        showsVerticalScrollIndicator={true}
+                                      >
+                                        {resp.approvals.map((appr, i) => (
+                                          <View
+                                            key={i}
+                                            style={{
+                                              marginBottom: 2,
+                                              flexWrap: "wrap",
+                                            }}
+                                          >
+                                            <Text style={{ color: "#222" }}>
+                                              <Text
+                                                style={{ fontWeight: "bold" }}
+                                              >
+                                                Secuencia:
+                                              </Text>{" "}
+                                              {appr.sequence_number} |{" "}
+                                              <Text
+                                                style={{ fontWeight: "bold" }}
+                                              >
+                                                Estado:
+                                              </Text>{" "}
+                                              {appr.status} |{" "}
+                                              <Text
+                                                style={{ fontWeight: "bold" }}
+                                              >
+                                                Obligatorio:
+                                              </Text>{" "}
+                                              {appr.is_mandatory ? "Sí" : "No"}
+                                            </Text>
+                                            <Text style={{ color: "#222" }}>
+                                              <Text
+                                                style={{ fontWeight: "bold" }}
+                                              >
+                                                Usuario:
+                                              </Text>{" "}
+                                              {appr.user?.name || "-"}
+                                            </Text>
+                                            {appr.message && (
+                                              <Text
+                                                style={{ color: "#ef4444" }}
+                                              >
+                                                Mensaje: {appr.message}
+                                              </Text>
+                                            )}
+                                          </View>
+                                        ))}
+                                      </ScrollView>
+                                    </View>
+                                  )}
+                                {resp.approval_status === "rechazado" && (
+                                  <TouchableOpacity
+                                    style={styles.reconsiderButton}
+                                    onPress={() => {
+                                      Alert.alert(
+                                        "Reconsiderar",
+                                        "Funcionalidad próximamente disponible."
+                                      );
+                                    }}
+                                  >
+                                    <Text style={styles.reconsiderButtonText}>
+                                      Reconsiderar aprobación
+                                    </Text>
+                                  </TouchableOpacity>
+                                )}
+                              </View>
+                            ))
+                          ) : (
+                            <Text style={styles.noAnswersText}>
+                              No hay respuestas para este formulario.
+                            </Text>
+                          )}
+                        </ScrollView>
                       </View>
                     )}
                   </View>
@@ -356,6 +562,7 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 6 },
     elevation: 8,
+    minHeight: height * 0.5,
   },
   formCardWrapper: {
     marginBottom: height * 0.018,
@@ -367,10 +574,11 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 8,
     backgroundColor: "transparent",
-    // Espacio en todos los bordes respecto al padre
     marginTop: 10,
     marginLeft: 10,
     marginRight: 10,
+    minWidth: width * 0.85,
+    maxWidth: width * 0.95,
   },
   formCard: {
     backgroundColor: "#f7fafc",
@@ -378,7 +586,8 @@ const styles = StyleSheet.create({
     padding: width * 0.04,
     borderWidth: 1.5,
     borderColor: "#4B34C7",
-    // Sombra ya está en el wrapper
+    minWidth: width * 0.8,
+    maxWidth: width * 0.95,
   },
   formText: {
     fontSize: width * 0.05,
@@ -387,29 +596,23 @@ const styles = StyleSheet.create({
     marginBottom: 2,
     letterSpacing: 0.2,
   },
+  formTitle: {
+    fontSize: width * 0.045,
+    fontWeight: "bold",
+    color: "#4B34C7",
+    marginBottom: 2,
+    letterSpacing: 0.2,
+  },
   formDescription: {
     fontSize: width * 0.04,
-    color: "#4B34C7",
+    color: "#12A0AF",
     marginBottom: 4,
     fontStyle: "italic",
   },
-  formMode: {
-    fontSize: 13,
-    fontWeight: "bold",
-    marginTop: 2,
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    alignSelf: "flex-start",
-    overflow: "hidden",
-  },
-  formModeOnline: {
-    color: "#fff",
-    backgroundColor: "#12A0AF",
-  },
-  formModeOffline: {
-    color: "#fff",
-    backgroundColor: "#EB9525FF",
+  formMeta: {
+    fontSize: width * 0.038,
+    color: "#222",
+    marginBottom: 2,
   },
   viewResponsesButton: {
     backgroundColor: "#4B34C7",
@@ -423,6 +626,8 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
     elevation: 2,
+    marginTop: 6,
+    marginBottom: 6,
   },
   viewResponsesButtonText: {
     color: "#fff",
@@ -437,6 +642,8 @@ const styles = StyleSheet.create({
     padding: 10,
     borderWidth: 1,
     borderColor: "#12A0AF44",
+    minHeight: 40,
+    maxHeight: height * 0.4,
   },
   diligCard: {
     backgroundColor: "#fff",
@@ -450,6 +657,8 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
     elevation: 2,
+    minWidth: width * 0.7,
+    maxWidth: width * 0.93,
   },
   diligHeader: {
     fontWeight: "bold",
@@ -462,29 +671,24 @@ const styles = StyleSheet.create({
     color: "#12A0AF",
     marginBottom: 2,
   },
-  answerRow: {
-    flexDirection: "row",
-    marginBottom: 2,
-    flexWrap: "wrap",
-  },
-  answerQuestion: {
-    fontWeight: "bold",
-    fontSize: 13,
-    color: "#4B34C7",
-    marginRight: 4,
-    flexShrink: 1,
-    maxWidth: "50%",
-  },
-  answerValue: {
-    fontSize: 13,
-    color: "#222",
-    flex: 1,
-    flexWrap: "wrap",
-  },
   noAnswersText: {
     fontSize: 13,
     color: "#888",
     fontStyle: "italic",
     marginVertical: 4,
+  },
+  reconsiderButton: {
+    marginTop: 10,
+    backgroundColor: "#fbbf24",
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 18,
+    alignItems: "center",
+    alignSelf: "flex-end",
+  },
+  reconsiderButtonText: {
+    color: "#fff",
+    fontWeight: "bold",
+    fontSize: 14,
   },
 });
