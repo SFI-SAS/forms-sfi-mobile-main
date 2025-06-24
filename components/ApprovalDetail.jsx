@@ -10,6 +10,7 @@ import {
   TextInput,
   TouchableOpacity,
   BackHandler,
+  Alert,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
@@ -24,6 +25,7 @@ export default function ApprovalDetail() {
   const { response_id } = useLocalSearchParams();
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(null);
+  const [accepting, setAccepting] = useState(false);
   const router = useRouter();
 
   // Bloquea el botón físico de volver atrás
@@ -112,6 +114,40 @@ export default function ApprovalDetail() {
       console.log("🟢 Detalle de aprobación guardado offline:", detail);
     } catch (e) {
       console.error("❌ Error guardando detalle offline:", e);
+    }
+  };
+
+  const handleAcceptReconsideration = async () => {
+    setAccepting(true);
+    try {
+      const token = await AsyncStorage.getItem("authToken");
+      if (!token) throw new Error("No authentication token found");
+      const res = await fetch(
+        `https://api-forms-sfi.service.saferut.com/responses/accept_reconsideration/${response_id}`,
+        {
+          method: "PUT",
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(
+          data?.detail ||
+            "No se pudo aceptar la reconsideración. Intenta de nuevo."
+        );
+      }
+      Alert.alert(
+        "Reconsideración aceptada",
+        "La reconsideración fue aceptada."
+      );
+      loadDetail();
+    } catch (error) {
+      Alert.alert(
+        "Error",
+        error.message || "No se pudo aceptar la reconsideración."
+      );
+    } finally {
+      setAccepting(false);
     }
   };
 
@@ -238,6 +274,30 @@ export default function ApprovalDetail() {
             <Text style={styles.infoText}>No hay aprobadores.</Text>
           )}
         </View>
+
+        {/* Mostrar mensaje y botón solo si está rechazado y tiene reconsideración */}
+        {form.your_approval_status?.status === "rechazado" &&
+          form.reconsideration_requested && (
+            <View style={styles.reconsiderationBox}>
+              <Text style={styles.reconsiderationMsg}>
+                Este formulario con estado{" "}
+                <Text style={{ color: "#ef4444", fontWeight: "bold" }}>
+                  rechazado
+                </Text>{" "}
+                ha sido seleccionado para una reconsideración.
+              </Text>
+              <TouchableOpacity
+                style={styles.acceptButton}
+                onPress={handleAcceptReconsideration}
+                disabled={accepting}
+              >
+                <Text style={styles.acceptButtonText}>
+                  {accepting ? "Aceptando..." : "Aceptar reconsideración"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => router.back()}
@@ -326,5 +386,41 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "bold",
     fontSize: width * 0.045,
+  },
+  errorText: {
+    color: "#ef4444",
+    fontSize: width * 0.045,
+    textAlign: "center",
+    marginTop: 40,
+  },
+  reconsiderationBox: {
+    backgroundColor: "#f3f4f6",
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 14,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "#ef4444",
+    alignItems: "center",
+  },
+  reconsiderationMsg: {
+    color: "#ef4444",
+    fontWeight: "bold",
+    fontSize: width * 0.04,
+    marginBottom: 10,
+    textAlign: "center",
+  },
+  acceptButton: {
+    backgroundColor: "#FFB46EFF",
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+    alignItems: "center",
+    marginTop: 4,
+  },
+  acceptButtonText: {
+    color: "#fff",
+    fontWeight: "bold",
+    fontSize: 15,
   },
 });

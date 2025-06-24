@@ -27,6 +27,7 @@ export default function Layout() {
     if (tab === "my-forms") router.replace("/my-forms");
     if (tab === "pending-forms") router.replace("/pending-forms");
     if (tab === "approvals") router.replace("/approvals");
+    if (tab === "settings") router.replace("/settings"); // NUEVO
     if (tab === "logout") {
       // Limpia token y marca sesión cerrada
       await AsyncStorage.setItem("isLoggedOut", "true");

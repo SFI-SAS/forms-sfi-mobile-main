@@ -238,24 +238,22 @@ export default function PendingForms() {
             }}
             showsVerticalScrollIndicator={false}
           >
-            <Text style={styles.header}>Formularios Diligenciados Offline</Text>
+            <Text style={styles.header}>Offline Submitted Forms</Text>
             {pendingForms.length === 0 ? (
               <Text style={styles.noPendingText}>
-                No hay formularios en estado offline pendientes.
+                No offline forms pending.
               </Text>
             ) : (
               pendingForms.map((form, index) => (
                 <View key={index} style={styles.formCardWrapper}>
                   <View style={styles.formCard}>
-                    <Text style={styles.formText}>
-                      Formulario ID: {form.id}
-                    </Text>
+                    <Text style={styles.formText}>Form ID: {form.id}</Text>
                     {form.title ? (
-                      <Text style={styles.formTitle}>Título: {form.title}</Text>
+                      <Text style={styles.formTitle}>Title: {form.title}</Text>
                     ) : null}
                     {form.description ? (
                       <Text style={styles.formDescription}>
-                        Descripción: {form.description}
+                        Description: {form.description}
                       </Text>
                     ) : null}
                     <TouchableOpacity
@@ -273,21 +271,18 @@ export default function PendingForms() {
                             "pending_forms",
                             JSON.stringify(updatedPendingForms)
                           );
-                          Alert.alert(
-                            "Sincronización",
-                            "Formulario enviado correctamente."
-                          );
+                          Alert.alert("Sync", "Form sent successfully.");
                         } catch (error) {
                           Alert.alert(
                             "Error",
-                            `No se pudo sincronizar el formulario ID ${form.id}`
+                            `Could not sync form ID ${form.id}`
                           );
                         }
                       }}
                       disabled={!isOnline}
                     >
                       <Text style={styles.submitButtonText}>
-                        {isOnline ? "Enviar " : "Sin conexión"}
+                        {isOnline ? "Send" : "No connection"}
                       </Text>
                     </TouchableOpacity>
                   </View>
@@ -305,11 +300,11 @@ export default function PendingForms() {
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
               <Text style={styles.modalTitle}>
-                Sesión cerrada por inactividad
+                Session closed due to inactivity
               </Text>
               <Text style={styles.modalText}>
-                Por seguridad, la sesión se cerró automáticamente tras 2 minutos
-                sin actividad.
+                For security, your session was closed automatically after 2
+                minutes of inactivity.
               </Text>
               <TouchableOpacity
                 style={[styles.modalButton, { backgroundColor: "#2563eb" }]}
@@ -318,9 +313,7 @@ export default function PendingForms() {
                   router.replace("/");
                 }}
               >
-                <Text style={styles.modalButtonText}>
-                  Ir al inicio de sesión
-                </Text>
+                <Text style={styles.modalButtonText}>Go to login</Text>
               </TouchableOpacity>
             </View>
           </View>

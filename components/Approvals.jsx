@@ -2,12 +2,13 @@ import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
+  TouchableOpacity,
   StyleSheet,
   ScrollView,
-  TouchableOpacity,
-  Dimensions,
-  ActivityIndicator,
   Alert,
+  ActivityIndicator,
+  Modal,
+  Dimensions,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
@@ -18,6 +19,14 @@ import { useRouter } from "expo-router";
 const { width, height } = Dimensions.get("window");
 const APPROVALS_OFFLINE_KEY = "approvals_offline";
 const APPROVALS_OFFLINE_ACTIONS_KEY = "approvals_offline_actions"; // NUEVO
+const BACKEND_URL_KEY = "backend_url";
+const DEFAULT_BACKEND_URL = "https://your-safemetrics-api.com";
+
+// Utilidad para obtener la URL base del backend
+const getBackendUrl = async () => {
+  const stored = await AsyncStorage.getItem(BACKEND_URL_KEY);
+  return stored || DEFAULT_BACKEND_URL;
+};
 
 export default function Approvals() {
   const [loading, setLoading] = useState(true);
@@ -25,6 +34,7 @@ export default function Approvals() {
   const [show, setShow] = useState("pending"); // "pending" | "approved" | "rejected"
   const [isOffline, setIsOffline] = useState(false);
   const [pendingApprovalActions, setPendingApprovalActions] = useState([]);
+  const [accepting, setAccepting] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -42,9 +52,10 @@ export default function Approvals() {
       if (net.isConnected) {
         const token = await AsyncStorage.getItem("authToken");
         if (!token) throw new Error("No authentication token found");
+        const backendUrl = await getBackendUrl();
 
         const res = await fetch(
-          "https://api-forms-sfi.service.saferut.com/forms/user/assigned-forms-with-responses",
+          `${backendUrl}/forms/user/assigned-forms-with-responses`,
           {
             headers: { Authorization: `Bearer ${token}` },
           }
@@ -91,7 +102,11 @@ export default function Approvals() {
   // Contadores
   const pending = filterByStatus("pendiente");
   const approved = filterByStatus("aprobado");
-  const rejected = filterByStatus("rechazado");
+  const rejected = allApprovals.filter(
+    (item) =>
+      item.your_approval_status &&
+      item.your_approval_status.status === "rechazado"
+  );
   const total = allApprovals.length;
 
   // Guardar acción offline (aprobación/rechazo)
@@ -198,6 +213,7 @@ export default function Approvals() {
       try {
         const token = await AsyncStorage.getItem("authToken");
         if (!token) throw new Error("No authentication token found");
+        const backendUrl = await getBackendUrl();
         const now = new Date();
         const reviewed_at = now.toISOString();
         const selectedSequence =
@@ -209,7 +225,7 @@ export default function Approvals() {
           selectedSequence,
         };
         const res = await fetch(
-          `https://api-forms-sfi.service.saferut.com/forms/update-response-approval/${item.response_id}`,
+          `${backendUrl}/forms/update-response-approval/${item.response_id}`,
           {
             method: "PUT",
             headers: {
@@ -241,24 +257,87 @@ export default function Approvals() {
     }
   };
 
+  // Cambia la función para detectar reconsideration_requested en los rechazados
+  const handleAcceptReconsideration = async (item) => {
+    setAccepting(true);
+    try {
+      const token = await AsyncStorage.getItem("authToken");
+      if (!token) throw new Error("No authentication token found");
+      const backendUrl = await getBackendUrl();
+
+      // Busca el aprobador actual en all_approvers (el usuario logueado)
+      // y verifica que tenga reconsideration_requested === true
+      const approver = (item.all_approvers || []).find(
+        (appr) =>
+          appr.reconsideration_requested === true && appr.status === "rechazado"
+      );
+      if (!approver) {
+        throw new Error(
+          "No hay reconsideración pendiente para este formulario."
+        );
+      }
+
+      // El backend espera un body con status: "aprobado", reviewed_at, message, selectedSequence
+      const now = new Date();
+      const reviewed_at = now.toISOString();
+      const body = {
+        status: "aprobado",
+        reviewed_at,
+        message: "Reconsideración aceptada",
+        selectedSequence: approver.sequence_number || 1,
+      };
+
+      const res = await fetch(
+        `${backendUrl}/forms/update-response-approval/${item.response_id}`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(
+          data?.detail ||
+            "No se pudo aceptar la reconsideración. Intenta de nuevo."
+        );
+      }
+      Alert.alert(
+        "Reconsideración aceptada",
+        "La reconsideración fue aceptada."
+      );
+      loadApprovals();
+    } catch (error) {
+      Alert.alert(
+        "Error",
+        error.message || "No se pudo aceptar la reconsideración."
+      );
+    } finally {
+      setAccepting(false);
+    }
+  };
+
   return (
     <LinearGradient colors={["#f7fafc", "#e6fafd"]} style={{ flex: 1 }}>
       <View style={styles.container}>
         <View style={styles.headerRow}>
           <MaterialIcons name="check-circle" size={32} color="#12A0AF" />
           <View style={{ marginLeft: 10 }}>
-            <Text style={styles.headerTitle}>Centro de Aprobaciones</Text>
+            <Text style={styles.headerTitle}>Approvals Center</Text>
             <Text style={styles.headerSubtitle}>
-              Revisa y aprueba formularios pendientes
+              Review and approve pending forms
             </Text>
           </View>
         </View>
-        {/* Contadores */}
+        {/* Counters */}
         <View style={styles.countersRow}>
           <CounterBox
             icon="schedule"
             color="#fbbf24"
-            label="Pendientes"
+            label="Pending"
             value={pending.length}
             active={show === "pending"}
             onPress={() => setShow("pending")}
@@ -266,7 +345,7 @@ export default function Approvals() {
           <CounterBox
             icon="check-circle"
             color="#22c55e"
-            label="Aprobados"
+            label="Approved"
             value={approved.length}
             active={show === "approved"}
             onPress={() => setShow("approved")}
@@ -274,7 +353,7 @@ export default function Approvals() {
           <CounterBox
             icon="cancel"
             color="#ef4444"
-            label="Rechazados"
+            label="Rejected"
             value={rejected.length}
             active={show === "rejected"}
             onPress={() => setShow("rejected")}
@@ -288,13 +367,13 @@ export default function Approvals() {
             onPress={() => {}}
           />
         </View>
-        {/* Lista de pendientes de envío de aprobación/rechazo */}
+        {/* Pending approval/reject actions */}
         {pendingApprovalActions.length > 0 && (
           <View style={{ marginBottom: 12, marginTop: 8 }}>
             <Text
               style={{ color: "#ef4444", fontWeight: "bold", marginBottom: 4 }}
             >
-              Pendientes de envío de aprobación/rechazo:
+              Pending approval/reject actions:
             </Text>
             {pendingApprovalActions.map((action, idx) => (
               <View
@@ -309,7 +388,7 @@ export default function Approvals() {
                 }}
               >
                 <Text style={{ color: "#222" }}>
-                  Formulario ID: {action.response_id} - Acción:{" "}
+                  Form ID: {action.response_id} - Action:{" "}
                   <Text
                     style={{
                       fontWeight: "bold",
@@ -323,14 +402,14 @@ export default function Approvals() {
                   </Text>
                 </Text>
                 <Text style={{ color: "#888", fontSize: 12 }}>
-                  Guardado offline el:{" "}
+                  Saved offline at:{" "}
                   {new Date(action.timestamp).toLocaleString()}
                 </Text>
               </View>
             ))}
           </View>
         )}
-        {/* Lista de formatos */}
+        {/* Forms list */}
         <View style={styles.listContainer}>
           {loading ? (
             <ActivityIndicator size="large" color="#12A0AF" />
@@ -351,9 +430,9 @@ export default function Approvals() {
                     color="#12A0AF"
                     style={{ marginBottom: 8 }}
                   />
-                  <Text style={styles.emptyTitle}>¡Todo al día!</Text>
+                  <Text style={styles.emptyTitle}>All up to date!</Text>
                   <Text style={styles.emptySubtitle}>
-                    No hay formularios pendientes por revisar.
+                    No pending forms to review.
                   </Text>
                 </View>
               )}
@@ -368,8 +447,6 @@ export default function Approvals() {
                       router.push({
                         pathname: "/approval-detail",
                         params: { response_id: item.response_id },
-                        // Puedes pasar más datos si lo deseas
-                        // params: { ...item }
                       })
                     }
                   />
@@ -382,10 +459,8 @@ export default function Approvals() {
                     color="#22c55e"
                     style={{ marginBottom: 8 }}
                   />
-                  <Text style={styles.emptyTitle}>Sin aprobados</Text>
-                  <Text style={styles.emptySubtitle}>
-                    No hay formularios aprobados.
-                  </Text>
+                  <Text style={styles.emptyTitle}>No approved</Text>
+                  <Text style={styles.emptySubtitle}>No approved forms.</Text>
                 </View>
               )}
               {show === "approved" &&
@@ -410,10 +485,8 @@ export default function Approvals() {
                     color="#ef4444"
                     style={{ marginBottom: 8 }}
                   />
-                  <Text style={styles.emptyTitle}>Sin rechazados</Text>
-                  <Text style={styles.emptySubtitle}>
-                    No hay formularios rechazados.
-                  </Text>
+                  <Text style={styles.emptyTitle}>No rejected</Text>
+                  <Text style={styles.emptySubtitle}>No rejected forms.</Text>
                 </View>
               )}
               {show === "rejected" &&
@@ -428,6 +501,8 @@ export default function Approvals() {
                         params: { response_id: item.response_id },
                       })
                     }
+                    onAcceptReconsideration={handleAcceptReconsideration}
+                    accepting={accepting}
                   />
                 ))}
             </ScrollView>
@@ -462,7 +537,17 @@ function ApprovalCard({
   onApprove,
   onReject,
   onPress,
+  onAcceptReconsideration,
+  accepting,
 }) {
+  // Detecta si hay reconsideration_requested en algún aprobador
+  const hasReconsideration =
+    Array.isArray(item.all_approvers) &&
+    item.all_approvers.some(
+      (appr) =>
+        appr.reconsideration_requested === true && appr.status === "rechazado"
+    );
+
   return (
     <TouchableOpacity
       activeOpacity={0.85}
@@ -520,6 +605,18 @@ function ApprovalCard({
           </TouchableOpacity>
         </View>
       )}
+      {/* Botón para aceptar reconsideración SOLO si está rechazado y tiene reconsideration_requested */}
+      {rejected && hasReconsideration && (
+        <TouchableOpacity
+          style={styles.reconsiderationBtn}
+          onPress={() => onAcceptReconsideration(item)}
+          disabled={accepting}
+        >
+          <Text style={styles.reconsiderationBtnText}>
+            {accepting ? "Aceptando..." : "Aceptar reconsideración"}
+          </Text>
+        </TouchableOpacity>
+      )}
     </TouchableOpacity>
   );
 }
@@ -529,13 +626,6 @@ const styles = StyleSheet.create({
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 8,
-    marginTop: 8,
-  },
-  headerTitle: {
-    fontSize: width * 0.06,
-    fontWeight: "bold",
-    color: "#222",
   },
   headerSubtitle: {
     fontSize: width * 0.035,
@@ -641,5 +731,19 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "bold",
     fontSize: width * 0.035,
+  },
+  reconsiderationBtn: {
+    marginTop: 10,
+    backgroundColor: "#FF9D2DFF",
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 18,
+    alignItems: "center",
+    alignSelf: "flex-end",
+  },
+  reconsiderationBtnText: {
+    color: "#fff",
+    fontWeight: "bold",
+    fontSize: 14,
   },
 });

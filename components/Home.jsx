@@ -87,7 +87,9 @@ const UserCard = ({ userInfo, isOffline, loadingUser, spinAnimUser }) => (
                 height={28}
               />
             </Animated.View>
-            <Text style={styles.userLoadingTextGreen}>Cargando datos...</Text>
+            <Text style={styles.userLoadingTextGreen}>
+              Loading user data...
+            </Text>
           </View>
         ) : (
           // Mostrar la información del usuario en columnas (una debajo de la otra)
@@ -97,19 +99,19 @@ const UserCard = ({ userInfo, isOffline, loadingUser, spinAnimUser }) => (
               <Text style={styles.userInfoValueGreen}>{userInfo?.email}</Text>
             </View>
             <View style={styles.userInfoRow}>
-              <Text style={styles.userInfoLabelGreen}>Doc: </Text>
+              <Text style={styles.userInfoLabelGreen}>Document: </Text>
               <Text style={styles.userInfoValueGreen}>
                 {userInfo?.num_document}
               </Text>
             </View>
             <View style={styles.userInfoRow}>
-              <Text style={styles.userInfoLabelGreen}>Tel: </Text>
+              <Text style={styles.userInfoLabelGreen}>Phone: </Text>
               <Text style={styles.userInfoValueGreen}>
                 {userInfo?.telephone}
               </Text>
             </View>
             <View style={styles.userInfoRow}>
-              <Text style={styles.userInfoLabelGreen}>Tipo: </Text>
+              <Text style={styles.userInfoLabelGreen}>Type: </Text>
               <Text style={styles.userInfoValueGreen}>
                 {userInfo?.user_type}
               </Text>
@@ -159,7 +161,7 @@ const BottomTabBar = ({ activeTab, onTabPress }) => (
   <View style={styles.tabBarContainer}>
     <TabBarButton
       icon={<HomeIcon color={activeTab === "home" ? "#12A0AF" : "#4B34C7"} />}
-      label="Inicio"
+      label="Home"
       active={activeTab === "home"}
       onPress={() => onTabPress("home")}
     />
@@ -173,7 +175,7 @@ const BottomTabBar = ({ activeTab, onTabPress }) => (
           ]}
         />
       }
-      label="Diligenciados"
+      label="Submitted"
       active={activeTab === "my-forms"}
       onPress={() => onTabPress("my-forms")}
     />
@@ -187,7 +189,7 @@ const BottomTabBar = ({ activeTab, onTabPress }) => (
           ]}
         />
       }
-      label="Pendientes"
+      label="Pending"
       active={activeTab === "pending-forms"}
       onPress={() => onTabPress("pending-forms")}
     />
@@ -201,7 +203,7 @@ const BottomTabBar = ({ activeTab, onTabPress }) => (
           ]}
         />
       }
-      label="Salir"
+      label="Logout"
       active={activeTab === "logout"}
       onPress={() => onTabPress("logout")}
       danger
@@ -660,14 +662,14 @@ export default function Home({ activeTab, onTabPress }) {
     >
       <View style={styles.container}>
         {/* Fondo decorativo superior eliminado, ahora todo el fondo es morado */}
-        <Text style={styles.sectionTitleWhite}>Bienvenido</Text>
+        <Text style={styles.sectionTitleWhite}>Welcome</Text>
         <UserCard
           userInfo={userInfo}
           isOffline={isOffline}
           loadingUser={loadingUser}
           spinAnimUser={spin}
         />
-        <Text style={styles.sectionTitleWhite}>Formatos asignados</Text>
+        <Text style={styles.sectionTitleWhite}>Assigned forms</Text>
         <ScrollView
           contentContainerStyle={{
             flexGrow: 1,
@@ -684,7 +686,7 @@ export default function Home({ activeTab, onTabPress }) {
                   height={40}
                 />
               </Animated.View>
-              <Text style={styles.loadingTextWhite}>Cargando...</Text>
+              <Text style={styles.loadingTextWhite}>Loading...</Text>
             </View>
           ) : (
             <View style={styles.formsScrollWrapper}>
@@ -766,7 +768,7 @@ export default function Home({ activeTab, onTabPress }) {
                   color: "#222",
                 }}
               >
-                Sesión cerrada por inactividad
+                Session closed due to inactivity
               </Text>
               <Text
                 style={{
@@ -776,8 +778,8 @@ export default function Home({ activeTab, onTabPress }) {
                   textAlign: "center",
                 }}
               >
-                Por seguridad, la sesión se cerró automáticamente tras 2 minutos
-                sin actividad.
+                For security, your session was closed automatically after 2
+                minutes of inactivity.
               </Text>
               <TouchableOpacity
                 style={{
@@ -799,7 +801,7 @@ export default function Home({ activeTab, onTabPress }) {
                     fontSize: width * 0.045,
                   }}
                 >
-                  Ir al inicio de sesión
+                  Go to login
                 </Text>
               </TouchableOpacity>
             </View>

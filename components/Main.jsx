@@ -9,6 +9,7 @@ import {
   Alert,
   Dimensions,
   BackHandler,
+  Modal,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
@@ -31,6 +32,15 @@ function encodeFormData(data) {
     .join("&");
 }
 
+const BACKEND_URL_KEY = "backend_url";
+const DEFAULT_BACKEND_URL = "https://api-forms-sfi.service.saferut.com";
+
+// Utilidad para obtener la URL base del backend
+const getBackendUrl = async () => {
+  const stored = await AsyncStorage.getItem(BACKEND_URL_KEY);
+  return stored || DEFAULT_BACKEND_URL;
+};
+
 export function Main() {
   const router = useRouter();
   const [username, setUsername] = useState("");
@@ -39,6 +49,22 @@ export function Main() {
   const [userData, setUserData] = useState(null); // Estado para guardar los datos del usuario
   const [showPassword, setShowPassword] = useState(false); // Estado para mostrar/ocultar contraseña
   const [errors, setErrors] = useState({}); // Estado para errores visuales
+  const [backendUrl, setBackendUrl] = useState(DEFAULT_BACKEND_URL);
+  const [showBackendModal, setShowBackendModal] = useState(false);
+  const [backendInput, setBackendInput] = useState("");
+  const [backendUrlSet, setBackendUrlSet] = useState(false);
+
+  // Solo pregunta la primera vez
+  useEffect(() => {
+    AsyncStorage.getItem(BACKEND_URL_KEY).then((url) => {
+      if (url) {
+        setBackendUrl(url);
+        setBackendUrlSet(true);
+      } else {
+        setShowBackendModal(true); // Mostrar modal la primera vez
+      }
+    });
+  }, []);
 
   // Validación de email simple
   const isValidEmail = (email) => {
@@ -145,6 +171,8 @@ export function Main() {
         }
       }
 
+      const backendUrlToUse = await getBackendUrl();
+
       // Construir la cadena de parámetros manualmente
       const params = encodeFormData({
         grant_type: "password",
@@ -157,14 +185,11 @@ export function Main() {
       console.log(params);
 
       // El endpoint /auth/token espera POST con application/x-www-form-urlencoded y los campos grant_type, username, password, scope, client_id, client_secret
-      const response = await fetch(
-        `https://api-forms-sfi.service.saferut.com/auth/token`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: params,
-        }
-      );
+      const response = await fetch(`${backendUrlToUse}/auth/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params,
+      });
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -191,11 +216,11 @@ export function Main() {
       const token = json.access_token;
 
       await AsyncStorage.setItem("authToken", token);
-      await AsyncStorage.setItem("isLoggedOut", "false"); // Mark the session as logged in
+      await AsyncStorage.setItem("isLoggedOut", "false");
 
       // Validar el token usando GET
       const responseUser = await fetch(
-        `https://api-forms-sfi.service.saferut.com/auth/validate-token`,
+        `${backendUrlToUse}/auth/validate-token`,
         {
           method: "GET",
           headers: { Authorization: `Bearer ${token}` },
@@ -297,7 +322,105 @@ export function Main() {
               <Text style={styles.errorText}>{errors.password}</Text>
             )}
           </View>
-          <TouchableOpacity onPress={handleLogin} style={styles.button}>
+          {/* Mostrar solo si la URL no ha sido seteada */}
+          {!backendUrlSet && (
+            <Modal
+              visible={showBackendModal}
+              transparent
+              animationType="fade"
+              onRequestClose={() => {}}
+            >
+              <View
+                style={{
+                  flex: 1,
+                  backgroundColor: "rgba(0,0,0,0.4)",
+                  justifyContent: "center",
+                  alignItems: "center",
+                }}
+              >
+                <View
+                  style={{
+                    backgroundColor: "#fff",
+                    borderRadius: 10,
+                    padding: 24,
+                    width: "85%",
+                    alignItems: "center",
+                    elevation: 5,
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontWeight: "bold",
+                      fontSize: 18,
+                      marginBottom: 8,
+                      color: "#222",
+                      textAlign: "center",
+                    }}
+                  >
+                    Configura la conexión backend
+                  </Text>
+                  <TextInput
+                    style={{
+                      borderWidth: 1,
+                      borderColor: "#12A0AF",
+                      borderRadius: 8,
+                      padding: 10,
+                      width: "100%",
+                      marginBottom: 10,
+                    }}
+                    placeholder="https://api-forms-sfi.service.saferut.com"
+                    value={backendInput}
+                    onChangeText={setBackendInput}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      width: "100%",
+                      justifyContent: "space-between",
+                    }}
+                  >
+                    <TouchableOpacity
+                      style={{
+                        backgroundColor: "#2563eb",
+                        borderRadius: 6,
+                        padding: 12,
+                        alignItems: "center",
+                        flex: 1,
+                        marginRight: 8,
+                      }}
+                      onPress={async () => {
+                        let url = backendInput.trim();
+                        if (!/^https?:\/\//.test(url)) {
+                          url = "https://" + url;
+                        }
+                        setBackendUrl(url);
+                        await AsyncStorage.setItem(BACKEND_URL_KEY, url);
+                        setBackendUrlSet(true);
+                        setShowBackendModal(false);
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: "white",
+                          fontWeight: "bold",
+                          fontSize: 16,
+                        }}
+                      >
+                        Guardar
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            </Modal>
+          )}
+          <TouchableOpacity
+            onPress={handleLogin}
+            style={styles.button}
+            disabled={!backendUrlSet}
+          >
             <Text style={styles.buttonText}>
               {isOffline ? "Iniciar en Modo Offline" : "Iniciar Sesión"}
             </Text>

@@ -10,6 +10,7 @@ import {
   Modal,
   Dimensions,
   ActivityIndicator,
+  TextInput,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
@@ -27,6 +28,13 @@ export default function MyForms() {
   const [responsesDetail, setResponsesDetail] = useState({}); // { [formId]: [responses] }
   const [loading, setLoading] = useState(true);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [reconsiderModal, setReconsiderModal] = useState({
+    visible: false,
+    responseId: null,
+    loading: false,
+    error: null,
+    message: "",
+  });
   const inactivityTimer = useRef(null);
   const router = useRouter();
 
@@ -193,6 +201,102 @@ export default function MyForms() {
     };
   }, []);
 
+  // --- Nueva función para solicitar reconsideración ---
+  const handleReconsider = async (responseId) => {
+    setReconsiderModal({
+      visible: true,
+      responseId,
+      loading: false,
+      error: null,
+      message: "",
+    });
+  };
+
+  const submitReconsideration = async () => {
+    setReconsiderModal((prev) => ({ ...prev, loading: true, error: null }));
+    try {
+      const accessToken = await AsyncStorage.getItem("authToken");
+      if (!accessToken) throw new Error("No authentication token found");
+      if (!reconsiderModal.message.trim()) {
+        setReconsiderModal((prev) => ({
+          ...prev,
+          loading: false,
+          error: "Debes ingresar un mensaje de reconsideración.",
+        }));
+        return;
+      }
+      // DEBUG: log de request
+      console.log("🔵 Enviando reconsideración:", {
+        response_id: reconsiderModal.responseId,
+        mensaje_reconsideracion: reconsiderModal.message,
+      });
+
+      // El backend espera el mensaje como parámetro de query, no en el body
+      const url = `https://api-forms-sfi.service.saferut.com/responses/set_reconsideration/${reconsiderModal.responseId}?mensaje_reconsideracion=${encodeURIComponent(
+        reconsiderModal.message
+      )}`;
+
+      const res = await fetch(url, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        // body: JSON.stringify({ mensaje_reconsideracion: reconsiderModal.message }), // NO ENVIAR BODY
+      });
+      let data;
+      try {
+        data = await res.json();
+      } catch (e) {
+        data = {};
+      }
+      // DEBUG: log de respuesta
+      console.log("🟢 Respuesta reconsideración:", data);
+
+      if (!res.ok) {
+        // Si el backend responde con un array de errores, muéstralo
+        let msg = "No se pudo solicitar la reconsideración. Intenta de nuevo.";
+        if (data?.detail) {
+          if (Array.isArray(data.detail)) {
+            msg =
+              "Error: " +
+              data.detail
+                .map((d) =>
+                  typeof d === "object" ? d.msg || JSON.stringify(d) : String(d)
+                )
+                .join(", ");
+          } else if (typeof data.detail === "string") {
+            msg = data.detail;
+          }
+        }
+        throw new Error(msg);
+      }
+
+      setReconsiderModal({
+        visible: false,
+        responseId: null,
+        loading: false,
+        error: null,
+        message: "",
+      });
+      Alert.alert(
+        "Reconsideración enviada",
+        "Tu solicitud de reconsideración fue enviada correctamente."
+      );
+      // Opcional: recargar formularios para actualizar estado
+      handleViewForms();
+    } catch (error) {
+      console.error("❌ Error en reconsideración:", error);
+      setReconsiderModal((prev) => ({
+        ...prev,
+        loading: false,
+        error:
+          error.message ||
+          "No se pudo solicitar la reconsideración. Intenta de nuevo.",
+      }));
+    }
+  };
+
   return (
     <LinearGradient colors={["#4B34C7", "#4B34C7"]} style={{ flex: 1 }}>
       <View style={{ flex: 1 }}>
@@ -202,16 +306,16 @@ export default function MyForms() {
             contentContainerStyle={{
               paddingBottom: 24,
               paddingHorizontal: 0,
-              minHeight: height * 0.7, // Asegura espacio para contenido
+              minHeight: height * 0.7,
             }}
             showsVerticalScrollIndicator={true}
           >
-            <Text style={styles.header}>Formularios Enviados</Text>
+            <Text style={styles.header}>Submitted Forms</Text>
             {loading ? (
               <ActivityIndicator size="large" color="#12A0AF" />
             ) : forms.length === 0 ? (
               <Text style={styles.noFormsText}>
-                No hay formularios enviados disponibles.
+                No submitted forms available.
               </Text>
             ) : (
               forms.map((form, index) => (
@@ -222,14 +326,14 @@ export default function MyForms() {
                       numberOfLines={1}
                       ellipsizeMode="tail"
                     >
-                      Formulario ID: {form.id}
+                      Form ID: {form.id}
                     </Text>
                     <Text
                       style={styles.formTitle}
                       numberOfLines={2}
                       ellipsizeMode="tail"
                     >
-                      {form.form_title || "Sin título"}
+                      {form.form_title || "Untitled"}
                     </Text>
                     <Text
                       style={styles.formDescription}
@@ -239,7 +343,7 @@ export default function MyForms() {
                       {form.form_description || ""}
                     </Text>
                     <Text style={styles.formMeta} numberOfLines={1}>
-                      Respondido por: {form.submitted_by?.name || "-"}
+                      Submitted by: {form.submitted_by?.name || "-"}
                     </Text>
                     <TouchableOpacity
                       style={styles.viewResponsesButton}
@@ -247,8 +351,8 @@ export default function MyForms() {
                     >
                       <Text style={styles.viewResponsesButtonText}>
                         {expandedForms[form.id]
-                          ? "Ocultar respuestas"
-                          : "Ver respuestas"}
+                          ? "Hide responses"
+                          : "Show responses"}
                       </Text>
                     </TouchableOpacity>
                     {expandedForms[form.id] && (
@@ -264,26 +368,42 @@ export default function MyForms() {
                             responsesByForm[form.id].map((resp, idx) => (
                               <View
                                 key={resp.response_id || idx}
-                                style={styles.diligCard}
+                                style={[
+                                  styles.diligCard,
+                                  {
+                                    borderWidth: 1.5,
+                                    borderColor: "#12A0AF",
+                                    borderRadius: 10,
+                                    marginBottom: 14,
+                                    backgroundColor: "#fff",
+                                    shadowColor: "#12A0AF",
+                                    shadowOpacity: 0.08,
+                                    shadowRadius: 4,
+                                    shadowOffset: { width: 0, height: 2 },
+                                    elevation: 2,
+                                    padding: 14, // Add padding for space between content and border
+                                  },
+                                ]}
                               >
+                                {/* Submission content */}
                                 <Text
                                   style={styles.diligHeader}
                                   numberOfLines={1}
                                   ellipsizeMode="tail"
                                 >
-                                  Diligenciamiento #{idx + 1}
+                                  Submission #{idx + 1}
                                 </Text>
                                 <Text
                                   style={styles.diligMeta}
                                   numberOfLines={1}
                                 >
-                                  Fecha: {resp.submitted_at || "Desconocida"}
+                                  Date: {resp.submitted_at || "Unknown"}
                                 </Text>
                                 <Text
                                   style={styles.diligMeta}
                                   numberOfLines={1}
                                 >
-                                  Estado de aprobación:{" "}
+                                  Approval status:{" "}
                                   <Text
                                     style={{
                                       color:
@@ -304,7 +424,7 @@ export default function MyForms() {
                                     numberOfLines={2}
                                     ellipsizeMode="tail"
                                   >
-                                    Mensaje: {resp.message}
+                                    Message: {resp.message}
                                   </Text>
                                 ) : null}
                                 <View style={{ marginTop: 6 }}>
@@ -354,7 +474,7 @@ export default function MyForms() {
                                     </ScrollView>
                                   ) : (
                                     <Text style={styles.noAnswersText}>
-                                      Sin respuestas.
+                                      No answers.
                                     </Text>
                                   )}
                                 </View>
@@ -367,7 +487,7 @@ export default function MyForms() {
                                           color: "#2563eb",
                                         }}
                                       >
-                                        Detalle de aprobaciones:
+                                        Approval details:
                                       </Text>
                                       <ScrollView
                                         style={{ maxHeight: height * 0.12 }}
@@ -386,27 +506,27 @@ export default function MyForms() {
                                               <Text
                                                 style={{ fontWeight: "bold" }}
                                               >
-                                                Secuencia:
+                                                Sequence:
                                               </Text>{" "}
                                               {appr.sequence_number} |{" "}
                                               <Text
                                                 style={{ fontWeight: "bold" }}
                                               >
-                                                Estado:
+                                                Status:
                                               </Text>{" "}
                                               {appr.status} |{" "}
                                               <Text
                                                 style={{ fontWeight: "bold" }}
                                               >
-                                                Obligatorio:
+                                                Mandatory:
                                               </Text>{" "}
-                                              {appr.is_mandatory ? "Sí" : "No"}
+                                              {appr.is_mandatory ? "Yes" : "No"}
                                             </Text>
                                             <Text style={{ color: "#222" }}>
                                               <Text
                                                 style={{ fontWeight: "bold" }}
                                               >
-                                                Usuario:
+                                                User:
                                               </Text>{" "}
                                               {appr.user?.name || "-"}
                                             </Text>
@@ -414,7 +534,7 @@ export default function MyForms() {
                                               <Text
                                                 style={{ color: "#ef4444" }}
                                               >
-                                                Mensaje: {appr.message}
+                                                Message: {appr.message}
                                               </Text>
                                             )}
                                           </View>
@@ -425,15 +545,12 @@ export default function MyForms() {
                                 {resp.approval_status === "rechazado" && (
                                   <TouchableOpacity
                                     style={styles.reconsiderButton}
-                                    onPress={() => {
-                                      Alert.alert(
-                                        "Reconsiderar",
-                                        "Funcionalidad próximamente disponible."
-                                      );
-                                    }}
+                                    onPress={() =>
+                                      handleReconsider(resp.response_id)
+                                    }
                                   >
                                     <Text style={styles.reconsiderButtonText}>
-                                      Reconsiderar aprobación
+                                      Request reconsideration
                                     </Text>
                                   </TouchableOpacity>
                                 )}
@@ -441,7 +558,7 @@ export default function MyForms() {
                             ))
                           ) : (
                             <Text style={styles.noAnswersText}>
-                              No hay respuestas para este formulario.
+                              No responses for this form.
                             </Text>
                           )}
                         </ScrollView>
@@ -453,7 +570,141 @@ export default function MyForms() {
             )}
           </ScrollView>
         </View>
-        {/* Modal de cierre de sesión por inactividad */}
+        {/* Modal de reconsideración */}
+        <Modal
+          visible={reconsiderModal.visible}
+          transparent
+          animationType="fade"
+          onRequestClose={() =>
+            setReconsiderModal({
+              visible: false,
+              responseId: null,
+              loading: false,
+              error: null,
+              message: "",
+            })
+          }
+        >
+          <View
+            style={{
+              flex: 1,
+              backgroundColor: "rgba(0,0,0,0.4)",
+              justifyContent: "center",
+              alignItems: "center",
+            }}
+          >
+            <View
+              style={{
+                backgroundColor: "#fff",
+                borderRadius: 10,
+                padding: 24,
+                width: "85%",
+                alignItems: "center",
+                elevation: 5,
+              }}
+            >
+              <Text
+                style={{
+                  fontWeight: "bold",
+                  fontSize: 20,
+                  marginBottom: 8,
+                  color: "#222",
+                  textAlign: "center",
+                }}
+              >
+                Request reconsideration
+              </Text>
+              <Text
+                style={{
+                  fontSize: 15,
+                  color: "#444",
+                  marginBottom: 12,
+                  textAlign: "center",
+                }}
+              >
+                Write the reason for your reconsideration request for this rejected form.
+              </Text>
+              <TextInput
+                style={{
+                  borderWidth: 1,
+                  borderColor: "#12A0AF",
+                  borderRadius: 8,
+                  padding: 10,
+                  width: "100%",
+                  minHeight: 60,
+                  marginBottom: 10,
+                  textAlignVertical: "top",
+                }}
+                multiline
+                placeholder="Reason for reconsideration"
+                value={reconsiderModal.message}
+                onChangeText={(text) =>
+                  setReconsiderModal((prev) => ({ ...prev, message: text }))
+                }
+                editable={!reconsiderModal.loading}
+              />
+              {reconsiderModal.error && (
+                <Text style={{ color: "#ef4444", marginBottom: 8 }}>
+                  {reconsiderModal.error}
+                </Text>
+              )}
+              <View
+                style={{
+                  flexDirection: "row",
+                  width: "100%",
+                  justifyContent: "space-between",
+                }}
+              >
+                <TouchableOpacity
+                  style={{
+                    backgroundColor: "#2563eb",
+                    borderRadius: 6,
+                    padding: 12,
+                    alignItems: "center",
+                    flex: 1,
+                    marginRight: 8,
+                    opacity: reconsiderModal.loading ? 0.6 : 1,
+                  }}
+                  onPress={submitReconsideration}
+                  disabled={reconsiderModal.loading}
+                >
+                  <Text
+                    style={{ color: "white", fontWeight: "bold", fontSize: 16 }}
+                  >
+                    {reconsiderModal.loading ? "Sending..." : "Send"}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={{
+                    backgroundColor: "#888",
+                    borderRadius: 6,
+                    padding: 12,
+                    alignItems: "center",
+                    flex: 1,
+                    marginLeft: 8,
+                  }}
+                  onPress={() =>
+                    setReconsiderModal({
+                      visible: false,
+                      responseId: null,
+                      loading: false,
+                      error: null,
+                      message: "",
+                    })
+                  }
+                  disabled={reconsiderModal.loading}
+                >
+                  <Text
+                    style={{ color: "white", fontWeight: "bold", fontSize: 16 }}
+                  >
+                    Cancel
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+        {/* Logout modal */}
         <Modal
           visible={showLogoutModal}
           transparent
@@ -486,7 +737,7 @@ export default function MyForms() {
                   color: "#222",
                 }}
               >
-                Sesión cerrada por inactividad
+                Session closed due to inactivity
               </Text>
               <Text
                 style={{
@@ -496,8 +747,7 @@ export default function MyForms() {
                   textAlign: "center",
                 }}
               >
-                Por seguridad, la sesión se cerró automáticamente tras 2 minutos
-                sin actividad.
+                For security, your session was closed automatically after 2 minutes of inactivity.
               </Text>
               <TouchableOpacity
                 style={{
@@ -515,7 +765,7 @@ export default function MyForms() {
                 <Text
                   style={{ color: "white", fontWeight: "bold", fontSize: 18 }}
                 >
-                  Ir al inicio de sesión
+                  Go to login
                 </Text>
               </TouchableOpacity>
             </View>
@@ -527,168 +777,173 @@ export default function MyForms() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, backgroundColor: "#f7fafc" },
   header: {
-    fontSize: width * 0.06,
+    fontSize: 24,
     fontWeight: "bold",
-    marginBottom: height * 0.02,
-    color: "#4B34C7",
+    color: "#fff",
+    marginBottom: 16,
+    marginTop: 32,
     textAlign: "center",
-    letterSpacing: 0.5,
-    textShadowColor: "#12A0AF22",
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
-  },
-  noFormsText: {
-    fontSize: width * 0.045,
-    color: "#12A0AF",
-    textAlign: "center",
-    fontStyle: "italic",
-    marginVertical: 16,
   },
   formsScrollWrapper: {
     flex: 1,
-    marginHorizontal: width * 0.03,
-    marginTop: 12,
-    marginBottom: 0,
-    borderRadius: width * 0.035,
-    overflow: "hidden",
-    maxHeight: height - (height * 0.07 + height * 0.1),
-    backgroundColor: "#fff",
-    borderWidth: 1.5,
-    borderColor: "#12A0AF",
-    shadowColor: "#4B34C7",
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 8,
-    minHeight: height * 0.5,
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 16,
+    paddingBottom: 32,
   },
   formCardWrapper: {
-    marginBottom: height * 0.018,
-    borderRadius: width * 0.035,
-    overflow: "visible",
-    shadowColor: "#12A0AF",
-    shadowOpacity: 0.13,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 8,
-    backgroundColor: "transparent",
-    marginTop: 10,
-    marginLeft: 10,
-    marginRight: 10,
-    minWidth: width * 0.85,
-    maxWidth: width * 0.95,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    marginBottom: 16,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(0, 0, 0, 0.1)",
   },
   formCard: {
-    backgroundColor: "#f7fafc",
-    borderRadius: width * 0.035,
-    padding: width * 0.04,
-    borderWidth: 1.5,
-    borderColor: "#4B34C7",
-    minWidth: width * 0.8,
-    maxWidth: width * 0.95,
+    padding: 16,
   },
   formText: {
-    fontSize: width * 0.05,
-    fontWeight: "bold",
-    color: "#12A0AF",
-    marginBottom: 2,
-    letterSpacing: 0.2,
+    fontSize: 14,
+    color: "#666",
+    marginBottom: 8,
   },
   formTitle: {
-    fontSize: width * 0.045,
+    fontSize: 18,
     fontWeight: "bold",
-    color: "#4B34C7",
-    marginBottom: 2,
-    letterSpacing: 0.2,
+    color: "#333",
+    marginBottom: 4,
   },
   formDescription: {
-    fontSize: width * 0.04,
-    color: "#12A0AF",
-    marginBottom: 4,
-    fontStyle: "italic",
+    fontSize: 14,
+    color: "#666",
+    marginBottom: 12,
   },
   formMeta: {
-    fontSize: width * 0.038,
-    color: "#222",
-    marginBottom: 2,
+    fontSize: 12,
+    color: "#999",
+    marginBottom: 12,
   },
   viewResponsesButton: {
     backgroundColor: "#4B34C7",
-    paddingVertical: 7,
-    paddingHorizontal: 16,
     borderRadius: 8,
-    marginLeft: 8,
-    alignSelf: "flex-start",
-    shadowColor: "#12A0AF",
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-    marginTop: 6,
-    marginBottom: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    alignItems: "center",
+    marginBottom: 8,
   },
   viewResponsesButtonText: {
     color: "#fff",
     fontWeight: "bold",
-    fontSize: 13,
-    letterSpacing: 0.2,
   },
   responsesContainer: {
-    marginTop: 10,
-    backgroundColor: "#e6fafd",
+    backgroundColor: "#f9f9f9",
     borderRadius: 8,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: "#12A0AF44",
-    minHeight: 40,
+    padding: 16,
     maxHeight: height * 0.4,
   },
-  diligCard: {
-    backgroundColor: "#fff",
-    borderRadius: 6,
-    padding: 10,
-    marginBottom: 10,
-    borderColor: "#12A0AF",
-    borderWidth: 1,
-    shadowColor: "#4B34C7",
-    shadowOpacity: 0.07,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-    minWidth: width * 0.7,
-    maxWidth: width * 0.93,
+  diligentCard: {
+    // Remove backgroundColor, border, marginBottom here if present
+    // They are now set inline above for each submission
+    // ...existing code...
+    // Add only if you want a default padding for all, otherwise keep empty
   },
-  diligHeader: {
+  diligentHeader: {
+    fontSize: 16,
     fontWeight: "bold",
-    fontSize: 15,
-    marginBottom: 2,
-    color: "#4B34C7",
+    color: "#333",
+    marginBottom: 8,
   },
-  diligMeta: {
-    fontSize: 13,
-    color: "#12A0AF",
-    marginBottom: 2,
+  diligentMeta: {
+    fontSize: 12,
+    color: "#999",
+    marginBottom: 8,
+  },
+  noFormsText: {
+    textAlign: "center",
+    color: "#999",
+    fontSize: 16,
+    marginTop: 32,
+  },
+  noResponsesText: {
+    textAlign: "center",
+    color: "#999",
+    fontSize: 14,
+    marginTop: 16,
   },
   noAnswersText: {
-    fontSize: 13,
-    color: "#888",
-    fontStyle: "italic",
-    marginVertical: 4,
+    textAlign: "center",
+    color: "#999",
+    fontSize: 14,
+    marginTop: 8,
   },
-  reconsiderButton: {
-    marginTop: 10,
-    backgroundColor: "#fbbf24",
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 18,
+  modalBackground: {
+    flex: 1,
+    justifyContent: "center",
     alignItems: "center",
-    alignSelf: "flex-end",
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
   },
-  reconsiderButtonText: {
+  modalContainer: {
+    width: width * 0.9,
+    maxWidth: 400,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 24,
+    alignItems: "center",
+    elevation: 4,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#333",
+    marginBottom: 16,
+    textAlign: "center",
+  },
+  modalMessage: {
+    fontSize: 14,
+    color: "#666",
+    marginBottom: 24,
+    textAlign: "center",
+  },
+  modalButton: {
+    backgroundColor: "#4B34C7",
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: "center",
+    flex: 1,
+    marginHorizontal: 4,
+  },
+  modalButtonText: {
     color: "#fff",
     fontWeight: "bold",
+    fontSize: 16,
+  },
+  cancelButton: {
+    backgroundColor: "#ccc",
+  },
+  reconsiderationInput: {
+    width: "100%",
+    maxHeight: 120,
+    borderColor: "#ccc",
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
     fontSize: 14,
+    color: "#333",
+    marginBottom: 12,
+    textAlignVertical: "top",
+  },
+  reconsiderationError: {
+    color: "#ef4444",
+    fontSize: 12,
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  modalButtonsContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    width: "100%",
   },
 });
