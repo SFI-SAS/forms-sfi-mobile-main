@@ -137,15 +137,19 @@ export function Main() {
     return () => unsubscribe();
   }, [router, isOffline]);
 
+  // Cambia el manejo de tokens para soportar múltiples usuarios
+  // Clave para guardar tokens por usuario
+  const TOKENS_KEY = "user_tokens"; // { [email]: { password, token } }
+
   const handleLogin = async () => {
     let newErrors = {};
     if (!username.trim()) {
-      newErrors.username = "El email es requerido.";
+      newErrors.username = "Email is required.";
     } else if (!isValidEmail(username)) {
-      newErrors.username = "Por favor ingresa un email válido.";
+      newErrors.username = "Please enter a valid email.";
     }
     if (!password.trim()) {
-      newErrors.password = "La contraseña es requerida.";
+      newErrors.password = "Password is required.";
     }
     setErrors(newErrors);
 
@@ -155,18 +159,32 @@ export function Main() {
 
     try {
       if (isOffline) {
-        const offlineToken = await AsyncStorage.getItem("authToken");
-        const offlineForms = await AsyncStorage.getItem("offline_forms");
-        if (offlineToken && offlineForms) {
-          Alert.alert("Modo Offline", "Iniciaste sesión sin conexión.");
-          await AsyncStorage.setItem("isLoggedOut", "false"); // Mark the session as logged in
-          router.push("/home"); // Navigate to Home
+        // --- OFFLINE LOGIN ---
+        const tokensRaw = await AsyncStorage.getItem(TOKENS_KEY);
+        const tokens = tokensRaw ? JSON.parse(tokensRaw) : {};
+        console.log("🔍 [OFFLINE] Tokens in storage:", tokens);
+        const userEntry = tokens[username.toLowerCase()];
+        console.log(
+          "🔍 [OFFLINE] Entry for user:",
+          username.toLowerCase(),
+          userEntry
+        );
+        if (userEntry && userEntry.password === password && userEntry.token) {
+          Alert.alert("Offline Mode", "Logged in without connection.");
+          await AsyncStorage.setItem("isLoggedOut", "false");
+          await AsyncStorage.setItem("authToken", userEntry.token);
+          console.log(
+            "✅ [OFFLINE] Login success, token set:",
+            userEntry.token
+          );
+          router.push("/home");
           return;
         } else {
           Alert.alert(
             "Error",
-            "No tienes un token guardado o datos guardados para acceder sin internet."
+            "No saved token or credentials for this user. Please log in online at least once."
           );
+          console.log("❌ [OFFLINE] No matching token for user/password.");
           return;
         }
       }
@@ -182,9 +200,7 @@ export function Main() {
         client_id: "",
         client_secret: "",
       });
-      console.log(params);
 
-      // El endpoint /auth/token espera POST con application/x-www-form-urlencoded y los campos grant_type, username, password, scope, client_id, client_secret
       const response = await fetch(`${backendUrlToUse}/auth/token`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -193,30 +209,45 @@ export function Main() {
 
       if (!response.ok) {
         const errorText = await response.text();
+        console.log("❌ [ONLINE] Error response from /auth/token:", errorText);
         throw new Error(errorText);
       }
 
       const text = await response.text();
 
       if (text.trim().startsWith("<!DOCTYPE html>")) {
-        console.error("Respuesta HTML recibida:", text);
-        throw new Error(
-          "Error de conexión con el servidor. Por favor, inténtalo más tarde."
-        );
+        console.log("❌ [ONLINE] HTML response from /auth/token:", text);
+        throw new Error("Server connection error. Please try again later.");
       }
 
       let json;
       try {
         json = JSON.parse(text);
       } catch (parseError) {
-        console.error("Error parseando JSON, respuesta recibida:", text);
-        throw new Error("La respuesta del servidor no es un JSON válido.");
+        console.log("❌ [ONLINE] JSON parse error:", text);
+        throw new Error("Server response is not valid JSON.");
       }
 
       const token = json.access_token;
+      console.log("✅ [ONLINE] Received token:", token);
 
+      // Guarda el token en la sesión actual
       await AsyncStorage.setItem("authToken", token);
       await AsyncStorage.setItem("isLoggedOut", "false");
+
+      // Guarda el token en el mapa de usuarios para login offline
+      const tokensRaw = await AsyncStorage.getItem(TOKENS_KEY);
+      const tokens = tokensRaw ? JSON.parse(tokensRaw) : {};
+      tokens[username.toLowerCase()] = {
+        password,
+        token,
+      };
+      await AsyncStorage.setItem(TOKENS_KEY, JSON.stringify(tokens));
+      console.log(
+        "💾 [ONLINE] Saved token for user:",
+        username.toLowerCase(),
+        tokens[username.toLowerCase()]
+      );
 
       // Validar el token usando GET
       const responseUser = await fetch(
@@ -229,31 +260,42 @@ export function Main() {
 
       if (!responseUser.ok) {
         const errorUserText = await responseUser.text();
+        console.log("❌ [ONLINE] Error validating token:", errorUserText);
         throw new Error(errorUserText);
       }
 
       const userData = await responseUser.json();
       setUserData(userData);
-      await AsyncStorage.setItem("isLoggedOut", "false"); // Mark the session as logged in
-      console.log("✅ Token guardado correctamente.");
-      console.log("✅ Navigating to Home");
+      await AsyncStorage.setItem("isLoggedOut", "false");
+      console.log("✅ [ONLINE] User validated, navigating to home.");
+      // Guarda también la info de usuario para offline
+      const userInfoKey = `user_info_${username.toLowerCase()}`;
+      await AsyncStorage.setItem(
+        userInfoKey,
+        JSON.stringify({
+          ...userData,
+          username,
+          password,
+          token,
+        })
+      );
+      console.log("💾 [ONLINE] Saved user info for offline:", userInfoKey);
+
       router.push({
         pathname: "/home",
         params: { name: userData.name, email: userData.email },
-      }); // Navigate to Home
+      });
 
-      // Cache user credentials for offline login
+      // Opcional: puedes guardar el usuario y contraseña para autocompletar
       await AsyncStorage.setItem("username", username);
       await AsyncStorage.setItem("password", password);
-
-      console.log(userData);
     } catch (error) {
-      console.error("❌ API error:", error);
+      console.log("❌ [LOGIN ERROR]", error);
       Alert.alert(
-        "Error al iniciar sesión",
+        "Login Error",
         error.message?.includes("Method Not Allowed")
-          ? "El endpoint /auth/token no permite POST. Consulta con el administrador del sistema."
-          : "Verifique su usuario y contraseña."
+          ? "The /auth/token endpoint does not allow POST. Contact your system administrator."
+          : "Check your username and password."
       );
     }
   };
@@ -421,8 +463,14 @@ export function Main() {
             style={styles.button}
             disabled={!backendUrlSet}
           >
-            <Text style={styles.buttonText}>
-              {isOffline ? "Iniciar en Modo Offline" : "Iniciar Sesión"}
+            <Text
+              style={styles.buttonText}
+              numberOfLines={1}
+              adjustsFontSizeToFit={true}
+              minimumFontScale={0.8}
+              ellipsizeMode="clip"
+            >
+              {isOffline ? "Sign in Offline Mode" : "Sign In"}
             </Text>
           </TouchableOpacity>
         </View>

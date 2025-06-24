@@ -92,7 +92,6 @@ const UserCard = ({ userInfo, isOffline, loadingUser, spinAnimUser }) => (
             </Text>
           </View>
         ) : (
-          // Mostrar la información del usuario en columnas (una debajo de la otra)
           <View style={styles.userInfoColumn}>
             <View style={styles.userInfoRow}>
               <Text style={styles.userInfoLabelGreen}>Email: </Text>
@@ -120,14 +119,20 @@ const UserCard = ({ userInfo, isOffline, loadingUser, spinAnimUser }) => (
         )}
       </View>
       <View style={styles.statusPillWrapper}>
-        <Text
-          style={[
-            styles.statusPill,
-            isOffline ? styles.statusOffline : styles.statusOnline,
-          ]}
-        >
-          {isOffline ? "Offline" : "Online"}
-        </Text>
+        <View style={styles.statusPillBox}>
+          <Text
+            style={[
+              styles.statusPill,
+              isOffline ? styles.statusOffline : styles.statusOnline,
+            ]}
+            numberOfLines={1}
+            ellipsizeMode="clip"
+            adjustsFontSizeToFit={true}
+            minimumFontScale={0.7}
+          >
+            {isOffline ? "Offline" : "Online"}
+          </Text>
+        </View>
       </View>
     </View>
   </LinearGradient>
@@ -949,6 +954,13 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
     justifyContent: "flex-start",
     marginLeft: 8,
+    maxWidth: width * 0.22,
+  },
+  statusPillBox: {
+    minWidth: width * 0.13,
+    maxWidth: width * 0.22,
+    alignItems: "center",
+    justifyContent: "center",
   },
   statusPill: {
     fontSize: width * 0.032,
@@ -960,6 +972,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 2,
     color: "#fff",
+    width: "100%",
   },
   statusOnline: {
     backgroundColor: "#22c55e",

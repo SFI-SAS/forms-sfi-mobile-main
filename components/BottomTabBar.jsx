@@ -114,6 +114,9 @@ function TabBarButton({ icon, label, active, onPress, danger, last }) {
           danger && styles.tabBarLabelDanger,
         ]}
         numberOfLines={1}
+        adjustsFontSizeToFit={true}
+        minimumFontScale={0.8}
+        ellipsizeMode="clip"
       >
         {label}
       </Text>
@@ -148,7 +151,7 @@ const styles = StyleSheet.create({
     flexDirection: "column",
     marginHorizontal: 2,
     minWidth: width * 0.15,
-    maxWidth: width * 0.19,
+    maxWidth: width * 0.22, // Increase maxWidth for more space
   },
   tabBarButtonActive: {
     backgroundColor: "#4B34C722",
@@ -169,9 +172,11 @@ const styles = StyleSheet.create({
     resizeMode: "contain",
   },
   tabBarLabel: {
-    fontSize: width * 0.032,
+    fontSize: width * 0.034, // Slightly larger for readability
     color: "#4B34C7",
     fontWeight: "bold",
+    width: "100%",
+    textAlign: "center",
   },
   tabBarLabelActive: {
     color: "#12A0AF",
