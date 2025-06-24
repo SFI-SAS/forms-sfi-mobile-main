@@ -20,6 +20,7 @@ import { LinearGradient } from "expo-linear-gradient";
 const { width, height } = Dimensions.get("window");
 const RESPONSES_OFFLINE_KEY = "responses_with_answers_offline";
 const RESPONSES_DETAIL_OFFLINE_KEY = "responses_detail_offline"; // NUEVO
+const MY_FORMS_OFFLINE_KEY = "my_forms_offline"; // NUEVO
 
 export default function MyForms() {
   const [forms, setForms] = useState([]);
@@ -60,99 +61,84 @@ export default function MyForms() {
     setLoading(true);
     try {
       const accessToken = await AsyncStorage.getItem("authToken");
-      if (!accessToken) {
+      let formsList = [];
+      let grouped = {};
+
+      // 1. Intentar cargar de AsyncStorage primero
+      const offlineDataRaw = await AsyncStorage.getItem(MY_FORMS_OFFLINE_KEY);
+      let offlineData = offlineDataRaw ? JSON.parse(offlineDataRaw) : null;
+
+      if (!accessToken && offlineData) {
+        // Sin token, solo mostrar offline
+        setForms(offlineData.formsList || []);
+        setResponsesByForm(offlineData.grouped || {});
         setLoading(false);
         return;
       }
 
-      // 1. Obtener la lista de formularios asignados al usuario
-      const formsRes = await fetch(
-        "https://api-forms-sfi.service.saferut.com/forms/users/form_by_user",
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${accessToken}` },
-        }
-      );
-      const formsData = await formsRes.json();
-      if (!Array.isArray(formsData)) {
-        setForms([]);
-        setResponsesByForm({});
-        setLoading(false);
-        Alert.alert(
-          "Error",
-          "No se pudieron cargar los formularios asignados."
-        );
-        return;
-      }
-
-      // 2. Para cada formulario, obtener sus respuestas (si existen)
-      const grouped = {};
-      const formsList = [];
-      for (const form of formsData) {
+      // 2. Si hay token, intentar cargar online
+      let onlineOk = false;
+      if (accessToken) {
         try {
-          const res = await fetch(
-            `https://api-forms-sfi.service.saferut.com/responses/get_responses/?form_id=${form.id}`,
+          // 1. Obtener la lista de formularios asignados al usuario
+          const formsRes = await fetch(
+            "https://api-forms-sfi.service.saferut.com/forms/users/form_by_user",
             {
               method: "GET",
               headers: { Authorization: `Bearer ${accessToken}` },
             }
           );
-          const responses = await res.json();
-          // Solo agrega el formulario si tiene respuestas
-          if (Array.isArray(responses) && responses.length > 0) {
-            grouped[form.id] = responses;
-            formsList.push({
-              id: form.id,
-              form_title: form.title || "Sin título",
-              form_description: form.description || "",
-              submitted_by: responses[0]?.submitted_by || {},
-            });
+          const formsData = await formsRes.json();
+          if (!Array.isArray(formsData)) {
+            throw new Error("No se pudieron cargar los formularios asignados.");
           }
-        } catch (e) {
-          // Si falla la consulta de respuestas, ignora ese formulario
-        }
-      }
 
-      setResponsesByForm(grouped);
-      setForms(formsList);
-
-      // DEBUG: Mostrar forms y grouped en el state
-      setTimeout(() => {
-        console.log("📋 State forms:", formsList);
-        console.log("📋 State grouped:", grouped);
-      }, 1000);
-
-      // NUEVO: Cargar detalles de respuestas por form_id usando el endpoint correcto
-      const detailStored = await AsyncStorage.getItem(
-        RESPONSES_DETAIL_OFFLINE_KEY
-      );
-      let detailData = detailStored ? JSON.parse(detailStored) : {};
-
-      for (const form of formsList) {
-        if (!detailData[form.id]) {
-          try {
-            // Usa el endpoint con query param form_id
-            const res = await fetch(
-              `https://api-forms-sfi.service.saferut.com/responses/get_responses/?form_id=${form.id}`,
-              {
-                method: "GET",
-                headers: { Authorization: `Bearer ${accessToken}` },
+          grouped = {};
+          formsList = [];
+          for (const form of formsData) {
+            try {
+              const res = await fetch(
+                `https://api-forms-sfi.service.saferut.com/responses/get_responses/?form_id=${form.id}`,
+                {
+                  method: "GET",
+                  headers: { Authorization: `Bearer ${accessToken}` },
+                }
+              );
+              const responses = await res.json();
+              if (Array.isArray(responses) && responses.length > 0) {
+                grouped[form.id] = responses;
+                formsList.push({
+                  id: form.id,
+                  form_title: form.title || "Sin título",
+                  form_description: form.description || "",
+                  submitted_by: responses[0]?.submitted_by || {},
+                });
               }
-            );
-            const detailResp = await res.json();
-            if (Array.isArray(detailResp)) {
-              detailData[form.id] = detailResp;
+            } catch (e) {
+              // Si falla la consulta de respuestas, ignora ese formulario
             }
-          } catch (e) {
-            // Si falla online, ignora y sigue
           }
+
+          setResponsesByForm(grouped);
+          setForms(formsList);
+
+          // Guardar en AsyncStorage para alta disponibilidad offline
+          await AsyncStorage.setItem(
+            MY_FORMS_OFFLINE_KEY,
+            JSON.stringify({ formsList, grouped })
+          );
+          onlineOk = true;
+        } catch (err) {
+          // Si falla online, intenta cargar offline
+          onlineOk = false;
         }
       }
-      setResponsesDetail(detailData);
-      await AsyncStorage.setItem(
-        RESPONSES_DETAIL_OFFLINE_KEY,
-        JSON.stringify(detailData)
-      );
+
+      // 3. Si no se pudo cargar online, intenta cargar offline
+      if (!onlineOk && offlineData) {
+        setForms(offlineData.formsList || []);
+        setResponsesByForm(offlineData.grouped || {});
+      }
     } catch (error) {
       console.error("❌ Error al cargar formularios enviados:", error);
       setForms([]);
