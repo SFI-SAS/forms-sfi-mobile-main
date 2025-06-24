@@ -78,6 +78,12 @@ const saveCompletedFormAnswers = async ({
   }
 };
 
+const BACKEND_URL_KEY = "backend_url";
+const getBackendUrl = async () => {
+  const stored = await AsyncStorage.getItem(BACKEND_URL_KEY);
+  return stored || "";
+};
+
 export default function FormatScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams(); // Recibir el ID del formulario como parámetro
@@ -408,14 +414,12 @@ export default function FormatScreen() {
 
         await new Promise((resolve) => setTimeout(resolve, 50));
 
-        const res = await fetch(
-          `https://api-forms-sfi.service.saferut.com/responses/save-answers/`,
-          {
-            method: "POST",
-            headers: requestOptions.headers,
-            body: JSON.stringify(responseData),
-          }
-        );
+        const backendUrl = await getBackendUrl();
+        const res = await fetch(`${backendUrl}/responses/save-answers/`, {
+          method: "POST",
+          headers: requestOptions.headers,
+          body: JSON.stringify(responseData),
+        });
 
         const responseJson = await res.json();
         console.log("🟢 Respuesta de save-answers:", responseJson);
@@ -433,9 +437,8 @@ export default function FormatScreen() {
               answer_id: responseJson.answer.answer_id,
               serial: fileSerials[answer.question_id],
             };
-            console.log("🔗 Asociando serial al answer:", serialPayload);
             const serialRes = await fetch(
-              "https://api-forms-sfi.service.saferut.com/responses/file-serials/",
+              `${backendUrl}/responses/file-serials/`,
               {
                 method: "POST",
                 headers: requestOptions.headers,
@@ -465,7 +468,7 @@ export default function FormatScreen() {
     try {
       const token = await AsyncStorage.getItem("authToken");
       if (!token) throw new Error("No authentication token found");
-
+      const backendUrl = await getBackendUrl();
       // Preparar todas las respuestas
       const allAnswers = [];
       console.log("📋 Preparando respuestas para cada pregunta...");
@@ -659,7 +662,7 @@ export default function FormatScreen() {
       // Crear registro de respuesta y obtener response_id
       console.log("📡 Creando registro de respuesta...");
       const saveResponseRes = await fetch(
-        `https://api-forms-sfi.service.saferut.com/responses/save-response/${id}?mode=${mode}`,
+        `${backendUrl}/responses/save-response/${id}?mode=${mode}`,
         {
           method: "POST",
           headers: requestOptions.headers,
@@ -788,6 +791,7 @@ export default function FormatScreen() {
     try {
       const token = await AsyncStorage.getItem("authToken");
       if (!token) throw new Error("No authentication token found");
+      const backendUrl = await getBackendUrl();
       const mode = await NetInfo.fetch().then((state) =>
         state.isConnected ? "online" : "offline"
       );
@@ -1075,7 +1079,7 @@ export default function FormatScreen() {
 
       // Crear registro de respuesta y obtener response_id
       const saveResponseRes = await fetch(
-        `https://api-forms-sfi.service.saferut.com/responses/save-response/${id}`,
+        `${backendUrl}/responses/save-response/${id}`,
         {
           method: "POST",
           headers: requestOptions.headers,
@@ -1164,10 +1168,11 @@ export default function FormatScreen() {
     try {
       const isOnline = await NetInfo.fetch().then((state) => state.isConnected);
       let serial = "";
+      const backendUrl = await getBackendUrl();
       if (isOnline) {
         const token = await AsyncStorage.getItem("authToken");
         const res = await fetch(
-          "https://api-forms-sfi.service.saferut.com/responses/file-serials/generate",
+          `${backendUrl}/responses/file-serials/generate`,
           {
             method: "POST",
             headers: {

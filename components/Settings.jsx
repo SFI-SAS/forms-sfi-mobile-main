@@ -42,7 +42,7 @@ export default function Settings() {
         onChangeText={setInput}
         autoCapitalize="none"
         autoCorrect={false}
-        placeholder="https://api-forms-sfi.service.saferut.com"
+        placeholder="https://your-api-safemetrics.com"
       />
       <TouchableOpacity style={styles.button} onPress={handleSave}>
         <Text style={styles.buttonText}>Save</Text>

@@ -21,6 +21,11 @@ const { width, height } = Dimensions.get("window");
 const RESPONSES_OFFLINE_KEY = "responses_with_answers_offline";
 const RESPONSES_DETAIL_OFFLINE_KEY = "responses_detail_offline"; // NUEVO
 const MY_FORMS_OFFLINE_KEY = "my_forms_offline"; // NUEVO
+const BACKEND_URL_KEY = "backend_url";
+const getBackendUrl = async () => {
+  const stored = await AsyncStorage.getItem(BACKEND_URL_KEY);
+  return stored || "";
+};
 
 export default function MyForms() {
   const [forms, setForms] = useState([]);
@@ -69,7 +74,6 @@ export default function MyForms() {
       let offlineData = offlineDataRaw ? JSON.parse(offlineDataRaw) : null;
 
       if (!accessToken && offlineData) {
-        // Sin token, solo mostrar offline
         setForms(offlineData.formsList || []);
         setResponsesByForm(offlineData.grouped || {});
         setLoading(false);
@@ -80,9 +84,10 @@ export default function MyForms() {
       let onlineOk = false;
       if (accessToken) {
         try {
+          const backendUrl = await getBackendUrl();
           // 1. Obtener la lista de formularios asignados al usuario
           const formsRes = await fetch(
-            "https://api-forms-sfi.service.saferut.com/forms/users/form_by_user",
+            `${backendUrl}/forms/users/form_by_user`,
             {
               method: "GET",
               headers: { Authorization: `Bearer ${accessToken}` },
@@ -98,7 +103,7 @@ export default function MyForms() {
           for (const form of formsData) {
             try {
               const res = await fetch(
-                `https://api-forms-sfi.service.saferut.com/responses/get_responses/?form_id=${form.id}`,
+                `${backendUrl}/responses/get_responses/?form_id=${form.id}`,
                 {
                   method: "GET",
                   headers: { Authorization: `Bearer ${accessToken}` },
@@ -211,14 +216,8 @@ export default function MyForms() {
         }));
         return;
       }
-      // DEBUG: log de request
-      console.log("🔵 Enviando reconsideración:", {
-        response_id: reconsiderModal.responseId,
-        mensaje_reconsideracion: reconsiderModal.message,
-      });
-
-      // El backend espera el mensaje como parámetro de query, no en el body
-      const url = `https://api-forms-sfi.service.saferut.com/responses/set_reconsideration/${reconsiderModal.responseId}?mensaje_reconsideracion=${encodeURIComponent(
+      const backendUrl = await getBackendUrl();
+      const url = `${backendUrl}/responses/set_reconsideration/${reconsiderModal.responseId}?mensaje_reconsideracion=${encodeURIComponent(
         reconsiderModal.message
       )}`;
 
@@ -228,7 +227,6 @@ export default function MyForms() {
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
-        // body: JSON.stringify({ mensaje_reconsideracion: reconsiderModal.message }), // NO ENVIAR BODY
       });
       let data;
       try {
@@ -236,11 +234,7 @@ export default function MyForms() {
       } catch (e) {
         data = {};
       }
-      // DEBUG: log de respuesta
-      console.log("🟢 Respuesta reconsideración:", data);
-
       if (!res.ok) {
-        // Si el backend responde con un array de errores, muéstralo
         let msg = "No se pudo solicitar la reconsideración. Intenta de nuevo.";
         if (data?.detail) {
           if (Array.isArray(data.detail)) {
@@ -269,7 +263,6 @@ export default function MyForms() {
         "Reconsideración enviada",
         "Tu solicitud de reconsideración fue enviada correctamente."
       );
-      // Opcional: recargar formularios para actualizar estado
       handleViewForms();
     } catch (error) {
       console.error("❌ Error en reconsideración:", error);
@@ -608,7 +601,8 @@ export default function MyForms() {
                   textAlign: "center",
                 }}
               >
-                Write the reason for your reconsideration request for this rejected form.
+                Write the reason for your reconsideration request for this
+                rejected form.
               </Text>
               <TextInput
                 style={{
@@ -733,7 +727,8 @@ export default function MyForms() {
                   textAlign: "center",
                 }}
               >
-                For security, your session was closed automatically after 2 minutes of inactivity.
+                For security, your session was closed automatically after 2
+                minutes of inactivity.
               </Text>
               <TouchableOpacity
                 style={{

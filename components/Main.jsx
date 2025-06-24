@@ -33,12 +33,9 @@ function encodeFormData(data) {
 }
 
 const BACKEND_URL_KEY = "backend_url";
-const DEFAULT_BACKEND_URL = "https://api-forms-sfi.service.saferut.com";
-
-// Utilidad para obtener la URL base del backend
 const getBackendUrl = async () => {
   const stored = await AsyncStorage.getItem(BACKEND_URL_KEY);
-  return stored || DEFAULT_BACKEND_URL;
+  return stored || "";
 };
 
 export function Main() {
@@ -49,10 +46,12 @@ export function Main() {
   const [userData, setUserData] = useState(null); // Estado para guardar los datos del usuario
   const [showPassword, setShowPassword] = useState(false); // Estado para mostrar/ocultar contraseña
   const [errors, setErrors] = useState({}); // Estado para errores visuales
-  const [backendUrl, setBackendUrl] = useState(DEFAULT_BACKEND_URL);
+  const [backendUrl, setBackendUrl] = useState("");
   const [showBackendModal, setShowBackendModal] = useState(false);
   const [backendInput, setBackendInput] = useState("");
   const [backendUrlSet, setBackendUrlSet] = useState(false);
+  const [showBackendError, setShowBackendError] = useState(false);
+  const [backendErrorMsg, setBackendErrorMsg] = useState("");
 
   // Solo pregunta la primera vez
   useEffect(() => {
@@ -96,8 +95,9 @@ export function Main() {
 
         // Solo permite acceso automático si isLoggedOut !== "true"
         if (savedToken && isLoggedOut !== "true") {
+          const backendUrlToUse = await getBackendUrl();
           const responseUser = await fetch(
-            `https://api-forms-sfi.service.saferut.com/auth/validate-token`,
+            `${backendUrlToUse}/auth/validate-token`,
             {
               method: "GET",
               headers: { Authorization: `Bearer ${savedToken}` },
@@ -162,29 +162,18 @@ export function Main() {
         // --- OFFLINE LOGIN ---
         const tokensRaw = await AsyncStorage.getItem(TOKENS_KEY);
         const tokens = tokensRaw ? JSON.parse(tokensRaw) : {};
-        console.log("🔍 [OFFLINE] Tokens in storage:", tokens);
         const userEntry = tokens[username.toLowerCase()];
-        console.log(
-          "🔍 [OFFLINE] Entry for user:",
-          username.toLowerCase(),
-          userEntry
-        );
         if (userEntry && userEntry.password === password && userEntry.token) {
           Alert.alert("Offline Mode", "Logged in without connection.");
           await AsyncStorage.setItem("isLoggedOut", "false");
           await AsyncStorage.setItem("authToken", userEntry.token);
-          console.log(
-            "✅ [OFFLINE] Login success, token set:",
-            userEntry.token
-          );
           router.push("/home");
           return;
         } else {
-          Alert.alert(
-            "Error",
-            "No saved token or credentials for this user. Please log in online at least once."
-          );
-          console.log("❌ [OFFLINE] No matching token for user/password.");
+          setErrors({
+            password:
+              "No saved token or credentials for this user. Please log in online at least once.",
+          });
           return;
         }
       }
@@ -201,35 +190,65 @@ export function Main() {
         client_secret: "",
       });
 
-      const response = await fetch(`${backendUrlToUse}/auth/token`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: params,
-      });
+      let response;
+      try {
+        response = await fetch(`${backendUrlToUse}/auth/token`, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: params,
+        });
+      } catch (fetchError) {
+        // Error de red/fetch
+        setBackendErrorMsg(
+          "Could not connect to the backend. Please check the URL or your connection."
+        );
+        setShowBackendError(true);
+        return;
+      }
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.log("❌ [ONLINE] Error response from /auth/token:", errorText);
-        throw new Error(errorText);
+        // Detectar error de red (sin conexión real)
+        if (
+          errorText.includes("Failed to fetch") ||
+          errorText.includes("Network request failed") ||
+          errorText.includes("ENOTFOUND") ||
+          errorText.includes("timeout") ||
+          errorText.includes("NetworkError")
+        ) {
+          setBackendErrorMsg(
+            "Could not connect to the backend. Please check the URL or your connection."
+          );
+          setShowBackendError(true);
+          return;
+        }
+        // Si es error de usuario/contraseña, mostrar solo ese error
+        setErrors({
+          password: "Incorrect username or password. Please try again.",
+        });
+        return;
       }
 
       const text = await response.text();
 
       if (text.trim().startsWith("<!DOCTYPE html>")) {
-        console.log("❌ [ONLINE] HTML response from /auth/token:", text);
-        throw new Error("Server connection error. Please try again later.");
+        setErrors({
+          password: "Server connection error. Please try again later.",
+        });
+        return;
       }
 
       let json;
       try {
         json = JSON.parse(text);
       } catch (parseError) {
-        console.log("❌ [ONLINE] JSON parse error:", text);
-        throw new Error("Server response is not valid JSON.");
+        setErrors({
+          password: "Server response is not valid JSON.",
+        });
+        return;
       }
 
       const token = json.access_token;
-      console.log("✅ [ONLINE] Received token:", token);
 
       // Guarda el token en la sesión actual
       await AsyncStorage.setItem("authToken", token);
@@ -243,32 +262,35 @@ export function Main() {
         token,
       };
       await AsyncStorage.setItem(TOKENS_KEY, JSON.stringify(tokens));
-      console.log(
-        "💾 [ONLINE] Saved token for user:",
-        username.toLowerCase(),
-        tokens[username.toLowerCase()]
-      );
 
       // Validar el token usando GET
-      const responseUser = await fetch(
-        `${backendUrlToUse}/auth/validate-token`,
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
+      let responseUser;
+      try {
+        responseUser = await fetch(
+          `${backendUrlToUse}/auth/validate-token`,
+          {
+            method: "GET",
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
+      } catch (fetchError) {
+        setBackendErrorMsg(
+          "Could not connect to the backend. Please check the URL or your connection."
+        );
+        setShowBackendError(true);
+        return;
+      }
 
       if (!responseUser.ok) {
-        const errorUserText = await responseUser.text();
-        console.log("❌ [ONLINE] Error validating token:", errorUserText);
-        throw new Error(errorUserText);
+        setErrors({
+          password: "Could not validate user session. Please try again.",
+        });
+        return;
       }
 
       const userData = await responseUser.json();
       setUserData(userData);
       await AsyncStorage.setItem("isLoggedOut", "false");
-      console.log("✅ [ONLINE] User validated, navigating to home.");
-      // Guarda también la info de usuario para offline
       const userInfoKey = `user_info_${username.toLowerCase()}`;
       await AsyncStorage.setItem(
         userInfoKey,
@@ -279,24 +301,18 @@ export function Main() {
           token,
         })
       );
-      console.log("💾 [ONLINE] Saved user info for offline:", userInfoKey);
 
       router.push({
         pathname: "/home",
         params: { name: userData.name, email: userData.email },
       });
 
-      // Opcional: puedes guardar el usuario y contraseña para autocompletar
       await AsyncStorage.setItem("username", username);
       await AsyncStorage.setItem("password", password);
     } catch (error) {
-      console.log("❌ [LOGIN ERROR]", error);
-      Alert.alert(
-        "Login Error",
-        error.message?.includes("Method Not Allowed")
-          ? "The /auth/token endpoint does not allow POST. Contact your system administrator."
-          : "Check your username and password."
-      );
+      setErrors({
+        password: "Unexpected error. Please try again.",
+      });
     }
   };
 
@@ -364,13 +380,16 @@ export function Main() {
               <Text style={styles.errorText}>{errors.password}</Text>
             )}
           </View>
-          {/* Mostrar solo si la URL no ha sido seteada */}
-          {!backendUrlSet && (
+          {/* Mostrar solo si la URL no ha sido seteada o si hay error de backend */}
+          {(!backendUrlSet || showBackendError) && (
             <Modal
-              visible={showBackendModal}
+              visible={showBackendModal || showBackendError}
               transparent
               animationType="fade"
-              onRequestClose={() => {}}
+              onRequestClose={() => {
+                setShowBackendModal(false);
+                setShowBackendError(false);
+              }}
             >
               <View
                 style={{
@@ -399,8 +418,20 @@ export function Main() {
                       textAlign: "center",
                     }}
                   >
-                    Configura la conexión backend
+                    Configure backend connection
                   </Text>
+                  {showBackendError && (
+                    <Text
+                      style={{
+                        color: "#ef4444",
+                        marginBottom: 8,
+                        textAlign: "center",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      {backendErrorMsg}
+                    </Text>
+                  )}
                   <TextInput
                     style={{
                       borderWidth: 1,
@@ -410,7 +441,7 @@ export function Main() {
                       width: "100%",
                       marginBottom: 10,
                     }}
-                    placeholder="https://api-forms-sfi.service.saferut.com"
+                    placeholder="https://your-api-from-safemetrics.com"
                     value={backendInput}
                     onChangeText={setBackendInput}
                     autoCapitalize="none"
@@ -441,6 +472,7 @@ export function Main() {
                         await AsyncStorage.setItem(BACKEND_URL_KEY, url);
                         setBackendUrlSet(true);
                         setShowBackendModal(false);
+                        setShowBackendError(false);
                       }}
                     >
                       <Text
@@ -450,7 +482,7 @@ export function Main() {
                           fontSize: 16,
                         }}
                       >
-                        Guardar
+                        Save
                       </Text>
                     </TouchableOpacity>
                   </View>

@@ -23,6 +23,11 @@ const { width, height } = Dimensions.get("window");
 const INACTIVITY_TIMEOUT = 10 * 60 * 1000; // 10 minutos
 const PENDING_SAVE_RESPONSE_KEY = "pending_save_response";
 const PENDING_SAVE_ANSWERS_KEY = "pending_save_answers";
+const BACKEND_URL_KEY = "backend_url";
+const getBackendUrl = async () => {
+  const stored = await AsyncStorage.getItem(BACKEND_URL_KEY);
+  return stored || "";
+};
 
 export default function PendingForms() {
   const [pendingForms, setPendingForms] = useState([]);
@@ -126,6 +131,7 @@ export default function PendingForms() {
 
       const token = tokenOverride || (await AsyncStorage.getItem("authToken"));
       if (!token) throw new Error("No authentication token found");
+      const backendUrl = await getBackendUrl();
 
       const requestOptions = {
         headers: {
@@ -159,7 +165,7 @@ export default function PendingForms() {
       let responseId = null;
       if (saveResponseData) {
         const saveResponseRes = await fetch(
-          `https://api-forms-sfi.service.saferut.com/responses/save-response/${form.id}?mode=offline`,
+          `${backendUrl}/responses/save-response/${form.id}?mode=offline`,
           {
             method: "POST",
             headers: requestOptions.headers,
@@ -173,9 +179,8 @@ export default function PendingForms() {
       // 3. Enviar cada respuesta individualmente a save-answers (igual que online)
       if (responseId && saveAnswersData.length > 0) {
         for (const answer of saveAnswersData) {
-          // Enviar cada respuesta con el response_id generado
           const answerRes = await fetch(
-            `https://api-forms-sfi.service.saferut.com/responses/save-answers/`,
+            `${backendUrl}/responses/save-answers/`,
             {
               method: "POST",
               headers: requestOptions.headers,
