@@ -33,6 +33,11 @@ const QUESTIONS_KEY = "offline_questions";
 const FORMS_METADATA_KEY = "offline_forms_metadata";
 const RELATED_ANSWERS_KEY = "offline_related_answers";
 const INACTIVITY_TIMEOUT = 10 * 60 * 1000; // 10 minutos
+const BACKEND_URL_KEY = "backend_url";
+const getBackendUrl = async () => {
+  const stored = await AsyncStorage.getItem(BACKEND_URL_KEY);
+  return stored || "";
+};
 
 // --- COMPONENTES REUTILIZABLES ---
 
@@ -338,9 +343,9 @@ export default function Home({ activeTab, onTabPress }) {
     try {
       const token = await AsyncStorage.getItem("authToken");
       if (!token) throw new Error("No authentication token found");
-
+      const backendUrl = await getBackendUrl();
       const response = await fetch(
-        "https://api-forms-sfi.service.saferut.com/auth/validate-token",
+        `${backendUrl}/auth/validate-token`,
         {
           method: "GET",
           headers: { Authorization: `Bearer ${token}` },
@@ -371,9 +376,10 @@ export default function Home({ activeTab, onTabPress }) {
 
     for (const form of forms) {
       try {
+        const backendUrl = await getBackendUrl();
         // 1. Preguntas del formulario
         const qRes = await fetch(
-          `https://api-forms-sfi.service.saferut.com/forms/${form.id}`,
+          `${backendUrl}/forms/${form.id}`,
           {
             method: "GET",
             headers: {
@@ -417,7 +423,7 @@ export default function Home({ activeTab, onTabPress }) {
           if (question.question_type === "table") {
             try {
               const relRes = await fetch(
-                `https://api-forms-sfi.service.saferut.com/questions/question-table-relation/answers/${question.id}`,
+                `${backendUrl}/questions/question-table-relation/answers/${question.id}`,
                 {
                   method: "GET",
                   headers: { Authorization: `Bearer ${token}` },
@@ -455,9 +461,9 @@ export default function Home({ activeTab, onTabPress }) {
     try {
       const token = await AsyncStorage.getItem("authToken");
       if (!token) throw new Error("No authentication token found");
-
+      const backendUrl = await getBackendUrl();
       const response = await fetch(
-        "https://api-forms-sfi.service.saferut.com/forms/users/form_by_user",
+        `${backendUrl}/forms/users/form_by_user`,
         {
           method: "GET",
           headers: {

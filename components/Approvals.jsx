@@ -20,12 +20,9 @@ const { width, height } = Dimensions.get("window");
 const APPROVALS_OFFLINE_KEY = "approvals_offline";
 const APPROVALS_OFFLINE_ACTIONS_KEY = "approvals_offline_actions"; // NUEVO
 const BACKEND_URL_KEY = "backend_url";
-const DEFAULT_BACKEND_URL = "https://your-safemetrics-api.com";
-
-// Utilidad para obtener la URL base del backend
 const getBackendUrl = async () => {
   const stored = await AsyncStorage.getItem(BACKEND_URL_KEY);
-  return stored || DEFAULT_BACKEND_URL;
+  return stored || "";
 };
 
 export default function Approvals() {
@@ -160,11 +157,12 @@ export default function Approvals() {
       if (actions.length === 0) return;
       const token = await AsyncStorage.getItem("authToken");
       if (!token) return;
+      const backendUrl = await getBackendUrl();
       let remaining = [];
       for (const action of actions) {
         try {
           const res = await fetch(
-            `https://api-forms-sfi.service.saferut.com/forms/update-response-approval/${action.response_id}`,
+            `${backendUrl}/forms/update-response-approval/${action.response_id}`,
             {
               method: "PUT",
               headers: {

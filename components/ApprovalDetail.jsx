@@ -20,6 +20,11 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 const { width, height } = Dimensions.get("window");
 const APPROVALS_OFFLINE_KEY = "approvals_offline";
 const APPROVAL_DETAIL_OFFLINE_KEY = "approval_detail_offline"; // NUEVO
+const BACKEND_URL_KEY = "backend_url";
+const getBackendUrl = async () => {
+  const stored = await AsyncStorage.getItem(BACKEND_URL_KEY);
+  return stored || "";
+};
 
 export default function ApprovalDetail() {
   const { response_id } = useLocalSearchParams();
@@ -75,8 +80,9 @@ export default function ApprovalDetail() {
       // Si no está en memoria, intenta online
       const token = await AsyncStorage.getItem("authToken");
       if (!token) throw new Error("No authentication token found");
+      const backendUrl = await getBackendUrl();
       const res = await fetch(
-        "https://api-forms-sfi.service.saferut.com/forms/user/assigned-forms-with-responses",
+        `${backendUrl}/forms/user/assigned-forms-with-responses`,
         {
           headers: { Authorization: `Bearer ${token}` },
         }
@@ -122,8 +128,9 @@ export default function ApprovalDetail() {
     try {
       const token = await AsyncStorage.getItem("authToken");
       if (!token) throw new Error("No authentication token found");
+      const backendUrl = await getBackendUrl();
       const res = await fetch(
-        `https://api-forms-sfi.service.saferut.com/responses/accept_reconsideration/${response_id}`,
+        `${backendUrl}/responses/accept_reconsideration/${response_id}`,
         {
           method: "PUT",
           headers: { Authorization: `Bearer ${token}` },
