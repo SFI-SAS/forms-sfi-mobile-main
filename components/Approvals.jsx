@@ -116,10 +116,8 @@ export default function Approvals() {
       const key = APPROVALS_OFFLINE_ACTIONS_KEY;
       const stored = await AsyncStorage.getItem(key);
       const arr = stored ? JSON.parse(stored) : [];
-      // El cuerpo debe ser igual al del endpoint
       const now = new Date();
       const reviewed_at = now.toISOString();
-      // Busca el formulario para obtener la secuencia
       const form = allApprovals.find(
         (f) => String(f.response_id) === String(response_id)
       );
@@ -136,14 +134,14 @@ export default function Approvals() {
       });
       await AsyncStorage.setItem(key, JSON.stringify(arr));
       setPendingApprovalActions(arr);
-      console.log("🟠 Acción de aprobación offline guardada:", {
+      console.log("🟠 Offline approval action saved:", {
         response_id,
         action,
         message,
         selectedSequence,
       });
     } catch (e) {
-      console.error("❌ Error guardando acción offline:", e);
+      console.error("❌ Error saving offline action:", e);
     }
   };
 
@@ -198,14 +196,13 @@ export default function Approvals() {
 
   // Botón aprobar/rechazar
   const handleApproveReject = async (item, action) => {
-    const message = ""; // Puedes pedir mensaje si lo deseas
+    const message = "";
     if (isOffline) {
       await saveOfflineApprovalAction(item.response_id, action, message);
       Alert.alert(
-        "Guardado Offline",
-        `La acción de ${action === "aprobado" ? "aprobación" : "rechazo"} se guardó para sincronizar cuando tengas conexión.`
+        "Saved Offline",
+        `The ${action === "aprobado" ? "approval" : "rejection"} action was saved and will sync when you are online.`
       );
-      // Opcional: actualizar UI localmente
       loadApprovals();
     } else {
       try {
@@ -236,18 +233,17 @@ export default function Approvals() {
         const data = await res.json();
         if (res.ok) {
           Alert.alert(
-            "Éxito",
-            `Formulario ${action === "aprobado" ? "aprobado" : "rechazado"} correctamente.`
+            "Success",
+            `Form ${action === "aprobado" ? "approved" : "rejected"} successfully.`
           );
-          // Actualiza la lista localmente
           loadApprovals();
         } else {
-          throw new Error(data?.detail || "Error en la aprobación");
+          throw new Error(data?.detail || "Approval error");
         }
       } catch (e) {
         Alert.alert(
           "Error",
-          "No se pudo enviar la aprobación. Se guardará para sincronizar offline."
+          "Could not send approval. It will be saved for offline sync."
         );
         await saveOfflineApprovalAction(item.response_id, action, message);
         loadApprovals();
@@ -262,26 +258,19 @@ export default function Approvals() {
       const token = await AsyncStorage.getItem("authToken");
       if (!token) throw new Error("No authentication token found");
       const backendUrl = await getBackendUrl();
-
-      // Busca el aprobador actual en all_approvers (el usuario logueado)
-      // y verifica que tenga reconsideration_requested === true
       const approver = (item.all_approvers || []).find(
         (appr) =>
           appr.reconsideration_requested === true && appr.status === "rechazado"
       );
       if (!approver) {
-        throw new Error(
-          "No hay reconsideración pendiente para este formulario."
-        );
+        throw new Error("There is no reconsideration pending for this form.");
       }
-
-      // El backend espera un body con status: "aprobado", reviewed_at, message, selectedSequence
       const now = new Date();
       const reviewed_at = now.toISOString();
       const body = {
         status: "aprobado",
         reviewed_at,
-        message: "Reconsideración aceptada",
+        message: "Reconsideration accepted",
         selectedSequence: approver.sequence_number || 1,
       };
 
@@ -299,19 +288,18 @@ export default function Approvals() {
       const data = await res.json();
       if (!res.ok) {
         throw new Error(
-          data?.detail ||
-            "No se pudo aceptar la reconsideración. Intenta de nuevo."
+          data?.detail || "Could not accept reconsideration. Please try again."
         );
       }
       Alert.alert(
-        "Reconsideración aceptada",
-        "La reconsideración fue aceptada."
+        "Reconsideration accepted",
+        "The reconsideration was accepted."
       );
       loadApprovals();
     } catch (error) {
       Alert.alert(
         "Error",
-        error.message || "No se pudo aceptar la reconsideración."
+        error.message || "Could not accept reconsideration."
       );
     } finally {
       setAccepting(false);
@@ -396,7 +384,9 @@ export default function Approvals() {
                           : "#ef4444",
                     }}
                   >
-                    {action.body.status}
+                    {action.body.status === "aprobado"
+                      ? "approved"
+                      : "rejected"}
                   </Text>
                 </Text>
                 <Text style={{ color: "#888", fontSize: 12 }}>
@@ -538,7 +528,7 @@ function ApprovalCard({
   onAcceptReconsideration,
   accepting,
 }) {
-  // Detecta si hay reconsideration_requested en algún aprobador
+  // Detect if there is reconsideration_requested in any approver
   const hasReconsideration =
     Array.isArray(item.all_approvers) &&
     item.all_approvers.some(
@@ -568,17 +558,24 @@ function ApprovalCard({
         <View>
           <Text style={styles.approvalTitle}>{item.form_title}</Text>
           <Text style={styles.approvalMeta}>
-            Usuario: {item.submitted_by?.name || "Desconocido"}
+            User: {item.submitted_by?.name || "Unknown"}
           </Text>
           <Text style={styles.approvalMeta}>
-            Fecha: {item.submitted_at?.split("T")[0] || "Sin fecha"}
+            Date: {item.submitted_at?.split("T")[0] || "No date"}
           </Text>
           <Text style={styles.approvalMeta}>
-            Estado: {item.your_approval_status?.status}
+            Status:{" "}
+            {item.your_approval_status?.status === "aprobado"
+              ? "approved"
+              : item.your_approval_status?.status === "rechazado"
+                ? "rejected"
+                : item.your_approval_status?.status === "pendiente"
+                  ? "pending"
+                  : item.your_approval_status?.status || "-"}
           </Text>
         </View>
       </View>
-      {/* Mostrar respuestas del formulario */}
+      {/* Show form answers */}
       <View style={{ marginTop: 8 }}>
         {Array.isArray(item.answers) &&
           item.answers.map((ans, i) => (
@@ -592,18 +589,18 @@ function ApprovalCard({
             </View>
           ))}
       </View>
-      {/* Botones de aprobar/rechazar solo si está pendiente */}
+      {/* Approve/Reject buttons only if pending */}
       {!approved && !rejected && (
         <View style={styles.actionRow}>
           <TouchableOpacity style={styles.approveBtn} onPress={onApprove}>
-            <Text style={styles.actionBtnText}>Aprobar</Text>
+            <Text style={styles.actionBtnText}>Approve</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.rejectBtn} onPress={onReject}>
-            <Text style={styles.actionBtnText}>Rechazar</Text>
+            <Text style={styles.actionBtnText}>Reject</Text>
           </TouchableOpacity>
         </View>
       )}
-      {/* Botón para aceptar reconsideración SOLO si está rechazado y tiene reconsideration_requested */}
+      {/* Button to accept reconsideration ONLY if rejected and has reconsideration_requested */}
       {rejected && hasReconsideration && (
         <TouchableOpacity
           style={styles.reconsiderationBtn}
@@ -611,7 +608,7 @@ function ApprovalCard({
           disabled={accepting}
         >
           <Text style={styles.reconsiderationBtnText}>
-            {accepting ? "Aceptando..." : "Aceptar reconsideración"}
+            {accepting ? "Accepting..." : "Accept reconsideration"}
           </Text>
         </TouchableOpacity>
       )}

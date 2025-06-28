@@ -344,13 +344,10 @@ export default function Home({ activeTab, onTabPress }) {
       const token = await AsyncStorage.getItem("authToken");
       if (!token) throw new Error("No authentication token found");
       const backendUrl = await getBackendUrl();
-      const response = await fetch(
-        `${backendUrl}/auth/validate-token`,
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
+      const response = await fetch(`${backendUrl}/auth/validate-token`, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+      });
 
       if (!response.ok) {
         throw new Error("Error fetching user information");
@@ -368,6 +365,7 @@ export default function Home({ activeTab, onTabPress }) {
     }
   };
 
+  // Modifica fetchAndCacheQuestionsAndRelated para guardar el logo offline
   const fetchAndCacheQuestionsAndRelated = async (forms, token) => {
     // Guarda preguntas y respuestas relacionadas para cada formulario
     let allQuestions = {};
@@ -378,16 +376,13 @@ export default function Home({ activeTab, onTabPress }) {
       try {
         const backendUrl = await getBackendUrl();
         // 1. Preguntas del formulario
-        const qRes = await fetch(
-          `${backendUrl}/forms/${form.id}`,
-          {
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
-            },
-          }
-        );
+        const qRes = await fetch(`${backendUrl}/forms/${form.id}`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        });
         const qData = await qRes.json();
         if (!qRes.ok)
           throw new Error(qData.detail || "Error fetching questions");
@@ -404,18 +399,56 @@ export default function Home({ activeTab, onTabPress }) {
               options: question.options.map((option) => option.option_text),
             };
           }
-          // Para preguntas tipo tabla, las opciones se llenan con las relacionadas
           if (question.question_type === "table") {
-            // Las opciones se llenarán después con las relacionadas
             return { ...question, options: [] };
           }
           return question;
         });
 
         allQuestions[form.id] = adjustedQuestions;
+
+        // --- GUARDAR LOGO Y METADATA ---
+        // Busca el logo en form.form_design (si existe)
+        let logoUrl = null;
+        if (Array.isArray(form.form_design)) {
+          for (const item of form.form_design) {
+            if (
+              item.logo &&
+              (typeof item.logo === "string" || (item.logo && item.logo.url))
+            ) {
+              logoUrl =
+                typeof item.logo === "string" ? item.logo : item.logo.url;
+              break;
+            }
+            // Si el logo está como objeto dentro de item.logo
+            if (item.type === "logo" && item.props && item.props.url) {
+              logoUrl = item.props.url;
+              break;
+            }
+          }
+        }
+        // Si no está en form.form_design, intenta buscar en qData.form_design
+        if (!logoUrl && Array.isArray(qData.form_design)) {
+          for (const item of qData.form_design) {
+            if (
+              item.logo &&
+              (typeof item.logo === "string" || (item.logo && item.logo.url))
+            ) {
+              logoUrl =
+                typeof item.logo === "string" ? item.logo : item.logo.url;
+              break;
+            }
+            if (item.type === "logo" && item.props && item.props.url) {
+              logoUrl = item.props.url;
+              break;
+            }
+          }
+        }
+
         allFormsMetadata[form.id] = {
           title: qData.title,
           description: qData.description,
+          logo_url: logoUrl || null,
         };
 
         // 2. Respuestas relacionadas para preguntas tipo tabla
@@ -430,8 +463,6 @@ export default function Home({ activeTab, onTabPress }) {
                 }
               );
               const relData = await relRes.json();
-              // relData.data es un array de objetos con { name }
-              // Guarda las opciones relacionadas para la pregunta
               allRelatedAnswers[question.id] = Array.isArray(relData.data)
                 ? relData.data.map((item) => item.name)
                 : [];
@@ -462,16 +493,13 @@ export default function Home({ activeTab, onTabPress }) {
       const token = await AsyncStorage.getItem("authToken");
       if (!token) throw new Error("No authentication token found");
       const backendUrl = await getBackendUrl();
-      const response = await fetch(
-        `${backendUrl}/forms/users/form_by_user`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
+      const response = await fetch(`${backendUrl}/forms/users/form_by_user`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
 
       const data = await response.json();
       if (!response.ok) {

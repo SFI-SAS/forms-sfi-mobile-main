@@ -11,7 +11,7 @@ import { useLocalSearchParams } from "expo-router";
 import { Screen } from "../components/Screen";
 import { useEffect, useState } from "react";
 import { ScrollView } from "react-native";
-import { getFormToAPI } from "../services/api";
+import api from "../services/api";
 
 export default function Detail() {
   const { formid } = useLocalSearchParams();
@@ -21,7 +21,7 @@ export default function Detail() {
   useEffect(() => {
     if (formid) {
       const getForm = async () => {
-        const data = await getFormToAPI(formid);
+        const data = await api.getFormToAPI(formid);
         setFormInfo(data);
       };
       getForm();

@@ -32,6 +32,10 @@ const getBackendUrl = async () => {
 export default function PendingForms() {
   const [pendingForms, setPendingForms] = useState([]);
   const [isOnline, setIsOnline] = useState(false);
+  const [loading, setLoading] = useState(false); // NUEVO: estado de carga al enviar
+  const [showAnswers, setShowAnswers] = useState({}); // { [formId]: boolean }
+  const [answersByForm, setAnswersByForm] = useState({}); // { [formId]: [answers] }
+  const [questionsByForm, setQuestionsByForm] = useState({}); // { [formId]: { [question_id]: question_text } }
   const router = useRouter();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const inactivityTimer = useRef(null);
@@ -91,26 +95,90 @@ export default function PendingForms() {
       // Unifica ambos, evitando duplicados por id
       const idsLegacy = legacyPending.map((f) => f.id);
 
-      // Solo muestra formularios que aún no han sido enviados (no duplicados)
+      // --- NUEVO: intenta obtener title y description de metadata offline ---
+      const storedMeta = await AsyncStorage.getItem("offline_forms_metadata");
+      const metaObj = storedMeta ? JSON.parse(storedMeta) : {};
+
       const unified = [
         ...legacyPending.map((f) => ({
           id: f.id,
-          title: f.title || "",
-          description: f.description || "",
+          title:
+            f.title || (metaObj && metaObj[f.id] && metaObj[f.id].title) || "",
+          description:
+            f.description ||
+            (metaObj && metaObj[f.id] && metaObj[f.id].description) ||
+            "",
         })),
         ...pendingSaveResponse
           .filter((f) => !idsLegacy.includes(f.form_id))
           .map((f) => ({
             id: f.form_id,
-            title: f.title || "",
-            description: f.description || "",
+            title:
+              f.title ||
+              (metaObj && metaObj[f.form_id] && metaObj[f.form_id].title) ||
+              "",
+            description:
+              f.description ||
+              (metaObj &&
+                metaObj[f.form_id] &&
+                metaObj[f.form_id].description) ||
+              "",
           })),
       ];
 
       setPendingForms(unified);
 
-      // DEBUG: log para ver qué se está mostrando
-      console.log("🟡 Formularios pendientes para mostrar:", unified);
+      // Cargar respuestas offline para cada formulario
+      const answersObj = {};
+      const questionsObj = {};
+      // Cargar preguntas offline para mostrar el texto de la pregunta
+      const storedQuestions = await AsyncStorage.getItem("offline_questions");
+      const offlineQuestions = storedQuestions
+        ? JSON.parse(storedQuestions)
+        : {};
+
+      for (const form of unified) {
+        // Busca en pending_save_answers primero
+        const storedPendingSaveAnswers = await AsyncStorage.getItem(
+          PENDING_SAVE_ANSWERS_KEY
+        );
+        const pendingSaveAnswers = storedPendingSaveAnswers
+          ? JSON.parse(storedPendingSaveAnswers)
+          : [];
+        const formAnswers = pendingSaveAnswers.filter(
+          (a) => String(a.form_id) === String(form.id)
+        );
+        if (formAnswers.length > 0) {
+          answersObj[form.id] = formAnswers;
+        } else {
+          // Busca en legacy pending_forms si no hay en pending_save_answers
+          const storedPendingForms =
+            await AsyncStorage.getItem("pending_forms");
+          const legacyPending = storedPendingForms
+            ? JSON.parse(storedPendingForms)
+            : [];
+          const legacyForm = legacyPending.find(
+            (f) => String(f.id) === String(form.id)
+          );
+          if (legacyForm && Array.isArray(legacyForm.responses)) {
+            answersObj[form.id] = legacyForm.responses;
+          } else {
+            answersObj[form.id] = [];
+          }
+        }
+        // Construir el mapa de question_id -> question_text para este formulario
+        if (offlineQuestions[form.id]) {
+          const qMap = {};
+          offlineQuestions[form.id].forEach((q) => {
+            qMap[q.id] = q.question_text;
+          });
+          questionsObj[form.id] = qMap;
+        } else {
+          questionsObj[form.id] = {};
+        }
+      }
+      setAnswersByForm(answersObj);
+      setQuestionsByForm(questionsObj);
     };
 
     fetchPendingForms();
@@ -126,6 +194,7 @@ export default function PendingForms() {
   }, [pendingForms]);
 
   const handleSubmitPendingForm = async (form, tokenOverride = null) => {
+    setLoading(true); // Mostrar loading
     try {
       console.log("🟢 Botón ENVIAR presionado para formulario:", form);
 
@@ -228,6 +297,8 @@ export default function PendingForms() {
         "Error",
         `No se pudo sincronizar el formulario ID ${form.id}`
       );
+    } finally {
+      setLoading(false); // Ocultar loading
     }
   };
 
@@ -261,6 +332,77 @@ export default function PendingForms() {
                         Description: {form.description}
                       </Text>
                     ) : null}
+                    {/* Botón para mostrar/ocultar respuestas */}
+                    <TouchableOpacity
+                      style={{
+                        marginTop: 8,
+                        marginBottom: 4,
+                        alignSelf: "flex-start",
+                        backgroundColor: "#4B34C7",
+                        borderRadius: 6,
+                        paddingVertical: 6,
+                        paddingHorizontal: 14,
+                      }}
+                      onPress={() =>
+                        setShowAnswers((prev) => ({
+                          ...prev,
+                          [form.id]: !prev[form.id],
+                        }))
+                      }
+                    >
+                      <Text style={{ color: "#fff", fontWeight: "bold" }}>
+                        {showAnswers[form.id]
+                          ? "Ocultar respuestas"
+                          : "Ver respuestas"}
+                      </Text>
+                    </TouchableOpacity>
+                    {/* Mostrar respuestas si está expandido */}
+                    {showAnswers[form.id] && (
+                      <View
+                        style={{
+                          backgroundColor: "#f3f4f6",
+                          borderRadius: 8,
+                          padding: 10,
+                          marginBottom: 8,
+                          marginTop: 2,
+                        }}
+                      >
+                        {Array.isArray(answersByForm[form.id]) &&
+                        answersByForm[form.id].length > 0 ? (
+                          answersByForm[form.id].map((ans, i) => (
+                            <View
+                              key={i}
+                              style={{
+                                marginBottom: 6,
+                                borderBottomWidth: 1,
+                                borderBottomColor: "#e5e7eb",
+                                paddingBottom: 4,
+                              }}
+                            >
+                              <Text
+                                style={{ color: "#4B34C7", fontWeight: "bold" }}
+                              >
+                                Pregunta:{" "}
+                                {questionsByForm[form.id]?.[ans.question_id] ||
+                                  ans.question_text ||
+                                  ans.question_id}
+                              </Text>
+                              <Text style={{ color: "#222" }}>
+                                Respuesta:{" "}
+                                {ans.answer_text ||
+                                  ans.response ||
+                                  ans.file_path ||
+                                  ""}
+                              </Text>
+                            </View>
+                          ))
+                        ) : (
+                          <Text style={{ color: "#888" }}>
+                            No hay respuestas guardadas.
+                          </Text>
+                        )}
+                      </View>
+                    )}
                     <TouchableOpacity
                       style={
                         isOnline ? styles.submitButton : styles.Offlinebutton
@@ -284,10 +426,14 @@ export default function PendingForms() {
                           );
                         }
                       }}
-                      disabled={!isOnline}
+                      disabled={!isOnline || loading}
                     >
                       <Text style={styles.submitButtonText}>
-                        {isOnline ? "Send" : "No connection"}
+                        {loading
+                          ? "Enviando..."
+                          : isOnline
+                            ? "Send"
+                            : "No connection"}
                       </Text>
                     </TouchableOpacity>
                   </View>

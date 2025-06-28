@@ -360,7 +360,7 @@ export default function MyForms() {
                                     shadowRadius: 4,
                                     shadowOffset: { width: 0, height: 2 },
                                     elevation: 2,
-                                    padding: 14, // Add padding for space between content and border
+                                    padding: 14,
                                   },
                                 ]}
                               >
@@ -377,6 +377,26 @@ export default function MyForms() {
                                   numberOfLines={1}
                                 >
                                   Date: {resp.submitted_at || "Unknown"}
+                                </Text>
+                                {/* NUEVO: Mostrar si fue offline u online */}
+                                <Text
+                                  style={[
+                                    styles.diligMeta,
+                                    {
+                                      color:
+                                        resp.mode === "offline"
+                                          ? "#ef4444"
+                                          : "#22c55e",
+                                      fontWeight: "bold",
+                                    },
+                                  ]}
+                                  numberOfLines={1}
+                                >
+                                  {resp.mode === "offline"
+                                    ? "Submitted Offline"
+                                    : resp.mode === "online"
+                                    ? "Submitted Online"
+                                    : ""}
                                 </Text>
                                 <Text
                                   style={styles.diligMeta}
@@ -759,136 +779,200 @@ export default function MyForms() {
 
 const styles = StyleSheet.create({
   header: {
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: "bold",
-    color: "#fff",
-    marginBottom: 16,
-    marginTop: 32,
+    color: "#4B34C7",
+    marginBottom: 18,
+    marginTop: 36,
     textAlign: "center",
+    letterSpacing: 0.5,
+    textShadowColor: "#12A0AF22",
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
   },
   formsScrollWrapper: {
     flex: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingTop: 16,
-    paddingBottom: 32,
+    backgroundColor: "#f7fafc",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingTop: 20,
+    paddingBottom: 36,
+    marginHorizontal: width * 0.02,
+    marginTop: 10,
+    shadowColor: "#4B34C7",
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
   },
   formCardWrapper: {
     backgroundColor: "#fff",
-    borderRadius: 12,
-    marginBottom: 16,
+    borderRadius: 16,
+    marginBottom: 18,
     overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(0, 0, 0, 0.1)",
+    borderWidth: 1.5,
+    borderColor: "#12A0AF",
+    shadowColor: "#12A0AF",
+    shadowOpacity: 0.10,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+    marginHorizontal: 8,
   },
   formCard: {
-    padding: 16,
+    padding: 18,
+    backgroundColor: "#f7fafc",
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: "#4B34C7",
   },
   formText: {
-    fontSize: 14,
-    color: "#666",
-    marginBottom: 8,
+    fontSize: 15,
+    fontWeight: "bold",
+    color: "#12A0AF",
+    marginBottom: 2,
+    letterSpacing: 0.2,
   },
   formTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: "bold",
-    color: "#333",
-    marginBottom: 4,
+    color: "#4B34C7",
+    marginBottom: 2,
+    letterSpacing: 0.2,
   },
   formDescription: {
-    fontSize: 14,
-    color: "#666",
-    marginBottom: 12,
+    fontSize: 15,
+    color: "#12A0AF",
+    marginBottom: 6,
+    fontStyle: "italic",
   },
   formMeta: {
-    fontSize: 12,
+    fontSize: 13,
     color: "#999",
     marginBottom: 12,
   },
   viewResponsesButton: {
-    backgroundColor: "#4B34C7",
+    backgroundColor: "#12A0AF",
     borderRadius: 8,
     paddingVertical: 10,
     paddingHorizontal: 16,
     alignItems: "center",
     marginBottom: 8,
+    shadowColor: "#12A0AF",
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   viewResponsesButtonText: {
     color: "#fff",
     fontWeight: "bold",
+    fontSize: 15,
+    letterSpacing: 0.2,
   },
   responsesContainer: {
-    backgroundColor: "#f9f9f9",
-    borderRadius: 8,
+    backgroundColor: "#e6fafd",
+    borderRadius: 10,
     padding: 16,
     maxHeight: height * 0.4,
+    borderWidth: 1,
+    borderColor: "#12A0AF",
+    marginTop: 8,
   },
   diligentCard: {
     // Remove backgroundColor, border, marginBottom here if present
-    // They are now set inline above for each submission
+    // They are now set inline above for cada envío
     // ...existing code...
     // Add only if you want a default padding for all, otherwise keep empty
   },
   diligentHeader: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: "bold",
-    color: "#333",
+    color: "#4B34C7",
     marginBottom: 8,
   },
   diligentMeta: {
-    fontSize: 12,
-    color: "#999",
+    fontSize: 13,
+    color: "#12A0AF",
     marginBottom: 8,
   },
   noFormsText: {
     textAlign: "center",
     color: "#999",
-    fontSize: 16,
-    marginTop: 32,
+    fontSize: 17,
+    marginTop: 36,
+    fontStyle: "italic",
   },
   noResponsesText: {
     textAlign: "center",
     color: "#999",
-    fontSize: 14,
+    fontSize: 15,
     marginTop: 16,
+    fontStyle: "italic",
   },
   noAnswersText: {
     textAlign: "center",
     color: "#999",
-    fontSize: 14,
+    fontSize: 15,
     marginTop: 8,
+    fontStyle: "italic",
+  },
+  reconsiderButton: {
+    backgroundColor: "#FFB46E",
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    alignItems: "center",
+    marginTop: 10,
+    marginBottom: 2,
+    shadowColor: "#FFB46E",
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  reconsiderButtonText: {
+    color: "#fff",
+    fontWeight: "bold",
+    fontSize: 15,
+    letterSpacing: 0.2,
   },
   modalBackground: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    backgroundColor: "rgba(18,160,175,0.13)",
   },
   modalContainer: {
     width: width * 0.9,
     maxWidth: 400,
     backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 24,
+    borderRadius: 14,
+    padding: 28,
     alignItems: "center",
     elevation: 4,
+    borderWidth: 2,
+    borderColor: "#12A0AF",
+    shadowColor: "#4B34C7",
+    shadowOpacity: 0.13,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
   },
   modalTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: "bold",
-    color: "#333",
+    color: "#4B34C7",
     marginBottom: 16,
     textAlign: "center",
   },
   modalMessage: {
-    fontSize: 14,
-    color: "#666",
+    fontSize: 15,
+    color: "#12A0AF",
     marginBottom: 24,
     textAlign: "center",
   },
   modalButton: {
-    backgroundColor: "#4B34C7",
+    backgroundColor: "#12A0AF",
     borderRadius: 8,
     paddingVertical: 12,
     paddingHorizontal: 16,
@@ -907,18 +991,19 @@ const styles = StyleSheet.create({
   reconsiderationInput: {
     width: "100%",
     maxHeight: 120,
-    borderColor: "#ccc",
+    borderColor: "#12A0AF",
     borderWidth: 1,
     borderRadius: 8,
     padding: 12,
-    fontSize: 14,
+    fontSize: 15,
     color: "#333",
     marginBottom: 12,
     textAlignVertical: "top",
+    backgroundColor: "#f7fafc",
   },
   reconsiderationError: {
     color: "#ef4444",
-    fontSize: 12,
+    fontSize: 13,
     marginBottom: 12,
     textAlign: "center",
   },

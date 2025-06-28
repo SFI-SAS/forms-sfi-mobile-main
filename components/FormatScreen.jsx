@@ -12,6 +12,7 @@ import {
   Animated, // Import Animated
   Easing, // Import Easing
   Modal,
+  Image,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -24,6 +25,7 @@ import { SvgXml } from "react-native-svg";
 import { HomeIcon } from "./Icons"; // Adjust the import path as necessary
 import { Ionicons } from "@expo/vector-icons"; // Para iconos si se desea
 import { LinearGradient } from "expo-linear-gradient";
+import * as Location from "expo-location";
 
 const { width, height } = Dimensions.get("window"); // Get screen dimensions
 
@@ -84,10 +86,9 @@ const getBackendUrl = async () => {
   return stored || "";
 };
 
-export default function FormatScreen() {
+export default function FormatScreen(props) {
   const router = useRouter();
-  const { id } = useLocalSearchParams(); // Recibir el ID del formulario como parámetro
-  const { title } = useLocalSearchParams(); // Recibir el título del formulario como parámetro
+  const { id, title, logo_url: logoUrlParam } = useLocalSearchParams(); // Recibir el ID del formulario como parámetro
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [loading, setLoading] = useState(true);
@@ -120,6 +121,7 @@ export default function FormatScreen() {
     serial: "",
   });
   const [generatingSerial, setGeneratingSerial] = useState(false);
+  const [formMeta, setFormMeta] = useState({}); // metadata del formulario (incluye logo)
 
   useFocusEffect(
     React.useCallback(() => {
@@ -198,6 +200,28 @@ export default function FormatScreen() {
     }
   }, [id]);
 
+  // Cargar metadata del formulario (incluyendo logo) desde AsyncStorage solo si no viene por props
+  useEffect(() => {
+    const loadFormMeta = async () => {
+      if (logoUrlParam) {
+        setFormMeta((prev) => ({ ...prev, logo_url: logoUrlParam }));
+        return;
+      }
+      try {
+        const storedMeta = await AsyncStorage.getItem(FORMS_METADATA_KEY);
+        if (storedMeta) {
+          const metaObj = JSON.parse(storedMeta);
+          if (metaObj && metaObj[id]) {
+            setFormMeta(metaObj[id]);
+          }
+        }
+      } catch (e) {
+        // Si falla, ignora
+      }
+    };
+    if (id) loadFormMeta();
+  }, [id, logoUrlParam]);
+
   const handleAnswerChange = (questionId, value) => {
     console.log(
       `✏️ Capturando respuesta para pregunta ID ${questionId}:`,
@@ -222,6 +246,13 @@ export default function FormatScreen() {
       .catch((error) =>
         console.error("❌ Error guardando respuestas en AsyncStorage:", error)
       );
+  };
+
+  // Usa la función handleFileUploadWithSerial ya existente, no la declares de nuevo.
+  // Solo agrega la función handleFileButtonPress para orquestar el flujo de serial + archivo:
+  const handleFileButtonPress = async (questionId) => {
+    await generateSerial(questionId);
+    await handleFileUploadWithSerial(questionId);
   };
 
   const handleFileUpload = async (questionId) => {
@@ -553,11 +584,25 @@ export default function FormatScreen() {
         // Number y otros tipos simples
         else if (
           question.question_type === "number" &&
-          answers[questionId]?.[0]
+          (Array.isArray(answers[questionId])
+            ? answers[questionId]?.[0]
+            : answers[questionId])
         ) {
+          // Permite tanto array como string/number directo
+          const value = Array.isArray(answers[questionId])
+            ? answers[questionId][0]
+            : answers[questionId];
           allAnswers.push({
             question_id: questionId,
-            answer_text: answers[questionId][0],
+            answer_text: value,
+            file_path: "",
+          });
+        }
+        // Location
+        else if (question.question_type === "location" && answers[questionId]) {
+          allAnswers.push({
+            question_id: questionId,
+            answer_text: answers[questionId],
             file_path: "",
           });
         }
@@ -864,11 +909,25 @@ export default function FormatScreen() {
           });
         } else if (
           question.question_type === "number" &&
-          answers[questionId]?.[0]
+          (Array.isArray(answers[questionId])
+            ? answers[questionId]?.[0]
+            : answers[questionId])
+        ) {
+          const value = Array.isArray(answers[questionId])
+            ? answers[questionId][0]
+            : answers[questionId];
+          repeatedAnswers.push({
+            question_id: questionId,
+            answer_text: value,
+            file_path: "",
+          });
+        } else if (
+          question.question_type === "location" &&
+          answers[questionId]
         ) {
           repeatedAnswers.push({
             question_id: questionId,
-            answer_text: answers[questionId][0],
+            answer_text: answers[questionId],
             file_path: "",
           });
         }
@@ -992,15 +1051,41 @@ export default function FormatScreen() {
               });
             }
           } else if (
-            question.question_type === "number" &&
-            ((nonRepeatedLocked && firstNonRepeatedAnswers[questionId]?.[0]) ||
-              answers[questionId]?.[0])
+            question.question_type === "location" &&
+            (nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
+              ? firstNonRepeatedAnswers[questionId]
+              : answers[questionId])
           ) {
             const value =
               nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
-                ? firstNonRepeatedAnswers[questionId][0]
-                : answers[questionId][0];
+                ? firstNonRepeatedAnswers[questionId]
+                : answers[questionId];
             if (value) {
+              nonRepeatedAnswers.push({
+                question_id: questionId,
+                answer_text: value,
+                file_path: "",
+              });
+            }
+          } else if (
+            question.question_type === "number" &&
+            (nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
+              ? Array.isArray(firstNonRepeatedAnswers[questionId])
+                ? firstNonRepeatedAnswers[questionId][0]
+                : firstNonRepeatedAnswers[questionId]
+              : Array.isArray(answers[questionId])
+                ? answers[questionId][0]
+                : answers[questionId])
+          ) {
+            const value =
+              nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
+                ? Array.isArray(firstNonRepeatedAnswers[questionId])
+                  ? firstNonRepeatedAnswers[questionId][0]
+                  : firstNonRepeatedAnswers[questionId]
+                : Array.isArray(answers[questionId])
+                  ? answers[questionId][0]
+                  : answers[questionId];
+            if (value !== undefined && value !== null && value !== "") {
               nonRepeatedAnswers.push({
                 question_id: questionId,
                 answer_text: value,
@@ -1133,34 +1218,28 @@ export default function FormatScreen() {
     }
   };
 
-  const resetInactivityTimer = async () => {
-    if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
-    inactivityTimer.current = setTimeout(async () => {
-      await AsyncStorage.setItem("isLoggedOut", "true");
-      setShowLogoutModal(true);
-    }, INACTIVITY_TIMEOUT);
+  const handleFileUploadWithSerial = async (questionId) => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: "*/*",
+        copyToCacheDirectory: true,
+      });
+      if (result && !result.canceled && result.assets?.[0]?.uri) {
+        setFileUris((prev) => ({
+          ...prev,
+          [questionId]: result.assets[0].uri,
+        }));
+        handleAnswerChange(questionId, result.assets[0].uri);
+        Alert.alert("Archivo seleccionado", `Ruta: ${result.assets[0].uri}`);
+      } else if (result && result.canceled) {
+        // Cancelado por el usuario, no hacer nada
+      } else {
+        Alert.alert("Error", "No se pudo seleccionar el archivo.");
+      }
+    } catch (error) {
+      Alert.alert("Error", "No se pudo seleccionar el archivo.");
+    }
   };
-
-  useEffect(() => {
-    const reset = () => resetInactivityTimer();
-    const touchListener = () => reset();
-    const focusListener = () => reset();
-
-    // React Native events
-    const subscription = BackHandler.addEventListener(
-      "hardwareBackPress",
-      reset
-    );
-    const interval = setInterval(reset, 1000 * 60 * 4);
-
-    reset();
-
-    return () => {
-      if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
-      subscription.remove();
-      clearInterval(interval);
-    };
-  }, []);
 
   // Generar serial (online/offline)
   const generateSerial = async (questionId) => {
@@ -1238,38 +1317,31 @@ export default function FormatScreen() {
     setShowSerialModal({ visible: false, serial: "" });
   };
 
-  // Subir archivo y asociar a pregunta
-  const handleFileUploadWithSerial = async (questionId) => {
-    console.log(
-      "🟢 Subiendo archivo para pregunta:",
-      questionId,
-      "Serial:",
-      fileSerials[questionId]
-    );
+  // NUEVO: Estado y función para campos tipo location
+  const [locationError, setLocationError] = useState({});
+  const handleCaptureLocation = async (questionId) => {
+    setLocationError((prev) => ({ ...prev, [questionId]: null }));
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: "*/*",
-        copyToCacheDirectory: true,
-      });
-      if (result && !result.canceled && result.assets?.[0]?.uri) {
-        setFileUris((prev) => ({
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        setLocationError((prev) => ({
           ...prev,
-          [questionId]: result.assets[0].uri,
+          [questionId]: "Permiso de ubicación denegado",
         }));
-        handleAnswerChange(questionId, result.assets[0].uri);
-        console.log("🟢 Archivo seleccionado:", result.assets[0].uri);
-        Alert.alert("Archivo seleccionado", `Ruta: ${result.assets[0].uri}`);
-      } else if (result && result.canceled) {
-        console.log("⚠️ Selección de archivo cancelada por el usuario.");
-      } else {
-        console.error(
-          "❌ Resultado inesperado del selector de documentos:",
-          result
-        );
+        Alert.alert("Permiso denegado", "Se requiere permiso de ubicación.");
+        return;
       }
-    } catch (error) {
-      console.error("❌ Error seleccionando archivo:", error);
-      Alert.alert("Error", "No se pudo seleccionar el archivo.");
+      let loc = await Location.getCurrentPositionAsync({});
+      if (loc && loc.coords) {
+        const value = `${loc.coords.latitude}, ${loc.coords.longitude}`;
+        handleAnswerChange(questionId, value);
+      }
+    } catch (e) {
+      setLocationError((prev) => ({
+        ...prev,
+        [questionId]: "No se pudo obtener la ubicación",
+      }));
+      Alert.alert("Error", "No se pudo obtener la ubicación.");
     }
   };
 
@@ -1279,9 +1351,25 @@ export default function FormatScreen() {
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
+          stickyHeaderIndices={[0]}
         >
-          <Text style={styles.header}>{title.toLocaleUpperCase()}</Text>
-          <Text style={styles.subHeader}>ID: 00{id}</Text>
+          {/* Sticky Header con logo y título */}
+          <View style={styles.stickyHeader}>
+            {logoUrlParam || formMeta.logo_url ? (
+              <Image
+                source={{ uri: logoUrlParam || formMeta.logo_url }}
+                style={styles.formLogo}
+                resizeMode="contain"
+              />
+            ) : null}
+            <View style={{ flex: 1 }}>
+              <Text style={styles.header}>
+                {title ? title.toLocaleUpperCase() : ""}
+              </Text>
+              <Text style={styles.subHeader}>ID: 00{id}</Text>
+            </View>
+          </View>
+
           <Text style={styles.instructions}>
             Responde las preguntas a continuación:
           </Text>
@@ -1347,12 +1435,10 @@ export default function FormatScreen() {
                                   backgroundColor: "#20B46F",
                                 }, // Verde si ya hay archivo
                               ]}
-                              onPress={() => {
-                                console.log(
-                                  "🟢 Botón archivo presionado para pregunta:",
-                                  question.id
-                                );
-                                !isLocked && openFileModal(question.id);
+                              onPress={async () => {
+                                if (!isLocked) {
+                                  await handleFileButtonPress(question.id);
+                                }
                               }}
                               disabled={isLocked}
                             >
@@ -1586,6 +1672,39 @@ export default function FormatScreen() {
                             )}
                           </>
                         )}
+                        {/* Location */}
+                        {question.question_type === "location" && (
+                          <View style={{ width: "100%", marginBottom: 8 }}>
+                            <TouchableOpacity
+                              style={[
+                                styles.locationButton,
+                                answers[question.id] && {
+                                  backgroundColor: "#22c55e",
+                                },
+                              ]}
+                              onPress={() => handleCaptureLocation(question.id)}
+                              disabled={isLocked}
+                            >
+                              <Text style={styles.locationButtonText}>
+                                {answers[question.id]
+                                  ? "Ubicación capturada"
+                                  : "Capturar ubicación"}
+                              </Text>
+                            </TouchableOpacity>
+                            <TextInput
+                              style={styles.input}
+                              value={answers[question.id] || ""}
+                              placeholder="Latitud, Longitud"
+                              editable={false}
+                              selectTextOnFocus={false}
+                            />
+                            {locationError[question.id] && (
+                              <Text style={{ color: "#ef4444", fontSize: 13 }}>
+                                {locationError[question.id]}
+                              </Text>
+                            )}
+                          </View>
+                        )}
                       </View>
                     );
                   })
@@ -1668,7 +1787,7 @@ export default function FormatScreen() {
                                 backgroundColor: "#20B46F",
                               },
                             ]}
-                            onPress={() =>
+                            onPress={async () =>
                               !isLocked && openFileModal(question.id)
                             }
                             disabled={isLocked}
@@ -1924,6 +2043,39 @@ export default function FormatScreen() {
                           )}
                         </>
                       )}
+                      {/* Location */}
+                      {question.question_type === "location" && (
+                        <View style={{ width: "100%", marginBottom: 8 }}>
+                          <TouchableOpacity
+                            style={[
+                              styles.locationButton,
+                              answers[question.id] && {
+                                backgroundColor: "#22c55e",
+                              },
+                            ]}
+                            onPress={() => handleCaptureLocation(question.id)}
+                            disabled={isLocked}
+                          >
+                            <Text style={styles.locationButtonText}>
+                              {answers[question.id]
+                                ? "Ubicación capturada"
+                                : "Capturar ubicación"}
+                            </Text>
+                          </TouchableOpacity>
+                          <TextInput
+                            style={styles.input}
+                            value={answers[question.id] || ""}
+                            placeholder="Latitud, Longitud"
+                            editable={false}
+                            selectTextOnFocus={false}
+                          />
+                          {locationError[question.id] && (
+                            <Text style={{ color: "#ef4444", fontSize: 13 }}>
+                              {locationError[question.id]}
+                            </Text>
+                          )}
+                        </View>
+                      )}
                     </View>
                   );
                 })
@@ -2025,134 +2177,155 @@ export default function FormatScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#ffffff" },
+  container: { flex: 1, backgroundColor: "#f7fafc" },
   scrollContent: {
     padding: width * 0.05,
     paddingBottom: height * 0.05,
     flexGrow: 1,
   },
   header: {
-    fontSize: width * 0.06,
+    fontSize: width * 0.065,
     fontWeight: "bold",
+    color: "#4B34C7",
     marginBottom: height * 0.02,
+    textAlign: "center",
+    letterSpacing: 0.5,
+    textShadowColor: "#12A0AF22",
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
   },
   subHeader: {
-    fontSize: width * 0.05,
+    fontSize: width * 0.045,
     fontWeight: "bold",
-    marginBottom: height * 0.02,
+    color: "#12A0AF",
+    marginBottom: height * 0.01,
+    textAlign: "center",
   },
   instructions: {
-    fontSize: width * 0.045,
+    fontSize: width * 0.042,
+    color: "#4B34C7",
     marginBottom: height * 0.01,
+    textAlign: "center",
   },
   questionsContainer: {
-    // Elimina maxHeight para permitir scroll global
-    backgroundColor: "#E4E4E4FF",
-    color: "white",
+    backgroundColor: "#fff",
     marginBottom: height * 0.02,
-    padding: 9,
-    borderRadius: width * 0.02,
-    borderColor: "#000000FF",
-    borderWidth: 1,
+    padding: 14,
+    borderRadius: width * 0.03,
+    borderColor: "#12A0AF",
+    borderWidth: 1.5,
+    shadowColor: "#12A0AF",
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
   },
   loadingText: {
     fontSize: width * 0.05,
     textAlign: "center",
     marginVertical: height * 0.02,
+    color: "#12A0AF",
   },
-  questionContainer: { marginBottom: height * 0.02 },
+  questionContainer: { marginBottom: height * 0.025 },
   questionLabel: {
-    fontSize: width * 0.05,
+    fontSize: width * 0.048,
     fontWeight: "bold",
+    color: "#4B34C7",
     marginBottom: height * 0.01,
   },
   requiredText: {
-    color: "red",
+    color: "#ef4444",
     fontWeight: "bold",
+    marginLeft: width * 0.01,
   },
   submitButton: {
     marginTop: height * 0.03,
-    padding: height * 0.02,
+    padding: height * 0.022,
     backgroundColor: "#12A0AF",
-    borderRadius: width * 0.02,
+    borderRadius: width * 0.025,
     alignItems: "center",
-    borderColor: "#000000FF",
-    borderWidth: 1,
+    borderColor: "#4B34C7",
+    borderWidth: 1.5,
+    shadowColor: "#12A0AF",
+    shadowOpacity: 0.13,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   submitButtonText: {
     color: "white",
     fontWeight: "bold",
-    fontSize: width * 0.045,
+    fontSize: width * 0.048,
+    letterSpacing: 0.2,
   },
   backButton: {
     marginTop: height * 0.02,
-    padding: height * 0.02,
-    backgroundColor: "red",
-    borderRadius: width * 0.02,
+    padding: height * 0.018,
+    backgroundColor: "#EB2525FF",
+    borderRadius: width * 0.025,
     alignItems: "center",
-    borderColor: "#000000FF",
-    borderWidth: 1,
+    borderColor: "#4B34C7",
+    borderWidth: 1.5,
+    shadowColor: "#EB2525FF",
+    shadowOpacity: 0.13,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   backButtonText: {
     color: "white",
     fontWeight: "bold",
     fontSize: width * 0.045,
+    letterSpacing: 0.2,
   },
   input: {
-    borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: width * 0.02, // Dynamic border radius
-    padding: height * 0.015, // Dynamic padding
-    backgroundColor: "#f9f9f9",
-    fontSize: width * 0.045, // Dynamic font size
+    borderWidth: 1.5,
+    borderColor: "#12A0AF",
     borderRadius: width * 0.02,
-    borderColor: "#000000FF",
-    borderWidth: 1,
-    width: width * 0.75, // Dynamic width
+    padding: height * 0.015,
+    backgroundColor: "#f3f4f6",
+    fontSize: width * 0.045,
+    width: width * 0.75,
+    marginBottom: 6,
+    color: "#222",
   },
   picker: {
-    borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: width * 0.75, // Dynamic border radius
-    backgroundColor: "#f9f9f9",
-    marginTop: 0,
+    borderWidth: 1.5,
+    borderColor: "#12A0AF",
     borderRadius: width * 0.02,
-    borderColor: "#000000FF",
-    borderWidth: 1,
+    backgroundColor: "#f3f4f6",
+    marginTop: 0,
     width: "100%",
+    color: "#222",
   },
   fileButton: {
     backgroundColor: "#9225EBFF",
-    padding: height * 0.02, // Dynamic padding
-    borderRadius: width * 0.02, // Dynamic border radius
+    padding: height * 0.018,
+    borderRadius: width * 0.02,
     alignItems: "center",
-    borderColor: "#000000FF",
-    borderWidth: 1,
-    width: width * 0.75, // Dynamic width
+    borderColor: "#12A0AF",
+    borderWidth: 1.5,
+    width: width * 0.75,
+    marginTop: 4,
   },
   fileButtonText: {
     color: "white",
     fontWeight: "bold",
-    fontSize: width * 0.045, // Dynamic font size
+    fontSize: width * 0.045,
   },
   dateButton: {
     backgroundColor: "#EB9525FF",
-    padding: height * 0.02, // Dynamic padding
-    borderRadius: width * 0.02, // Dynamic border radius
+    padding: height * 0.018,
+    borderRadius: width * 0.02,
     alignItems: "center",
-    marginTop: height * 0.02,
-    borderColor: "#000000FF",
-    borderWidth: 1,
+    marginTop: height * 0.01,
+    borderColor: "#12A0AF",
+    borderWidth: 1.5,
   },
   dateButtonText: {
     color: "white",
     fontWeight: "bold",
-    fontSize: width * 0.045, // Dynamic font size
-  },
-  requiredText: {
-    color: "red",
-    fontWeight: "bold",
-    marginLeft: width * 0.01, // Dynamic margin
+    fontSize: width * 0.045,
   },
   checkboxContainer: {
     flexDirection: "row",
@@ -2160,46 +2333,46 @@ const styles = StyleSheet.create({
     marginBottom: height * 0.01,
   },
   checkbox: {
-    width: width * 0.08, // Dynamic size
-    height: width * 0.08, // Dynamic size
-    borderWidth: 3,
-    borderColor: "#706C6CFF",
-    borderRadius: width * 0.01, // Dynamic border radius
+    width: width * 0.08,
+    height: width * 0.08,
+    borderWidth: 2,
+    borderColor: "#12A0AF",
+    borderRadius: width * 0.02,
     justifyContent: "center",
     alignItems: "center",
-    marginRight: width * 0.03, // Dynamic margin
+    marginRight: width * 0.03,
+    backgroundColor: "#fff",
   },
   checkboxSelected: {
     backgroundColor: "#12A0AF",
-    borderColor: "#020202FF",
+    borderColor: "#4B34C7",
   },
   checkboxCheckmark: {
     color: "white",
     fontWeight: "bold",
-    fontSize: width * 0.04, // Dynamic font size
+    fontSize: width * 0.04,
   },
   checkboxLabel: {
-    fontSize: width * 0.045, // Dynamic font size
-    color: "#333",
+    fontSize: width * 0.045,
+    color: "#222",
   },
   dynamicFieldContainer: {
     flexDirection: "column",
     alignItems: "flex-start",
     marginTop: height * 0.01,
     marginBottom: height * 0.01,
-    width: width * 0.75, // Dynamic width
+    width: width * 0.75,
     justifyContent: "flex-start",
   },
   addButton: {
-    backgroundColor: "green",
-    padding: height * 0.02,
+    backgroundColor: "#22c55e",
+    padding: height * 0.018,
     borderRadius: width * 0.6,
     alignItems: "center",
     marginTop: height * 0.01,
-    width: width * 0.14, // Dynamic width
-
-    borderColor: "#000000FF",
-    borderWidth: 1,
+    width: width * 0.14,
+    borderColor: "#12A0AF",
+    borderWidth: 1.5,
   },
   addButtonText: {
     color: "white",
@@ -2207,8 +2380,8 @@ const styles = StyleSheet.create({
     fontSize: width * 0.045,
   },
   removeButton: {
-    backgroundColor: "red",
-    padding: height * 0.015,
+    backgroundColor: "#ef4444",
+    padding: height * 0.012,
     borderRadius: width * 0.02,
     marginLeft: width * 0.02,
   },
@@ -2225,10 +2398,10 @@ const styles = StyleSheet.create({
   submittedGroupsContainer: {
     marginTop: height * 0.01,
     marginBottom: height * 0.01,
-    backgroundColor: "#f5f7fa",
+    backgroundColor: "#e6fafd",
     borderRadius: width * 0.02,
-    borderColor: "#b0b0b0",
-    borderWidth: 1,
+    borderColor: "#12A0AF",
+    borderWidth: 1.5,
     padding: width * 0.025,
     maxWidth: "100%",
   },
@@ -2236,21 +2409,22 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     fontSize: width * 0.045,
     marginBottom: height * 0.01,
-    color: "#1a237e",
+    color: "#12A0AF",
   },
   submittedGroupCard: {
-    backgroundColor: "#e3eafc",
+    backgroundColor: "#fff",
     borderRadius: width * 0.015,
     padding: width * 0.02,
+
     marginBottom: height * 0.01,
-    borderColor: "#90caf9",
+    borderColor: "#12A0AF",
     borderWidth: 1,
   },
   submittedGroupHeader: {
     fontWeight: "bold",
     fontSize: width * 0.038,
     marginBottom: height * 0.005,
-    color: "#1976d2",
+    color: "#4B34C7",
   },
   submittedGroupRow: {
     flexDirection: "row",
@@ -2261,7 +2435,7 @@ const styles = StyleSheet.create({
   submittedGroupQuestion: {
     fontWeight: "bold",
     fontSize: width * 0.035,
-    color: "#333",
+    color: "#12A0AF",
     flexShrink: 1,
     maxWidth: "45%",
   },
@@ -2274,7 +2448,7 @@ const styles = StyleSheet.create({
   submittedGroupAnswer: {
     fontSize: width * 0.035,
     color: "#222",
-    backgroundColor: "#fff",
+    backgroundColor: "#f7fafc",
     borderRadius: width * 0.01,
     paddingHorizontal: width * 0.01,
     marginBottom: 2,
@@ -2298,20 +2472,28 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    backgroundColor: "rgba(18,160,175,0.13)",
   },
   modalContent: {
     width: "80%",
-    backgroundColor: "white",
-    borderRadius: 10,
-    padding: 20,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 22,
     alignItems: "center",
+    borderWidth: 2,
+    borderColor: "#12A0AF",
+    shadowColor: "#4B34C7",
+    shadowOpacity: 0.13,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: "bold",
     marginBottom: 10,
     textAlign: "center",
+    color: "#4B34C7",
   },
   modalButton: {
     flex: 1,
@@ -2319,11 +2501,56 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     alignItems: "center",
     marginHorizontal: 5,
+    backgroundColor: "#12A0AF",
   },
   modalButtonText: {
     color: "white",
     fontSize: 15,
     fontWeight: "bold",
+    textAlign: "center",
+  },
+  stickyHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e5e7eb",
+    borderRadius: 12,
+    zIndex: 10,
+    elevation: 8,
+    shadowColor: "#000",
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  formLogo: {
+    width: 56, // Ajustado a 56px para mejor presencia en header
+    height: 56,
+    borderRadius: 12,
+    marginRight: 14,
+    backgroundColor: "#fff",
+    borderWidth: 1.5,
+    borderColor: "#12A0AF",
+    alignSelf: "center",
+  },
+  locationButton: {
+    backgroundColor: "#4B34C7",
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    alignItems: "center",
+    marginBottom: 6,
+    borderWidth: 1.5,
+    borderColor: "#12A0AF",
+    width: "75%",
+    alignSelf: "flex-start",
+  },
+  locationButtonText: {
+    color: "#fff",
+    fontWeight: "bold",
+    fontSize: width * 0.045,
     textAlign: "center",
   },
 });
