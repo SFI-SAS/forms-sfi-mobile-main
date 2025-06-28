@@ -13,8 +13,7 @@
     },
     "production": {
       "autoIncrement": true,
-      "channel": "production",
-      "appVersionSource": "remote"
+      "channel": "production"
     }
   },
   "submit": {
