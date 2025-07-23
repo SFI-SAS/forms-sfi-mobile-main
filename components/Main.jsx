@@ -96,16 +96,55 @@ export function Main() {
         // Solo permite acceso automático si isLoggedOut !== "true"
         if (savedToken && isLoggedOut !== "true") {
           const backendUrlToUse = await getBackendUrl();
-          const responseUser = await fetch(
-            `${backendUrlToUse}/auth/validate-token`,
-            {
-              method: "GET",
-              headers: { Authorization: `Bearer ${savedToken}` },
+          let responseUser;
+          let isOnline = false;
+          try {
+            // Verifica si hay conexión antes de intentar validar el token
+            isOnline = await NetInfo.fetch().then((state) => state.isConnected);
+            if (!isOnline) {
+              // Si está offline, no preguntar la URL, solo salir
+              return;
             }
-          );
+            responseUser = await fetch(
+              `${backendUrlToUse}/auth/validate-token`,
+              {
+                method: "GET",
+                headers: { Authorization: `Bearer ${savedToken}` },
+              }
+            );
+          } catch (err) {
+            // Solo preguntar la URL si hay conexión pero el backend está caído
+            if (isOnline) {
+              setBackendUrlSet(false);
+              setShowBackendModal(true);
+              setBackendErrorMsg(
+                "No se pudo conectar al backend. Por favor revisa la URL o tu conexión."
+              );
+              setShowBackendError(true);
+            }
+            return;
+          }
 
           if (!responseUser.ok) {
             const errorUserText = await responseUser.text();
+            // Solo preguntar la URL si hay conexión pero el backend está caído
+            if (
+              (await NetInfo.fetch()).isConnected &&
+              (errorUserText.includes("Failed to fetch") ||
+                errorUserText.includes("Network request failed") ||
+                errorUserText.includes("ENOTFOUND") ||
+                errorUserText.includes("timeout") ||
+                errorUserText.includes("NetworkError") ||
+                errorUserText.includes("offline"))
+            ) {
+              setBackendUrlSet(false);
+              setShowBackendModal(true);
+              setBackendErrorMsg(
+                "No se pudo conectar al backend. Por favor revisa la URL o tu conexión."
+              );
+              setShowBackendError(true);
+              return;
+            }
             throw new Error(errorUserText);
           }
 
@@ -121,6 +160,27 @@ export function Main() {
           await AsyncStorage.setItem("isLoggedOut", "true");
         }
       } catch (error) {
+        // Solo preguntar la URL si hay conexión pero el backend está caído
+        NetInfo.fetch().then((state) => {
+          if (
+            state.isConnected &&
+            ((error.message &&
+              (error.message.includes("Failed to fetch") ||
+                error.message.includes("Network request failed") ||
+                error.message.includes("ENOTFOUND") ||
+                error.message.includes("timeout") ||
+                error.message.includes("NetworkError") ||
+                error.message.includes("offline"))) ||
+              (typeof error === "string" && error.includes("offline")))
+          ) {
+            setBackendUrlSet(false);
+            setShowBackendModal(true);
+            setBackendErrorMsg(
+              "No se pudo conectar al backend. Por favor revisa la URL o tu conexión."
+            );
+            setShowBackendError(true);
+          }
+        });
         console.error("❌ Error obteniendo el token:", error);
       }
     };
@@ -266,13 +326,10 @@ export function Main() {
       // Validar el token usando GET
       let responseUser;
       try {
-        responseUser = await fetch(
-          `${backendUrlToUse}/auth/validate-token`,
-          {
-            method: "GET",
-            headers: { Authorization: `Bearer ${token}` },
-          }
-        );
+        responseUser = await fetch(`${backendUrlToUse}/auth/validate-token`, {
+          method: "GET",
+          headers: { Authorization: `Bearer ${token}` },
+        });
       } catch (fetchError) {
         setBackendErrorMsg(
           "Could not connect to the backend. Please check the URL or your connection."
