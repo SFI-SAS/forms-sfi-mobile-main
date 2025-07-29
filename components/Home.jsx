@@ -178,20 +178,18 @@ const CategoryCard = ({ category, onToggle, isExpanded, onFormPress }) => (
       <View style={styles.categoryTitleContainer}>
         <Text style={styles.categoryTitle}>{category.name}</Text>
         <Text style={styles.categoryCount}>
-          ({category.forms.length} formato{category.forms.length !== 1 ? 's' : ''})
+          ({category.forms.length} formato
+          {category.forms.length !== 1 ? "s" : ""})
         </Text>
       </View>
-      <Text style={styles.expandIcon}>{isExpanded ? '▼' : '▶'}</Text>
+      <Text style={styles.expandIcon}>{isExpanded ? "▼" : "▶"}</Text>
     </TouchableOpacity>
-    
+
     {isExpanded && (
       <View style={styles.formsInCategory}>
         {category.forms.map((form) => (
           <View key={form.id} style={styles.formCardWrapper}>
-            <FormCard
-              form={form}
-              onPress={() => onFormPress(form)}
-            />
+            <FormCard form={form} onPress={() => onFormPress(form)} />
           </View>
         ))}
       </View>
@@ -354,15 +352,15 @@ export default function Home({ activeTab, onTabPress }) {
   const organizeByCategorys = (formsList) => {
     const categoriesMap = {};
 
-    formsList.forEach(form => {
-      const categoryName = form.category?.name || 'Sin Categoría';
-      const categoryId = form.category?.id || 'no-category';
+    formsList.forEach((form) => {
+      const categoryName = form.category?.name || "Sin Categoría";
+      const categoryId = form.category?.id || "no-category";
 
       if (!categoriesMap[categoryId]) {
         categoriesMap[categoryId] = {
           id: categoryId,
           name: categoryName,
-          forms: []
+          forms: [],
         };
       }
 
@@ -372,8 +370,8 @@ export default function Home({ activeTab, onTabPress }) {
     // Convertir objeto a array y ordenar
     const categoriesArray = Object.values(categoriesMap).sort((a, b) => {
       // Poner "Sin Categoría" al final
-      if (a.id === 'no-category') return 1;
-      if (b.id === 'no-category') return -1;
+      if (a.id === "no-category") return 1;
+      if (b.id === "no-category") return -1;
       return a.name.localeCompare(b.name);
     });
 
@@ -382,40 +380,40 @@ export default function Home({ activeTab, onTabPress }) {
 
   // NUEVA FUNCIÓN: Alternar expansión de categoría
   const toggleCategory = (categoryId) => {
-    setExpandedCategories(prev => ({
+    setExpandedCategories((prev) => ({
       ...prev,
-      [categoryId]: !prev[categoryId]
+      [categoryId]: !prev[categoryId],
     }));
   };
 
   // ✅ OPTIMIZADO: Función auxiliar para extraer logo URL
   const findLogoInDesign = (formDesign) => {
     if (!Array.isArray(formDesign)) return null;
-    
+
     for (const item of formDesign) {
       // Caso 1: logo directo
       if (item.logo) {
         return typeof item.logo === "string" ? item.logo : item.logo.url;
       }
-      
+
       // Caso 2: tipo logo con props
       if (item.type === "logo" && item.props && item.props.url) {
         return item.props.url;
       }
     }
-    
+
     return null;
   };
 
   const extractLogoUrl = (form, qData) => {
     // Buscar en form.form_design
     let logoUrl = findLogoInDesign(form.form_design);
-    
+
     // Si no está, buscar en qData.form_design
     if (!logoUrl) {
       logoUrl = findLogoInDesign(qData.form_design);
     }
-    
+
     return logoUrl;
   };
 
@@ -461,16 +459,15 @@ export default function Home({ activeTab, onTabPress }) {
       }
 
       const data = await response.json();
-      
+
       // ✅ MOSTRAR DATOS INMEDIATAMENTE
       setUserInfo(data.user);
       setLoadingUser(false); // Ocultar spinner inmediatamente
 
       // ✅ GUARDAR EN BACKGROUND
-      saveUserInfoOffline(data.user).catch(error => {
+      saveUserInfoOffline(data.user).catch((error) => {
         console.error("❌ Error guardando userInfo offline:", error);
       });
-
     } catch (error) {
       console.error("❌ Error fetching user information:", error);
       // Si falla online, intenta cargar offline
@@ -482,7 +479,7 @@ export default function Home({ activeTab, onTabPress }) {
   const fetchAndCacheQuestionsAndRelated = async (forms, token) => {
     // Crear batches más pequeños para no bloquear la UI
     const BATCH_SIZE = 3; // Procesar 3 formularios a la vez
-    
+
     let allQuestions = {};
     let allFormsMetadata = {};
     let allRelatedAnswers = {};
@@ -490,12 +487,12 @@ export default function Home({ activeTab, onTabPress }) {
     // Procesar formularios en batches
     for (let i = 0; i < forms.length; i += BATCH_SIZE) {
       const batch = forms.slice(i, i + BATCH_SIZE);
-      
+
       // Procesar batch en paralelo
       const batchPromises = batch.map(async (form) => {
         try {
           const backendUrl = await getBackendUrl();
-          
+
           // 1. Obtener preguntas del formulario
           const qRes = await fetch(`${backendUrl}/forms/${form.id}`, {
             method: "GET",
@@ -504,9 +501,10 @@ export default function Home({ activeTab, onTabPress }) {
               "Content-Type": "application/json",
             },
           });
-          
+
           const qData = await qRes.json();
-          if (!qRes.ok) throw new Error(qData.detail || "Error fetching questions");
+          if (!qRes.ok)
+            throw new Error(qData.detail || "Error fetching questions");
 
           // Procesar preguntas
           const adjustedQuestions = qData.questions.map((question) => {
@@ -533,13 +531,15 @@ export default function Home({ activeTab, onTabPress }) {
             metadata: {
               title: qData.title,
               description: qData.description,
-              logo_url: extractLogoUrl(form, qData)
+              logo_url: extractLogoUrl(form, qData),
             },
-            relatedAnswers: {}
+            relatedAnswers: {},
           };
 
           // 2. Obtener respuestas relacionadas para preguntas tipo tabla
-          const tableQuestions = adjustedQuestions.filter(q => q.question_type === "table");
+          const tableQuestions = adjustedQuestions.filter(
+            (q) => q.question_type === "table"
+          );
           const relatedPromises = tableQuestions.map(async (question) => {
             try {
               const relRes = await fetch(
@@ -552,9 +552,9 @@ export default function Home({ activeTab, onTabPress }) {
               const relData = await relRes.json();
               return {
                 questionId: question.id,
-                answers: Array.isArray(relData.data) 
-                  ? relData.data.map((item) => item.name) 
-                  : []
+                answers: Array.isArray(relData.data)
+                  ? relData.data.map((item) => item.name)
+                  : [],
               };
             } catch (e) {
               return { questionId: question.id, answers: [] };
@@ -567,7 +567,6 @@ export default function Home({ activeTab, onTabPress }) {
           });
 
           return formResult;
-
         } catch (e) {
           console.error(`❌ Error procesando formulario ${form.id}:`, e);
           return null;
@@ -576,9 +575,9 @@ export default function Home({ activeTab, onTabPress }) {
 
       // Esperar que termine el batch actual
       const batchResults = await Promise.all(batchPromises);
-      
+
       // Consolidar resultados del batch
-      batchResults.forEach(result => {
+      batchResults.forEach((result) => {
         if (result) {
           allQuestions[result.formId] = result.questions;
           allFormsMetadata[result.formId] = result.metadata;
@@ -587,15 +586,21 @@ export default function Home({ activeTab, onTabPress }) {
       });
 
       // ✅ Dar tiempo al hilo principal entre batches
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
 
     // Guardar todo en AsyncStorage al final
     try {
       await Promise.all([
         AsyncStorage.setItem(QUESTIONS_KEY, JSON.stringify(allQuestions)),
-        AsyncStorage.setItem(FORMS_METADATA_KEY, JSON.stringify(allFormsMetadata)),
-        AsyncStorage.setItem(RELATED_ANSWERS_KEY, JSON.stringify(allRelatedAnswers))
+        AsyncStorage.setItem(
+          FORMS_METADATA_KEY,
+          JSON.stringify(allFormsMetadata)
+        ),
+        AsyncStorage.setItem(
+          RELATED_ANSWERS_KEY,
+          JSON.stringify(allRelatedAnswers)
+        ),
       ]);
       console.log("✅ Datos cacheados exitosamente en background");
     } catch (error) {
@@ -631,11 +636,10 @@ export default function Home({ activeTab, onTabPress }) {
       // Usar Promise sin await para que se ejecute en paralelo
       Promise.all([
         AsyncStorage.setItem("offline_forms", JSON.stringify(data)),
-        fetchAndCacheQuestionsAndRelated(data, token)
-      ]).catch(error => {
+        fetchAndCacheQuestionsAndRelated(data, token),
+      ]).catch((error) => {
         console.error("❌ Error en operaciones de background:", error);
       });
-
     } catch (error) {
       console.error("❌ Error al obtener los formularios del usuario:", error);
       setLoading(false);
@@ -666,7 +670,7 @@ export default function Home({ activeTab, onTabPress }) {
       // Cargar datos críticos que ya están en cache
       const [storedForms, storedUserInfo] = await Promise.all([
         AsyncStorage.getItem("offline_forms"),
-        AsyncStorage.getItem(USER_INFO_KEY)
+        AsyncStorage.getItem(USER_INFO_KEY),
       ]);
 
       if (storedForms) {
@@ -730,20 +734,16 @@ export default function Home({ activeTab, onTabPress }) {
 
       if (state.isConnected) {
         // ✅ Ejecutar ambas consultas en paralelo
-        Promise.all([
-          fetchUserForms(),
-          fetchUserInfo()
-        ]).catch(error => {
+        Promise.all([fetchUserForms(), fetchUserInfo()]).catch((error) => {
           console.error("❌ Error en consultas principales:", error);
         });
       } else {
         // ✅ También ejecutar carga offline en paralelo
-        Promise.all([
-          loadOfflineForms(),
-          loadUserInfoOffline()
-        ]).catch(error => {
-          console.error("❌ Error cargando datos offline:", error);
-        });
+        Promise.all([loadOfflineForms(), loadUserInfoOffline()]).catch(
+          (error) => {
+            console.error("❌ Error cargando datos offline:", error);
+          }
+        );
       }
     };
 
@@ -917,18 +917,16 @@ export default function Home({ activeTab, onTabPress }) {
                   showsVerticalScrollIndicator={false}
                   horizontal={false}
                 >
-                  {userForms &&
-                    userForms.map(
-                      (form) =>
-                        form && (
-                          <View style={styles.formCardWrapper} key={form.id}>
-                            <FormCard
-                              form={form}
-                              onPress={() => handleFormPress(form)}
-                            />
-                          </View>
-                        )
-                    )}
+                  {/* Mostrar formularios agrupados por categoría en acordeones */}
+                  {categorizedForms.map((category) => (
+                    <CategoryCard
+                      key={category.id}
+                      category={category}
+                      isExpanded={!!expandedCategories[category.id]}
+                      onToggle={() => toggleCategory(category.id)}
+                      onFormPress={handleFormPress}
+                    />
+                  ))}
                 </ScrollView>
               </LinearGradient>
             </View>
@@ -1316,5 +1314,52 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     letterSpacing: 0.2,
   },
-  // ...otros estilos existentes si es necesario...
+  // NUEVOS ESTILOS PARA CATEGORÍAS
+  categoryContainer: {
+    marginBottom: height * 0.02,
+    borderRadius: width * 0.035,
+    overflow: "hidden",
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#e0e0e0",
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  categoryHeader: {
+    backgroundColor: "#f7f7f9",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  categoryTitleContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  categoryTitle: {
+    fontSize: width * 0.04,
+    fontWeight: "bold",
+    color: "#333",
+    marginRight: 8,
+  },
+  categoryCount: {
+    fontSize: width * 0.035,
+    color: "#666",
+    fontWeight: "500",
+  },
+  expandIcon: {
+    fontSize: width * 0.045,
+    color: "#12A0AF",
+    lineHeight: 24,
+  },
+  formsInCategory: {
+    paddingBottom: 12,
+    paddingHorizontal: 16,
+    borderTopWidth: 1,
+    borderTopColor: "#e0e0e0",
+  },
 });
