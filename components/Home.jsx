@@ -34,6 +34,7 @@ const FORMS_METADATA_KEY = "offline_forms_metadata";
 const RELATED_ANSWERS_KEY = "offline_related_answers";
 const INACTIVITY_TIMEOUT = 10 * 60 * 1000; // 10 minutos
 const BACKEND_URL_KEY = "backend_url";
+
 const getBackendUrl = async () => {
   const stored = await AsyncStorage.getItem(BACKEND_URL_KEY);
   return stored || "";
@@ -166,6 +167,38 @@ const FormCard = ({ form, onPress }) => (
   </TouchableOpacity>
 );
 
+// NUEVO: Componente para renderizar cada categoría
+const CategoryCard = ({ category, onToggle, isExpanded, onFormPress }) => (
+  <View style={styles.categoryContainer}>
+    <TouchableOpacity
+      style={styles.categoryHeader}
+      onPress={onToggle}
+      activeOpacity={0.8}
+    >
+      <View style={styles.categoryTitleContainer}>
+        <Text style={styles.categoryTitle}>{category.name}</Text>
+        <Text style={styles.categoryCount}>
+          ({category.forms.length} formato{category.forms.length !== 1 ? 's' : ''})
+        </Text>
+      </View>
+      <Text style={styles.expandIcon}>{isExpanded ? '▼' : '▶'}</Text>
+    </TouchableOpacity>
+    
+    {isExpanded && (
+      <View style={styles.formsInCategory}>
+        {category.forms.map((form) => (
+          <View key={form.id} style={styles.formCardWrapper}>
+            <FormCard
+              form={form}
+              onPress={() => onFormPress(form)}
+            />
+          </View>
+        ))}
+      </View>
+    )}
+  </View>
+);
+
 // Barra de tabs inferior fija, ahora incluye Home y maneja navegación global
 const BottomTabBar = ({ activeTab, onTabPress }) => (
   <View style={styles.tabBarContainer}>
@@ -288,6 +321,8 @@ export function AppWithTabBar() {
 export default function Home({ activeTab, onTabPress }) {
   const router = useRouter();
   const [userForms, setUserForms] = useState([]);
+  const [categorizedForms, setCategorizedForms] = useState([]); // NUEVO
+  const [expandedCategories, setExpandedCategories] = useState({}); // NUEVO
   const [isOffline, setIsOffline] = useState(false);
   const [loading, setLoading] = useState(true);
   const [userInfo, setUserInfo] = useState(null); // State to store user information
@@ -315,10 +350,82 @@ export default function Home({ activeTab, onTabPress }) {
   const FORMS_KEY = "offline_forms";
   const PENDING_FORMS_KEY = "pending_forms";
 
-  // Guarda la info de usuario en AsyncStorage
+  // NUEVA FUNCIÓN: Organizar formularios por categorías
+  const organizeByCategorys = (formsList) => {
+    const categoriesMap = {};
+
+    formsList.forEach(form => {
+      const categoryName = form.category?.name || 'Sin Categoría';
+      const categoryId = form.category?.id || 'no-category';
+
+      if (!categoriesMap[categoryId]) {
+        categoriesMap[categoryId] = {
+          id: categoryId,
+          name: categoryName,
+          forms: []
+        };
+      }
+
+      categoriesMap[categoryId].forms.push(form);
+    });
+
+    // Convertir objeto a array y ordenar
+    const categoriesArray = Object.values(categoriesMap).sort((a, b) => {
+      // Poner "Sin Categoría" al final
+      if (a.id === 'no-category') return 1;
+      if (b.id === 'no-category') return -1;
+      return a.name.localeCompare(b.name);
+    });
+
+    setCategorizedForms(categoriesArray);
+  };
+
+  // NUEVA FUNCIÓN: Alternar expansión de categoría
+  const toggleCategory = (categoryId) => {
+    setExpandedCategories(prev => ({
+      ...prev,
+      [categoryId]: !prev[categoryId]
+    }));
+  };
+
+  // ✅ OPTIMIZADO: Función auxiliar para extraer logo URL
+  const findLogoInDesign = (formDesign) => {
+    if (!Array.isArray(formDesign)) return null;
+    
+    for (const item of formDesign) {
+      // Caso 1: logo directo
+      if (item.logo) {
+        return typeof item.logo === "string" ? item.logo : item.logo.url;
+      }
+      
+      // Caso 2: tipo logo con props
+      if (item.type === "logo" && item.props && item.props.url) {
+        return item.props.url;
+      }
+    }
+    
+    return null;
+  };
+
+  const extractLogoUrl = (form, qData) => {
+    // Buscar en form.form_design
+    let logoUrl = findLogoInDesign(form.form_design);
+    
+    // Si no está, buscar en qData.form_design
+    if (!logoUrl) {
+      logoUrl = findLogoInDesign(qData.form_design);
+    }
+    
+    return logoUrl;
+  };
+
+  // ✅ OPTIMIZADO: Guarda la info de usuario en AsyncStorage (no-bloqueante)
   const saveUserInfoOffline = async (user) => {
     try {
-      await AsyncStorage.setItem(USER_INFO_KEY, JSON.stringify(user));
+      // Usar setTimeout para no bloquear el hilo principal
+      setTimeout(async () => {
+        await AsyncStorage.setItem(USER_INFO_KEY, JSON.stringify(user));
+      }, 0);
     } catch (e) {
       console.error("❌ Error guardando userInfo offline:", e);
     }
@@ -337,7 +444,7 @@ export default function Home({ activeTab, onTabPress }) {
     }
   };
 
-  // Carga la info de usuario desde el servidor
+  // ✅ OPTIMIZADO: Carga la info de usuario desde el servidor
   const fetchUserInfo = async () => {
     setLoadingUser(true);
     try {
@@ -354,106 +461,86 @@ export default function Home({ activeTab, onTabPress }) {
       }
 
       const data = await response.json();
-      setUserInfo(data.user); // Save user information
-      saveUserInfoOffline(data.user); // Guarda siempre la info online/offline
+      
+      // ✅ MOSTRAR DATOS INMEDIATAMENTE
+      setUserInfo(data.user);
+      setLoadingUser(false); // Ocultar spinner inmediatamente
+
+      // ✅ GUARDAR EN BACKGROUND
+      saveUserInfoOffline(data.user).catch(error => {
+        console.error("❌ Error guardando userInfo offline:", error);
+      });
+
     } catch (error) {
       console.error("❌ Error fetching user information:", error);
       // Si falla online, intenta cargar offline
       loadUserInfoOffline();
-    } finally {
-      setLoadingUser(false);
     }
   };
 
-  // Modifica fetchAndCacheQuestionsAndRelated para guardar el logo offline
+  // ✅ OPTIMIZADO: Función para fetchAndCacheQuestionsAndRelated con batches
   const fetchAndCacheQuestionsAndRelated = async (forms, token) => {
-    // Guarda preguntas y respuestas relacionadas para cada formulario
+    // Crear batches más pequeños para no bloquear la UI
+    const BATCH_SIZE = 3; // Procesar 3 formularios a la vez
+    
     let allQuestions = {};
     let allFormsMetadata = {};
     let allRelatedAnswers = {};
 
-    for (const form of forms) {
-      try {
-        const backendUrl = await getBackendUrl();
-        // 1. Preguntas del formulario
-        const qRes = await fetch(`${backendUrl}/forms/${form.id}`, {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        });
-        const qData = await qRes.json();
-        if (!qRes.ok)
-          throw new Error(qData.detail || "Error fetching questions");
+    // Procesar formularios en batches
+    for (let i = 0; i < forms.length; i += BATCH_SIZE) {
+      const batch = forms.slice(i, i + BATCH_SIZE);
+      
+      // Procesar batch en paralelo
+      const batchPromises = batch.map(async (form) => {
+        try {
+          const backendUrl = await getBackendUrl();
+          
+          // 1. Obtener preguntas del formulario
+          const qRes = await fetch(`${backendUrl}/forms/${form.id}`, {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+          });
+          
+          const qData = await qRes.json();
+          if (!qRes.ok) throw new Error(qData.detail || "Error fetching questions");
 
-        // Ajusta opciones para multiple_choice/one_choice
-        const adjustedQuestions = qData.questions.map((question) => {
-          if (
-            (question.question_type === "multiple_choice" ||
-              question.question_type === "one_choice") &&
-            Array.isArray(question.options)
-          ) {
-            return {
-              ...question,
-              options: question.options.map((option) => option.option_text),
-            };
-          }
-          if (question.question_type === "table") {
-            return { ...question, options: [] };
-          }
-          return question;
-        });
-
-        allQuestions[form.id] = adjustedQuestions;
-
-        // --- GUARDAR LOGO Y METADATA ---
-        // Busca el logo en form.form_design (si existe)
-        let logoUrl = null;
-        if (Array.isArray(form.form_design)) {
-          for (const item of form.form_design) {
+          // Procesar preguntas
+          const adjustedQuestions = qData.questions.map((question) => {
             if (
-              item.logo &&
-              (typeof item.logo === "string" || (item.logo && item.logo.url))
+              (question.question_type === "multiple_choice" ||
+                question.question_type === "one_choice") &&
+              Array.isArray(question.options)
             ) {
-              logoUrl =
-                typeof item.logo === "string" ? item.logo : item.logo.url;
-              break;
+              return {
+                ...question,
+                options: question.options.map((option) => option.option_text),
+              };
             }
-            // Si el logo está como objeto dentro de item.logo
-            if (item.type === "logo" && item.props && item.props.url) {
-              logoUrl = item.props.url;
-              break;
+            if (question.question_type === "table") {
+              return { ...question, options: [] };
             }
-          }
-        }
-        // Si no está en form.form_design, intenta buscar en qData.form_design
-        if (!logoUrl && Array.isArray(qData.form_design)) {
-          for (const item of qData.form_design) {
-            if (
-              item.logo &&
-              (typeof item.logo === "string" || (item.logo && item.logo.url))
-            ) {
-              logoUrl =
-                typeof item.logo === "string" ? item.logo : item.logo.url;
-              break;
-            }
-            if (item.type === "logo" && item.props && item.props.url) {
-              logoUrl = item.props.url;
-              break;
-            }
-          }
-        }
+            return question;
+          });
 
-        allFormsMetadata[form.id] = {
-          title: qData.title,
-          description: qData.description,
-          logo_url: logoUrl || null,
-        };
+          // Guardar datos del formulario
+          const formResult = {
+            formId: form.id,
+            questions: adjustedQuestions,
+            metadata: {
+              title: qData.title,
+              description: qData.description,
+              logo_url: extractLogoUrl(form, qData)
+            },
+            relatedAnswers: {}
+          };
 
-        // 2. Respuestas relacionadas para preguntas tipo tabla
-        for (const question of adjustedQuestions) {
-          if (question.question_type === "table") {
+          // 2. Obtener respuestas relacionadas para preguntas tipo tabla
+          const tableQuestions = adjustedQuestions.filter(q => q.question_type === "table");
+          const relatedPromises = tableQuestions.map(async (question) => {
             try {
               const relRes = await fetch(
                 `${backendUrl}/questions/question-table-relation/answers/${question.id}`,
@@ -463,31 +550,60 @@ export default function Home({ activeTab, onTabPress }) {
                 }
               );
               const relData = await relRes.json();
-              allRelatedAnswers[question.id] = Array.isArray(relData.data)
-                ? relData.data.map((item) => item.name)
-                : [];
+              return {
+                questionId: question.id,
+                answers: Array.isArray(relData.data) 
+                  ? relData.data.map((item) => item.name) 
+                  : []
+              };
             } catch (e) {
-              allRelatedAnswers[question.id] = [];
+              return { questionId: question.id, answers: [] };
             }
-          }
+          });
+
+          const relatedResults = await Promise.all(relatedPromises);
+          relatedResults.forEach(({ questionId, answers }) => {
+            formResult.relatedAnswers[questionId] = answers;
+          });
+
+          return formResult;
+
+        } catch (e) {
+          console.error(`❌ Error procesando formulario ${form.id}:`, e);
+          return null;
         }
-      } catch (e) {
-        continue;
-      }
+      });
+
+      // Esperar que termine el batch actual
+      const batchResults = await Promise.all(batchPromises);
+      
+      // Consolidar resultados del batch
+      batchResults.forEach(result => {
+        if (result) {
+          allQuestions[result.formId] = result.questions;
+          allFormsMetadata[result.formId] = result.metadata;
+          Object.assign(allRelatedAnswers, result.relatedAnswers);
+        }
+      });
+
+      // ✅ Dar tiempo al hilo principal entre batches
+      await new Promise(resolve => setTimeout(resolve, 50));
     }
 
-    // Guarda todo en AsyncStorage
-    await AsyncStorage.setItem(QUESTIONS_KEY, JSON.stringify(allQuestions));
-    await AsyncStorage.setItem(
-      FORMS_METADATA_KEY,
-      JSON.stringify(allFormsMetadata)
-    );
-    await AsyncStorage.setItem(
-      RELATED_ANSWERS_KEY,
-      JSON.stringify(allRelatedAnswers)
-    );
+    // Guardar todo en AsyncStorage al final
+    try {
+      await Promise.all([
+        AsyncStorage.setItem(QUESTIONS_KEY, JSON.stringify(allQuestions)),
+        AsyncStorage.setItem(FORMS_METADATA_KEY, JSON.stringify(allFormsMetadata)),
+        AsyncStorage.setItem(RELATED_ANSWERS_KEY, JSON.stringify(allRelatedAnswers))
+      ]);
+      console.log("✅ Datos cacheados exitosamente en background");
+    } catch (error) {
+      console.error("❌ Error guardando cache:", error);
+    }
   };
 
+  // ✅ OPTIMIZADO: Función principal fetchUserForms
   const fetchUserForms = async () => {
     try {
       const token = await AsyncStorage.getItem("authToken");
@@ -505,16 +621,23 @@ export default function Home({ activeTab, onTabPress }) {
       if (!response.ok) {
         throw new Error(data.detail || "Error fetching user forms");
       }
+
+      // ✅ MOSTRAR DATOS INMEDIATAMENTE
       setUserForms(data);
+      organizeByCategorys(data);
+      setLoading(false); // Ocultar spinner inmediatamente
 
-      // Cache forms for offline access
-      await AsyncStorage.setItem("offline_forms", JSON.stringify(data));
+      // ✅ GUARDAR EN BACKGROUND (no bloquear UI)
+      // Usar Promise sin await para que se ejecute en paralelo
+      Promise.all([
+        AsyncStorage.setItem("offline_forms", JSON.stringify(data)),
+        fetchAndCacheQuestionsAndRelated(data, token)
+      ]).catch(error => {
+        console.error("❌ Error en operaciones de background:", error);
+      });
 
-      // NUEVO: Guarda preguntas y respuestas relacionadas de todos los formularios
-      await fetchAndCacheQuestionsAndRelated(data, token);
     } catch (error) {
       console.error("❌ Error al obtener los formularios del usuario:", error);
-    } finally {
       setLoading(false);
     }
   };
@@ -523,7 +646,10 @@ export default function Home({ activeTab, onTabPress }) {
     try {
       const storedForms = await AsyncStorage.getItem("offline_forms");
       if (storedForms) {
-        setUserForms(JSON.parse(storedForms));
+        const forms = JSON.parse(storedForms);
+        setUserForms(forms);
+        // NUEVO: Organizar por categorías también offline
+        organizeByCategorys(forms);
       } else {
         Alert.alert("Modo Offline", "No hay datos guardados para mostrar.");
       }
@@ -531,6 +657,31 @@ export default function Home({ activeTab, onTabPress }) {
       console.error("❌ Error cargando formularios offline:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ✅ NUEVA FUNCIÓN: Pre-cargar datos críticos desde cache
+  const preloadCriticalData = async () => {
+    try {
+      // Cargar datos críticos que ya están en cache
+      const [storedForms, storedUserInfo] = await Promise.all([
+        AsyncStorage.getItem("offline_forms"),
+        AsyncStorage.getItem(USER_INFO_KEY)
+      ]);
+
+      if (storedForms) {
+        const forms = JSON.parse(storedForms);
+        setUserForms(forms);
+        organizeByCategorys(forms);
+        setLoading(false);
+      }
+
+      if (storedUserInfo) {
+        setUserInfo(JSON.parse(storedUserInfo));
+        setLoadingUser(false);
+      }
+    } catch (error) {
+      console.error("❌ Error precargando datos:", error);
     }
   };
 
@@ -565,20 +716,34 @@ export default function Home({ activeTab, onTabPress }) {
     router.push("/pending-forms");
   };
 
-  // Modifica la sincronización de formularios pendientes para enviar también el serial offline asociado a cada archivo
+  // ✅ NUEVO: Pre-cargar datos inmediatamente desde cache
+  useEffect(() => {
+    // Pre-cargar datos inmediatamente desde cache
+    preloadCriticalData();
+  }, []);
+
+  // ✅ OPTIMIZADO: useEffect principal con operaciones en paralelo
   useEffect(() => {
     const checkNetworkStatus = async () => {
       const state = await NetInfo.fetch();
       setIsOffline(!state.isConnected);
 
       if (state.isConnected) {
-        await fetchUserForms();
-        fetchUserInfo();
-        // Ya NO sincroniza automáticamente los pending_forms aquí.
-        // Solo carga formularios y usuario.
+        // ✅ Ejecutar ambas consultas en paralelo
+        Promise.all([
+          fetchUserForms(),
+          fetchUserInfo()
+        ]).catch(error => {
+          console.error("❌ Error en consultas principales:", error);
+        });
       } else {
-        await loadOfflineForms();
-        loadUserInfoOffline();
+        // ✅ También ejecutar carga offline en paralelo
+        Promise.all([
+          loadOfflineForms(),
+          loadUserInfoOffline()
+        ]).catch(error => {
+          console.error("❌ Error cargando datos offline:", error);
+        });
       }
     };
 
@@ -586,7 +751,6 @@ export default function Home({ activeTab, onTabPress }) {
 
     const unsubscribe = NetInfo.addEventListener((state) => {
       setIsOffline(!state.isConnected);
-      // Ya NO sincroniza automáticamente los pending_forms aquí.
     });
 
     return () => unsubscribe();

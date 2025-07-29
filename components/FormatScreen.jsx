@@ -141,6 +141,7 @@ export default function FormatScreen(props) {
     try {
       // Preguntas
       const storedQuestions = await AsyncStorage.getItem(QUESTIONS_KEY);
+ 
       const offlineQuestions = storedQuestions
         ? JSON.parse(storedQuestions)
         : {};
