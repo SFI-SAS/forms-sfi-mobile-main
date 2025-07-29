@@ -14,6 +14,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { MaterialIcons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
+import { useRouter } from "expo-router";
 import NetInfo from "@react-native-community/netinfo";
 
 const BACKEND_URL_KEY = "backend_url";
@@ -32,7 +33,9 @@ export default function Settings() {
   const [userDraft, setUserDraft] = useState({});
   const [theme, setTheme] = useState("light");
   const [loadingUserUpdate, setLoadingUserUpdate] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
   const colorScheme = useColorScheme();
+  const router = useRouter();
 
   useEffect(() => {
     AsyncStorage.getItem(BACKEND_URL_KEY).then((url) => {
@@ -246,6 +249,26 @@ export default function Settings() {
     }
   };
 
+  useEffect(() => {
+    const checkNet = async () => {
+      const net = await NetInfo.fetch();
+      setIsOnline(net.isConnected);
+    };
+    checkNet();
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      setIsOnline(state.isConnected);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // NUEVO: Solo permitir PDF si es admin o creator
+  const canDownloadPdf =
+    isOnline &&
+    userInfo &&
+    (userInfo.user_type === "admin" ||
+      userInfo.user_type === "creator" ||
+      userInfo.user_type === "creador");
+
   return (
     <ScrollView style={{ flex: 1, backgroundColor: "#F4F3FF" }}>
       <View style={styles.container}>
@@ -396,6 +419,40 @@ export default function Settings() {
             <Text style={styles.userLabel}>No user data available.</Text>
           )}
         </View>
+
+        {/* NUEVA SECCIÓN: Formatos PDF */}
+        <View style={styles.sectionBox}>
+          <Text style={styles.sectionTitle}>Formatos PDF</Text>
+          <Text style={styles.label}>
+            Descarga y personaliza los formatos en PDF.
+          </Text>
+          <TouchableOpacity
+            style={[
+              styles.pdfButton,
+              !canDownloadPdf && styles.pdfButtonDisabled,
+            ]}
+            onPress={() => {
+              if (canDownloadPdf) {
+                router.push("/form-pdf-manager");
+              }
+            }}
+            disabled={!canDownloadPdf}
+            activeOpacity={canDownloadPdf ? 0.8 : 1}
+          >
+            <Text
+              style={[
+                styles.pdfButtonText,
+                !canDownloadPdf && { color: "#aaa" },
+              ]}
+            >
+              {canDownloadPdf
+                ? "Ver y descargar formatos"
+                : !isOnline
+                  ? "Conéctate a internet para descargar PDF"
+                  : "Solo disponible para administradores o creadores"}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </ScrollView>
   );
@@ -534,5 +591,21 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     fontSize: 15,
     textAlign: "center",
+  },
+  pdfButton: {
+    backgroundColor: "#12A0AF",
+    borderRadius: 8,
+    padding: 14,
+    alignItems: "center",
+    marginTop: 10,
+    marginBottom: 2,
+  },
+  pdfButtonDisabled: {
+    backgroundColor: "#e5e7eb",
+  },
+  pdfButtonText: {
+    color: "#fff",
+    fontWeight: "bold",
+    fontSize: 16,
   },
 });

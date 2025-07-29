@@ -827,36 +827,6 @@ export default function Home({ activeTab, onTabPress }) {
     };
   }, []);
 
-  // --- NOTIFICACIONES NATIVAS ---
-  // useEffect(() => {
-  //   // Solo ejecutar notificaciones si NO estamos en Expo Go
-  //   const isExpoGo =
-  //     typeof Constants !== "undefined" && Constants.appOwnership === "expo";
-  //   if (isExpoGo) return;
-
-  //   const checkPendingFormsAndNotify = async () => {
-  //     try {
-  //       const pending = await AsyncStorage.getItem("pending_forms");
-  //       if (pending) {
-  //         const pendingArr = JSON.parse(pending);
-  //         if (Array.isArray(pendingArr) && pendingArr.length > 0) {
-  //           await Notifications.scheduleNotificationAsync({
-  //             content: {
-  //               title: "Tienes formularios pendientes",
-  //               body: `Hay ${pendingArr.length} formularios sin enviar. ¡No olvides sincronizarlos!`,
-  //               sound: true,
-  //               priority: Notifications.AndroidNotificationPriority.HIGH,
-  //             },
-  //             trigger: null,
-  //           });
-  //         }
-  //       }
-  //     } catch (e) {
-  //       // Silenciar errores de notificación
-  //     }
-  //   };
-  //   checkPendingFormsAndNotify();
-  // }, []);
 
   return (
     <LinearGradient
