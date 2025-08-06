@@ -720,7 +720,7 @@ export default function FormPdfManager() {
               )}
 
               <View style={styles.modalActions}>
-                <TouchableOpacity
+                {/* <TouchableOpacity
                   style={styles.modalBtn}
                   onPress={() =>
                     handleDownloadPdf(
@@ -736,7 +736,7 @@ export default function FormPdfManager() {
                   ) : (
                     <Text style={styles.modalBtnText}>Descargar PDF</Text>
                   )}
-                </TouchableOpacity>
+                </TouchableOpacity> */}
                 <TouchableOpacity
                   style={[styles.modalBtn, { backgroundColor: "#2563eb" }]}
                   onPress={handleDownloadCsv}
