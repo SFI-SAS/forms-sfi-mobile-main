@@ -512,13 +512,11 @@ export default function FormPdfManager() {
       const backendUrl = await getBackendUrl();
       const token = await AsyncStorage.getItem("authToken");
       const url = `${backendUrl}/list_form/forms/${customizeModal.form.id}/complete-info`;
-      console.log("[DEBUG][CSV] Fetching complete-info for CSV:", url);
 
       const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      console.log("[DEBUG][CSV] complete-info data:", data);
 
       if (
         !data ||
