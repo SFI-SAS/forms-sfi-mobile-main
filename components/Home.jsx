@@ -827,7 +827,6 @@ export default function Home({ activeTab, onTabPress }) {
     };
   }, []);
 
-
   return (
     <LinearGradient
       colors={["#4B34C7", "#4B34C7"]}
@@ -1066,7 +1065,7 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "bold",
     fontSize: width * 0.055,
-    letterSpacing: 1,
+    //letterSpacing: 1,
   },
   userName: {
     fontSize: width * 0.045,
@@ -1314,7 +1313,7 @@ const styles = StyleSheet.create({
     fontSize: width * 0.04,
     fontWeight: "bold",
     color: "#333",
-    marginRight: 8,
+    marginRight: 7,
   },
   categoryCount: {
     fontSize: width * 0.035,

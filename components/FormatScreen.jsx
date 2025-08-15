@@ -122,6 +122,8 @@ export default function FormatScreen(props) {
   });
   const [generatingSerial, setGeneratingSerial] = useState(false);
   const [formMeta, setFormMeta] = useState({}); // metadata del formulario (incluye logo)
+  const [locationRelatedAnswers, setLocationRelatedAnswers] = useState({}); // { [questionId]: [{label, value}] }
+  const [locationSelected, setLocationSelected] = useState({}); // { [questionId]: value }
 
   useFocusEffect(
     React.useCallback(() => {
@@ -141,7 +143,7 @@ export default function FormatScreen(props) {
     try {
       // Preguntas
       const storedQuestions = await AsyncStorage.getItem(QUESTIONS_KEY);
- 
+      console.log(storedQuestions);
       const offlineQuestions = storedQuestions
         ? JSON.parse(storedQuestions)
         : {};
@@ -154,12 +156,16 @@ export default function FormatScreen(props) {
         return;
       }
       setQuestions(offlineQuestions[formId]);
-
+      console.log(
+        "📋 Preguntas del formulario seleccionado",
+        offlineQuestions[formId][0].options
+      );
       // Respuestas relacionadas para preguntas tipo tabla
       const storedRelated = await AsyncStorage.getItem(RELATED_ANSWERS_KEY);
       const offlineRelated = storedRelated ? JSON.parse(storedRelated) : {};
       // Carga para cada pregunta tipo tabla
       const tableAnswersObj = {};
+      const locationRelatedObj = {};
       offlineQuestions[formId].forEach((q) => {
         if (q.question_type === "table") {
           const rel = offlineRelated[q.id];
@@ -185,8 +191,39 @@ export default function FormatScreen(props) {
             tableAnswersObj[q.id] = [];
           }
         }
+        // NUEVO: Si es location y tiene related_answers, extraerlos
+        if (
+          q.question_type === "location" &&
+          Array.isArray(q.related_answers) &&
+          q.related_answers.length > 0
+        ) {
+          // related_answers es un array de objetos con answers: [{question_id, answer_text}]
+          // Buscar el campo de coordenadas y el campo de label (puede variar según el formulario)
+          locationRelatedObj[q.id] = q.related_answers.map((rel) => {
+            // Busca el campo de coordenadas (answer_text que parece lat,long)
+            const coordAns = rel.answers.find(
+              (a) =>
+                a.answer_text &&
+                a.answer_text.match(/^-?\d+\.\d+,\s*-?\d+\.\d+/)
+            );
+            // Busca el campo de label (el otro campo, si existe)
+            const labelAns = rel.answers.find(
+              (a) => !a.answer_text.match(/^-?\d+\.\d+,\s*-?\d+\.\d+/)
+            );
+            return {
+              label: labelAns
+                ? labelAns.answer_text
+                : coordAns
+                  ? coordAns.answer_text
+                  : "Ubicación",
+              value: coordAns ? coordAns.answer_text : "",
+              response_id: rel.response_id,
+            };
+          });
+        }
       });
       setTableAnswers(tableAnswersObj);
+      setLocationRelatedAnswers(locationRelatedObj);
     } catch (error) {
       console.error("❌ Error cargando datos offline:", error);
       Alert.alert("Error", "No se pudieron cargar los datos offline.");
@@ -754,6 +791,10 @@ export default function FormatScreen(props) {
         questions,
         mode: "online",
       });
+      console.log(
+        "[DEBUG][OFFLINE] Guardado en completed_form_answers para MyForms (online)",
+        { formId: id, answers: allAnswers }
+      );
 
       Alert.alert("Éxito ✅", "Formulario enviado correctamente");
       router.back();
@@ -1389,6 +1430,11 @@ export default function FormatScreen(props) {
                   .filter((question) => !question.is_repeated)
                   .map((question) => {
                     const isLocked = nonRepeatedLocked;
+                    // Fix: define relatedOptions for location questions
+                    let relatedOptions = [];
+                    if (question.question_type === "location") {
+                      relatedOptions = locationRelatedAnswers[question.id] || [];
+                    }
                     return (
                       <View key={question.id} style={styles.questionContainer}>
                         {/* Mostrar el texto de la pregunta siempre */}
@@ -1676,6 +1722,7 @@ export default function FormatScreen(props) {
                         {/* Location */}
                         {question.question_type === "location" && (
                           <View style={{ width: "100%", marginBottom: 8 }}>
+                            {/* Captura de coordenadas */}
                             <TouchableOpacity
                               style={[
                                 styles.locationButton,
@@ -1699,6 +1746,49 @@ export default function FormatScreen(props) {
                               editable={false}
                               selectTextOnFocus={false}
                             />
+                            {/* NUEVO: Si hay related answers, mostrar Picker */}
+                            {relatedOptions.length > 0 && (
+                              <View style={{ marginTop: 8 }}>
+                                <Text
+                                  style={{
+                                    color: "#2563eb",
+                                    fontWeight: "bold",
+                                    marginBottom: 4,
+                                  }}
+                                >
+                                  Selecciona una ubicación relacionada:
+                                </Text>
+                                <Picker
+                                  selectedValue={
+                                    locationSelected[question.id] || ""
+                                  }
+                                  onValueChange={(val) => {
+                                    setLocationSelected((prev) => ({
+                                      ...prev,
+                                      [question.id]: val,
+                                    }));
+                                    setAnswers((prev) => ({
+                                      ...prev,
+                                      [question.id]: val,
+                                    }));
+                                  }}
+                                  style={styles.picker}
+                                  enabled={!isLocked}
+                                >
+                                  <Picker.Item
+                                    label="Selecciona una ubicación"
+                                    value=""
+                                  />
+                                  {relatedOptions.map((opt, idx) => (
+                                    <Picker.Item
+                                      key={idx}
+                                      label={opt.label + " (" + opt.value + ")"}
+                                      value={opt.value}
+                                    />
+                                  ))}
+                                </Picker>
+                              </View>
+                            )}
                             {locationError[question.id] && (
                               <Text style={{ color: "#ef4444", fontSize: 13 }}>
                                 {locationError[question.id]}
@@ -1723,6 +1813,11 @@ export default function FormatScreen(props) {
                 isRepeatedQuestions.map((question) => {
                   const isLocked = false;
                   const allowAddRemove = isRepeatedQuestions.length === 1;
+                  // Fix: define relatedOptions for location questions
+                  let relatedOptions = [];
+                  if (question.question_type === "location") {
+                    relatedOptions = locationRelatedAnswers[question.id] || [];
+                  }
                   return (
                     <View key={question.id} style={styles.questionContainer}>
                       {/* Mostrar el texto de la pregunta siempre */}
@@ -2070,6 +2165,49 @@ export default function FormatScreen(props) {
                             editable={false}
                             selectTextOnFocus={false}
                           />
+                          {/* NUEVO: Si hay related answers, mostrar Picker */}
+                          {relatedOptions.length > 0 && (
+                            <View style={{ marginTop: 8 }}>
+                              <Text
+                                style={{
+                                  color: "#2563eb",
+                                  fontWeight: "bold",
+                                  marginBottom: 4,
+                                }}
+                              >
+                                Selecciona una ubicación relacionada:
+                              </Text>
+                              <Picker
+                                selectedValue={
+                                  locationSelected[question.id] || ""
+                                }
+                                onValueChange={(val) => {
+                                  setLocationSelected((prev) => ({
+                                    ...prev,
+                                    [question.id]: val,
+                                  }));
+                                  setAnswers((prev) => ({
+                                    ...prev,
+                                    [question.id]: val,
+                                  }));
+                                }}
+                                style={styles.picker}
+                                enabled={!isLocked}
+                              >
+                                <Picker.Item
+                                  label="Selecciona una ubicación"
+                                  value=""
+                                />
+                                {relatedOptions.map((opt, idx) => (
+                                  <Picker.Item
+                                    key={idx}
+                                    label={opt.label + " (" + opt.value + ")"}
+                                    value={opt.value}
+                                  />
+                                ))}
+                              </Picker>
+                            </View>
+                          )}
                           {locationError[question.id] && (
                             <Text style={{ color: "#ef4444", fontSize: 13 }}>
                               {locationError[question.id]}

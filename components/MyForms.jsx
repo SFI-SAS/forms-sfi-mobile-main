@@ -132,6 +132,10 @@ export default function MyForms() {
             MY_FORMS_OFFLINE_KEY,
             JSON.stringify({ formsList, grouped })
           );
+          console.log(
+            "[DEBUG][OFFLINE] Guardado en MY_FORMS_OFFLINE_KEY (online)",
+            { formsList, grouped }
+          );
           onlineOk = true;
         } catch (err) {
           // Si falla online, intenta cargar offline
@@ -395,8 +399,8 @@ export default function MyForms() {
                                   {resp.mode === "offline"
                                     ? "Submitted Offline"
                                     : resp.mode === "online"
-                                    ? "Submitted Online"
-                                    : ""}
+                                      ? "Submitted Online"
+                                      : ""}
                                 </Text>
                                 <Text
                                   style={styles.diligMeta}
@@ -813,7 +817,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: "#12A0AF",
     shadowColor: "#12A0AF",
-    shadowOpacity: 0.10,
+    shadowOpacity: 0.1,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
     elevation: 8,

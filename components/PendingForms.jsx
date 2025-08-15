@@ -290,6 +290,10 @@ export default function PendingForms() {
         "pending_forms",
         JSON.stringify(updatedPendingForms)
       );
+      console.log(
+        "[DEBUG][OFFLINE] Actualizado pending_forms tras envío",
+        updatedPendingForms
+      );
       Alert.alert("Sincronización", "Formulario enviado correctamente.");
     } catch (error) {
       console.error("❌ Error en handleSubmitPendingForm:", error);
