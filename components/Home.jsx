@@ -487,12 +487,9 @@ export default function Home({ activeTab, onTabPress }) {
     // Procesar formularios en batches
     for (let i = 0; i < forms.length; i += BATCH_SIZE) {
       const batch = forms.slice(i, i + BATCH_SIZE);
-
-      // Procesar batch en paralelo
       const batchPromises = batch.map(async (form) => {
         try {
           const backendUrl = await getBackendUrl();
-
           // 1. Obtener preguntas del formulario
           const qRes = await fetch(`${backendUrl}/forms/${form.id}`, {
             method: "GET",
@@ -501,7 +498,6 @@ export default function Home({ activeTab, onTabPress }) {
               "Content-Type": "application/json",
             },
           });
-
           const qData = await qRes.json();
           if (!qRes.ok)
             throw new Error(qData.detail || "Error fetching questions");
@@ -524,18 +520,6 @@ export default function Home({ activeTab, onTabPress }) {
             return question;
           });
 
-          // Guardar datos del formulario
-          const formResult = {
-            formId: form.id,
-            questions: adjustedQuestions,
-            metadata: {
-              title: qData.title,
-              description: qData.description,
-              logo_url: extractLogoUrl(form, qData),
-            },
-            relatedAnswers: {},
-          };
-
           // 2. Obtener respuestas relacionadas para preguntas tipo tabla
           const tableQuestions = adjustedQuestions.filter(
             (q) => q.question_type === "table"
@@ -550,42 +534,76 @@ export default function Home({ activeTab, onTabPress }) {
                 }
               );
               const relData = await relRes.json();
+              // --- FIX: Guarda data como array de strings ---
               return {
                 questionId: question.id,
-                answers: Array.isArray(relData.data)
-                  ? relData.data.map((item) => item.name)
+                data: Array.isArray(relData.data)
+                  ? relData.data
+                      .map((item) =>
+                        typeof item === "object" && item.name
+                          ? item.name
+                          : typeof item === "string"
+                            ? item
+                            : ""
+                      )
+                      .filter((v) => typeof v === "string" && v.length > 0)
                   : [],
+                correlations: relData.correlations || {},
+                related_question: relData.related_question || null,
+                source: relData.source || "",
               };
             } catch (e) {
-              return { questionId: question.id, answers: [] };
+              return {
+                questionId: question.id,
+                data: [],
+                correlations: {},
+                related_question: null,
+                source: "",
+              };
             }
           });
 
           const relatedResults = await Promise.all(relatedPromises);
-          relatedResults.forEach(({ questionId, answers }) => {
-            formResult.relatedAnswers[questionId] = answers;
-          });
+          // Guarda answers, correlaciones y pregunta relacionada en relatedAnswers
+          const relatedAnswersObj = {};
+          relatedResults.forEach(
+            ({ questionId, data, correlations, related_question, source }) => {
+              relatedAnswersObj[questionId] = {
+                data,
+                correlations,
+                related_question,
+                source,
+              };
+            }
+          );
 
-          return formResult;
+          return {
+            formId: form.id,
+            questions: adjustedQuestions,
+            metadata: {
+              title: qData.title,
+              description: qData.description,
+              logo_url: extractLogoUrl(form, qData),
+            },
+            relatedAnswers: relatedAnswersObj,
+          };
         } catch (e) {
           console.error(`❌ Error procesando formulario ${form.id}:`, e);
           return null;
         }
       });
 
-      // Esperar que termine el batch actual
       const batchResults = await Promise.all(batchPromises);
 
-      // Consolidar resultados del batch
       batchResults.forEach((result) => {
         if (result) {
           allQuestions[result.formId] = result.questions;
           allFormsMetadata[result.formId] = result.metadata;
+          // --- FIX: Merge relatedAnswers por pregunta ---
           Object.assign(allRelatedAnswers, result.relatedAnswers);
         }
       });
 
-      // ✅ Dar tiempo al hilo principal entre batches
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
 
@@ -1332,3 +1350,53 @@ const styles = StyleSheet.create({
     borderTopColor: "#e0e0e0",
   },
 });
+
+// Cuando guardas las respuestas relacionadas en AsyncStorage, asegúrate de guardar la estructura correcta.
+// El objeto debe tener la forma:
+// { [questionId]: { data: [{name: "valor"}], correlations: {...}, ... } }
+const fetchAndCacheRelatedAnswers = async (
+  formId,
+  questions,
+  token,
+  backendUrl
+) => {
+  try {
+    const relatedAnswers = {};
+    for (const question of questions) {
+      if (question.question_type === "table") {
+        const res = await fetch(
+          `${backendUrl}/questions/question-table-relation/answers/${question.id}`,
+          {
+            method: "GET",
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
+        const relData = await res.json();
+        // --- FIX: Guarda la estructura completa, pero data como array de strings ---
+        relatedAnswers[question.id] = {
+          data: Array.isArray(relData.data)
+            ? relData.data
+                .map((item) =>
+                  typeof item === "object" && item.name
+                    ? item.name
+                    : typeof item === "string"
+                      ? item
+                      : ""
+                )
+                .filter((v) => typeof v === "string" && v.length > 0)
+            : [],
+          correlations: relData.correlations || {},
+          related_question: relData.related_question || null,
+          source: relData.source || "",
+        };
+      }
+    }
+    await AsyncStorage.setItem(
+      RELATED_ANSWERS_KEY,
+      JSON.stringify(relatedAnswers)
+    );
+    // ...existing code...
+  } catch (e) {
+    // ...existing code...
+  }
+};

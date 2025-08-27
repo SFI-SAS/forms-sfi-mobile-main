@@ -125,6 +125,11 @@ export default function FormatScreen(props) {
   const [locationRelatedAnswers, setLocationRelatedAnswers] = useState({}); // { [questionId]: [{label, value}] }
   const [locationSelected, setLocationSelected] = useState({}); // { [questionId]: value }
 
+  // NUEVO: Estado para correlaciones de preguntas tipo tabla
+  const [tableCorrelations, setTableCorrelations] = useState({});
+  const [tableRelatedQuestions, setTableRelatedQuestions] = useState({});
+  const [tableAutoFilled, setTableAutoFilled] = useState({}); // Para controlar si ya se autocompletó
+
   useFocusEffect(
     React.useCallback(() => {
       const disableBack = () => true;
@@ -143,7 +148,6 @@ export default function FormatScreen(props) {
     try {
       // Preguntas
       const storedQuestions = await AsyncStorage.getItem(QUESTIONS_KEY);
-      console.log(storedQuestions);
       const offlineQuestions = storedQuestions
         ? JSON.parse(storedQuestions)
         : {};
@@ -156,39 +160,41 @@ export default function FormatScreen(props) {
         return;
       }
       setQuestions(offlineQuestions[formId]);
-      console.log(
-        "📋 Preguntas del formulario seleccionado",
-        offlineQuestions[formId][0].options
-      );
       // Respuestas relacionadas para preguntas tipo tabla
       const storedRelated = await AsyncStorage.getItem(RELATED_ANSWERS_KEY);
       const offlineRelated = storedRelated ? JSON.parse(storedRelated) : {};
-      // Carga para cada pregunta tipo tabla
       const tableAnswersObj = {};
+      // Carga para cada pregunta tipo tabla
       const locationRelatedObj = {};
+      const correlationsObj = {};
+      const relatedQuestionsObj = {};
       offlineQuestions[formId].forEach((q) => {
         if (q.question_type === "table") {
           const rel = offlineRelated[q.id];
-          if (rel) {
-            // Si la fuente es "pregunta_relacionada", los datos están en rel.data (array de objetos con { name })
-            if (
-              rel.source === "pregunta_relacionada" &&
-              Array.isArray(rel.data)
-            ) {
-              tableAnswersObj[q.id] = rel.data.map((item) => item.name);
-            }
-            // Si la fuente es "usuarios", los datos están en rel.data (array de strings o nombres)
-            else if (rel.source === "usuarios" && Array.isArray(rel.data)) {
-              tableAnswersObj[q.id] = rel.data;
-            }
-            // Si la estructura es solo un array plano (compatibilidad)
-            else if (Array.isArray(rel)) {
-              tableAnswersObj[q.id] = rel;
-            } else {
-              tableAnswersObj[q.id] = [];
-            }
+          // --- FIX: Asegura que las opciones del picker sean un array de strings válidos ---
+          if (rel && Array.isArray(rel.data)) {
+            // Si los items tienen 'name', úsalo como opción
+            tableAnswersObj[q.id] = rel.data
+              .map((item) => {
+                if (typeof item === "object" && item.name) return item.name;
+                if (typeof item === "string") return item;
+                return null;
+              })
+              .filter((item) => typeof item === "string" && item.length > 0);
+          } else if (rel && Array.isArray(rel)) {
+            // Compatibilidad: si rel es array plano
+            tableAnswersObj[q.id] = rel.filter(
+              (item) => typeof item === "string" && item.length > 0
+            );
           } else {
             tableAnswersObj[q.id] = [];
+          }
+          // Guarda correlaciones y pregunta relacionada si existen
+          if (rel && rel.correlations) {
+            correlationsObj[q.id] = rel.correlations;
+          }
+          if (rel && rel.related_question) {
+            relatedQuestionsObj[q.id] = rel.related_question;
           }
         }
         // NUEVO: Si es location y tiene related_answers, extraerlos
@@ -224,6 +230,8 @@ export default function FormatScreen(props) {
       });
       setTableAnswers(tableAnswersObj);
       setLocationRelatedAnswers(locationRelatedObj);
+      setTableCorrelations(correlationsObj);
+      setTableRelatedQuestions(relatedQuestionsObj);
     } catch (error) {
       console.error("❌ Error cargando datos offline:", error);
       Alert.alert("Error", "No se pudieron cargar los datos offline.");
@@ -386,21 +394,119 @@ export default function FormatScreen(props) {
     });
   };
 
-  const handleAddTableAnswer = (questionId) => {
-    console.log(
-      `➕ Agregando nuevo campo para pregunta tabla ID ${questionId}`
-    );
-    setTableAnswersState((prev) => ({
-      ...prev,
-      [questionId]: [...(prev[questionId] || []), ""],
-    }));
-  };
+  // NUEVO: Función para autocompletar campos relacionados de tipo tabla (bidireccional, por valor)
+  const handleTableSelectChangeWithCorrelation = (questionId, index, value) => {
+    console.log("[DEBUG] Selección en tabla:", { questionId, index, value });
+    setTableAnswersState((prev) => {
+      const updatedAnswers = [...(prev[questionId] || [])];
+      updatedAnswers[index] = value;
+      console.log("[DEBUG] Estado tras selección principal:", {
+        ...prev,
+        [questionId]: updatedAnswers,
+      });
+      return { ...prev, [questionId]: updatedAnswers };
+    });
 
-  const handleRemoveTableAnswer = (questionId, index) => {
-    setTableAnswersState((prev) => ({
-      ...prev,
-      [questionId]: prev[questionId].filter((_, i) => i !== index),
-    }));
+    // --- Correlaciones directas ---
+    const correlation = tableCorrelations[questionId]?.[value];
+    console.log("[DEBUG] Correlación directa encontrada:", correlation);
+
+    if (correlation) {
+      Object.entries(correlation).forEach(([relatedQId, relatedValue]) => {
+        // Buscar el valor en las opciones de todos los selects tipo tabla
+        Object.entries(tableAnswers).forEach(([otherQId, options]) => {
+          if (otherQId !== questionId && Array.isArray(options)) {
+            // Si el valor relacionado existe en las opciones de este select
+            if (options.includes(relatedValue)) {
+              setTableAnswersState((prev) => {
+                const arr = [...(prev[otherQId] || [])];
+                if (!arr[0]) {
+                  arr[0] = relatedValue;
+                  setTableAutoFilled((autoPrev) => ({
+                    ...autoPrev,
+                    [otherQId]: { ...(autoPrev[otherQId] || {}), [0]: true },
+                  }));
+                  console.log(
+                    `[DEBUG] Autocompletado por valor en ${otherQId} con valor ${relatedValue}`
+                  );
+                } else {
+                  console.log(
+                    `[DEBUG] No se autocompleta ${otherQId} porque ya tiene valor:`,
+                    arr[0]
+                  );
+                }
+                console.log("[DEBUG] Estado tras autocompletar por valor:", {
+                  ...prev,
+                  [otherQId]: arr,
+                });
+                return { ...prev, [otherQId]: arr };
+              });
+            }
+          }
+        });
+      });
+      setTableAutoFilled((prev) => ({
+        ...prev,
+        [questionId]: { ...(prev[questionId] || {}), [index]: true },
+      }));
+      console.log(
+        `[DEBUG] Marcado como autocompletado el select ${questionId} index ${index}`
+      );
+    }
+
+    // --- Correlaciones inversas ---
+    Object.entries(tableCorrelations).forEach(([otherQId, corrObj]) => {
+      if (otherQId !== questionId) {
+        Object.entries(corrObj).forEach(([corrValue, rels]) => {
+          if (rels && rels[questionId] && rels[questionId] === value) {
+            // Buscar el valor en las opciones de todos los selects tipo tabla
+            Object.entries(tableAnswers).forEach(([targetQId, options]) => {
+              if (targetQId !== questionId && Array.isArray(options)) {
+                if (options.includes(corrValue)) {
+                  setTableAnswersState((prev) => {
+                    const arr = [...(prev[targetQId] || [])];
+                    if (!arr[0]) {
+                      arr[0] = corrValue;
+                      setTableAutoFilled((autoPrev) => ({
+                        ...autoPrev,
+                        [targetQId]: {
+                          ...(autoPrev[targetQId] || {}),
+                          [0]: true,
+                        },
+                      }));
+                      console.log(
+                        `[DEBUG] Autocompletado inverso por valor en ${targetQId} con valor ${corrValue}`
+                      );
+                    } else {
+                      console.log(
+                        `[DEBUG] No se autocompleta inverso ${targetQId} porque ya tiene valor:`,
+                        arr[0]
+                      );
+                    }
+                    console.log(
+                      "[DEBUG] Estado tras autocompletar inverso por valor:",
+                      { ...prev, [targetQId]: arr }
+                    );
+                    return { ...prev, [targetQId]: arr };
+                  });
+                }
+              }
+            });
+          }
+        });
+      }
+    });
+
+    // --- Estado final de todos los selects tipo tabla ---
+    setTimeout(() => {
+      setTableAnswersState((prev) => {
+        console.log(
+          "[DEBUG] Estado FINAL de tableAnswersState:",
+          JSON.stringify(prev)
+        );
+        return prev;
+      });
+    }, 600);
   };
 
   const handleDateChange = (questionId, selectedDate) => {
@@ -955,9 +1061,6 @@ export default function FormatScreen(props) {
             ? answers[questionId]?.[0]
             : answers[questionId])
         ) {
-          const value = Array.isArray(answers[questionId])
-            ? answers[questionId][0]
-            : answers[questionId];
           repeatedAnswers.push({
             question_id: questionId,
             answer_text: value,
@@ -1387,6 +1490,13 @@ export default function FormatScreen(props) {
     }
   };
 
+  useEffect(() => {
+    console.log(
+      "[DEBUG][RENDER] tableAnswersState:",
+      JSON.stringify(tableAnswersState)
+    );
+  }, [tableAnswersState]);
+
   return (
     <LinearGradient colors={["#4B34C7", "#4B34C7"]} style={{ flex: 1 }}>
       <View style={styles.container}>
@@ -1433,7 +1543,8 @@ export default function FormatScreen(props) {
                     // Fix: define relatedOptions for location questions
                     let relatedOptions = [];
                     if (question.question_type === "location") {
-                      relatedOptions = locationRelatedAnswers[question.id] || [];
+                      relatedOptions =
+                        locationRelatedAnswers[question.id] || [];
                     }
                     return (
                       <View key={question.id} style={styles.questionContainer}>
@@ -1542,13 +1653,20 @@ export default function FormatScreen(props) {
                                     selectedValue={field}
                                     onValueChange={(selectedValue) =>
                                       !isLocked &&
-                                      handleTableSelectChange(
+                                      handleTableSelectChangeWithCorrelation(
                                         question.id,
                                         index,
                                         selectedValue
                                       )
                                     }
-                                    style={styles.picker}
+                                    style={[
+                                      styles.picker,
+                                      tableAutoFilled[question.id] &&
+                                        tableAutoFilled[question.id][index] && {
+                                          backgroundColor: "#e6fafd", // Color especial si autocompletado
+                                          borderColor: "#22c55e",
+                                        },
+                                    ]}
                                     enabled={!isLocked}
                                   >
                                     <Picker.Item
@@ -1939,13 +2057,20 @@ export default function FormatScreen(props) {
                                   selectedValue={field}
                                   onValueChange={(selectedValue) =>
                                     !isLocked &&
-                                    handleTableSelectChange(
+                                    handleTableSelectChangeWithCorrelation(
                                       question.id,
                                       index,
                                       selectedValue
                                     )
                                   }
-                                  style={styles.picker}
+                                  style={[
+                                    styles.picker,
+                                    tableAutoFilled[question.id] &&
+                                      tableAutoFilled[question.id][index] && {
+                                        backgroundColor: "#e6fafd", // Color especial si autocompletado
+                                        borderColor: "#22c55e",
+                                      },
+                                  ]}
                                   enabled={!isLocked}
                                 >
                                   <Picker.Item
