@@ -13,6 +13,7 @@ import {
   Modal,
   Alert,
   Platform,
+  TextInput,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
@@ -315,8 +316,7 @@ export function AppWithTabBar() {
   );
 }
 
-// Modifica Home para recibir activeTab y onTabPress como props
-export default function Home({ activeTab, onTabPress }) {
+export default function Home() {
   const router = useRouter();
   const [userForms, setUserForms] = useState([]);
   const [categorizedForms, setCategorizedForms] = useState([]); // NUEVO
@@ -328,6 +328,8 @@ export default function Home({ activeTab, onTabPress }) {
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [loadingUser, setLoadingUser] = useState(true);
   const [spinAnimUser] = useState(new Animated.Value(0));
+  const [searchText, setSearchText] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
   const inactivityTimer = useRef(null);
 
   useFocusEffect(
@@ -345,8 +347,6 @@ export default function Home({ activeTab, onTabPress }) {
 
   // Utilidad para guardar y cargar userInfo de AsyncStorage
   const USER_INFO_KEY = "user_info_offline";
-  const FORMS_KEY = "offline_forms";
-  const PENDING_FORMS_KEY = "pending_forms";
 
   // NUEVA FUNCIÓN: Organizar formularios por categorías
   const organizeByCategorys = (formsList) => {
@@ -490,7 +490,6 @@ export default function Home({ activeTab, onTabPress }) {
       const batchPromises = batch.map(async (form) => {
         try {
           const backendUrl = await getBackendUrl();
-          // 1. Obtener preguntas del formulario
           const qRes = await fetch(`${backendUrl}/forms/${form.id}`, {
             method: "GET",
             headers: {
@@ -499,6 +498,9 @@ export default function Home({ activeTab, onTabPress }) {
             },
           });
           const qData = await qRes.json();
+          //console.log(`[DEBUG][fetchQuestions] formId=${form.id} qData:`, qData); // <--- LOG DE PREGUNTAS
+          //console.log(`[DEBUG][fetchQuestions prueba] formId=${form.id} qData:`, qData); // <--- LOG DE PREGUNTAS
+
           if (!qRes.ok)
             throw new Error(qData.detail || "Error fetching questions");
 
@@ -534,6 +536,7 @@ export default function Home({ activeTab, onTabPress }) {
                 }
               );
               const relData = await relRes.json();
+              //console.log(`[DEBUG][fetchRelatedAnswers] formId=${form.id} relatedResults:`, relData); // <--- LOG DE RELACIONADAS
               // --- FIX: Guarda data como array de strings ---
               return {
                 questionId: question.id,
@@ -620,7 +623,7 @@ export default function Home({ activeTab, onTabPress }) {
           JSON.stringify(allRelatedAnswers)
         ),
       ]);
-      console.log("✅ Datos cacheados exitosamente en background");
+      //console.log("✅ Datos cacheados exitosamente en background");
     } catch (error) {
       console.error("❌ Error guardando cache:", error);
     }
@@ -719,7 +722,7 @@ export default function Home({ activeTab, onTabPress }) {
   };
 
   const handleFormPress = (form) => {
-    console.log("📋 Formulario seleccionado:", form); // Log the selected form
+    console.log("📋 Formulario seleccionado:", form.form_design[0].children); // Log the selected form
     router.push({
       pathname: "/format-screen",
       params: {
@@ -845,6 +848,21 @@ export default function Home({ activeTab, onTabPress }) {
     };
   }, []);
 
+  // Filtrar formularios por búsqueda
+  useEffect(() => {
+    if (searchText.trim() === "") {
+      setSearchResults([]);
+      return;
+    }
+    const text = searchText.trim().toLowerCase();
+    const results = userForms.filter(
+      (form) =>
+        (form.title && form.title.toLowerCase().includes(text)) ||
+        (form.description && form.description.toLowerCase().includes(text))
+    );
+    setSearchResults(results);
+  }, [searchText, userForms]);
+
   return (
     <LinearGradient
       colors={["#4B34C7", "#4B34C7"]}
@@ -859,11 +877,26 @@ export default function Home({ activeTab, onTabPress }) {
           loadingUser={loadingUser}
           spinAnimUser={spin}
         />
-        <Text style={styles.sectionTitleWhite}>Assigned forms</Text>
+
+        {/* Apartado de búsqueda */}
+        <View style={styles.searchContainer}>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="🔍 Buscar formato"
+            value={searchText}
+            onChangeText={setSearchText}
+            placeholderTextColor="#888"
+          />
+        </View>
+
+        {/* Mueve el título y las categorías hacia abajo */}
+        <Text style={[styles.sectionTitleWhite, { marginTop: 12 }]}>
+          Assigned forms
+        </Text>
         <ScrollView
           contentContainerStyle={{
             flexGrow: 1,
-            paddingBottom: height * 0.11, // Espacio para la tab-bar
+            paddingBottom: height * 0.11,
           }}
           style={{ flex: 1 }}
         >
@@ -899,21 +932,39 @@ export default function Home({ activeTab, onTabPress }) {
                   style={styles.formsContainer}
                   contentContainerStyle={{
                     paddingBottom: 10,
-                    paddingHorizontal: width * 0.03, // Espacio lateral interno
+                    paddingHorizontal: width * 0.03,
                   }}
                   showsVerticalScrollIndicator={false}
                   horizontal={false}
                 >
-                  {/* Mostrar formularios agrupados por categoría en acordeones */}
-                  {categorizedForms.map((category) => (
-                    <CategoryCard
-                      key={category.id}
-                      category={category}
-                      isExpanded={!!expandedCategories[category.id]}
-                      onToggle={() => toggleCategory(category.id)}
-                      onFormPress={handleFormPress}
-                    />
-                  ))}
+                  {/* Si hay búsqueda, muestra solo los resultados filtrados */}
+                  {searchText.trim() !== "" ? (
+                    searchResults.length === 0 ? (
+                      <Text style={styles.loadingText}>
+                        No se encontraron formatos.
+                      </Text>
+                    ) : (
+                      searchResults.map((form) => (
+                        <View key={form.id} style={styles.formCardWrapper}>
+                          <FormCard
+                            form={form}
+                            onPress={() => handleFormPress(form)}
+                          />
+                        </View>
+                      ))
+                    )
+                  ) : (
+                    // Si no hay búsqueda, muestra las categorías como antes
+                    categorizedForms.map((category) => (
+                      <CategoryCard
+                        key={category.id}
+                        category={category}
+                        isExpanded={!!expandedCategories[category.id]}
+                        onToggle={() => toggleCategory(category.id)}
+                        onFormPress={handleFormPress}
+                      />
+                    ))
+                  )}
                 </ScrollView>
               </LinearGradient>
             </View>
@@ -1348,6 +1399,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderTopWidth: 1,
     borderTopColor: "#e0e0e0",
+  },
+  searchContainer: {
+    marginHorizontal: width * 0.04,
+    marginBottom: 8,
+    marginTop: 8,
+    backgroundColor: "#fff",
+    borderRadius: width * 0.03,
+    borderWidth: 1,
+    borderColor: "#e0e0e0",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    shadowColor: "#000",
+    shadowOpacity: 0.07,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  searchInput: {
+    fontSize: width * 0.042,
+    color: "#222",
+    backgroundColor: "transparent",
+    borderWidth: 0,
+    paddingVertical: 6,
+    paddingHorizontal: 2,
   },
 });
 

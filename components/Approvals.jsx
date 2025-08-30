@@ -28,7 +28,7 @@ const getBackendUrl = async () => {
 export default function Approvals() {
   const [loading, setLoading] = useState(true);
   const [allApprovals, setAllApprovals] = useState([]);
-  const [show, setShow] = useState("pending"); // "pending" | "approved" | "rejected"
+  const [show, setShow] = useState("pending"); // "pending" | "approved" | "rejected" | "total"
   const [isOffline, setIsOffline] = useState(false);
   const [pendingApprovalActions, setPendingApprovalActions] = useState([]);
   const [accepting, setAccepting] = useState(false);
@@ -349,8 +349,8 @@ export default function Approvals() {
             color="#2563eb"
             label="Total"
             value={total}
-            active={false}
-            onPress={() => {}}
+            active={show === "total"}
+            onPress={() => setShow("total")}
           />
         </View>
         {/* Pending approval/reject actions */}
@@ -410,6 +410,7 @@ export default function Approvals() {
                 paddingVertical: 10,
               }}
             >
+              {/* ...existing code for pending, approved, rejected... */}
               {show === "pending" && pending.length === 0 && (
                 <View style={styles.emptyBox}>
                   <MaterialIcons
@@ -493,6 +494,83 @@ export default function Approvals() {
                     accepting={accepting}
                   />
                 ))}
+              {/* NUEVO: Mostrar historial de aprobados y rechazados en "Total" */}
+              {show === "total" && total === 0 && (
+                <View style={styles.emptyBox}>
+                  <MaterialIcons
+                    name="info"
+                    size={48}
+                    color="#2563eb"
+                    style={{ marginBottom: 8 }}
+                  />
+                  <Text style={styles.emptyTitle}>No forms</Text>
+                  <Text style={styles.emptySubtitle}>No forms found.</Text>
+                </View>
+              )}
+              {show === "total" && total > 0 && (
+                <>
+                  <Text
+                    style={{
+                      fontWeight: "bold",
+                      fontSize: width * 0.045,
+                      color: "#22c55e",
+                      marginBottom: 8,
+                      marginTop: 8,
+                      textAlign: "center",
+                    }}
+                  >
+                    Approved History
+                  </Text>
+                  {approved.length === 0 ? (
+                    <Text style={styles.emptySubtitle}>No approved forms.</Text>
+                  ) : (
+                    approved.map((item, idx) => (
+                      <ApprovalCard
+                        key={`approved-${idx}`}
+                        item={item}
+                        approved
+                        onPress={() =>
+                          router.push({
+                            pathname: "/approval-detail",
+                            params: { response_id: item.response_id },
+                          })
+                        }
+                      />
+                    ))
+                  )}
+                  <Text
+                    style={{
+                      fontWeight: "bold",
+                      fontSize: width * 0.045,
+                      color: "#ef4444",
+                      marginBottom: 8,
+                      marginTop: 18,
+                      textAlign: "center",
+                    }}
+                  >
+                    Rejected History
+                  </Text>
+                  {rejected.length === 0 ? (
+                    <Text style={styles.emptySubtitle}>No rejected forms.</Text>
+                  ) : (
+                    rejected.map((item, idx) => (
+                      <ApprovalCard
+                        key={`rejected-${idx}`}
+                        item={item}
+                        rejected
+                        onPress={() =>
+                          router.push({
+                            pathname: "/approval-detail",
+                            params: { response_id: item.response_id },
+                          })
+                        }
+                        onAcceptReconsideration={handleAcceptReconsideration}
+                        accepting={accepting}
+                      />
+                    ))
+                  )}
+                </>
+              )}
             </ScrollView>
           )}
         </View>

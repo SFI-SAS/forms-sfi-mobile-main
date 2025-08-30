@@ -10,6 +10,9 @@ import {
   Dimensions,
   BackHandler,
   Modal,
+  AppState,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
@@ -18,6 +21,7 @@ import { Screen } from "./Screen";
 import { useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons"; // Importar íconos
+import { SvgXml } from "react-native-svg"; // Agrega esta importación
 
 // Obtener dimensiones de la pantalla
 const { width, height } = Dimensions.get("window");
@@ -38,6 +42,15 @@ const getBackendUrl = async () => {
   return stored || "";
 };
 
+// Estado global para MatrixBackground (solo ejecuta una vez y nunca se reinicia)
+let matrixEffectShown = false;
+let matrixLoopStarted = false;
+
+// Spinner SVG igual que en Home/FormatScreen
+const spinnerSvg = `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><path fill="#000000FF" stroke="#EE4138FF" stroke-width="15" transform-origin="center" d="m148 84.7 13.8-8-10-17.3-13.8 8a50 50 0 0 0-27.4-15.9v-16h-20v16A50 50 0 0 0 63 67.4l-13.8-8-10 17.3 13.8 8a50 50 0 0 0 0 31.7l-13.8 8 10 17.3 13.8-8a50 50 0 0 0 27.5 15.9v16h20v-16a50 50 0 0 0 27.4-15.9l13.8 8 10-17.3-13.8-8a50 50 0 0 0 0-31.7Zm-47.5 50.8a35 35 0 1 1 0-70 35 35 0 0 1 0 70Z"><animateTransform type="rotate" attributeName="transform" calcMode="spline" dur="1.8" values="0;120" keyTimes="0;1" keySplines="0 0 1 1" repeatCount="indefinite"></animateTransform></path></svg>
+`;
+
 export function Main() {
   const router = useRouter();
   const [username, setUsername] = useState("");
@@ -52,6 +65,8 @@ export function Main() {
   const [backendUrlSet, setBackendUrlSet] = useState(false);
   const [showBackendError, setShowBackendError] = useState(false);
   const [backendErrorMsg, setBackendErrorMsg] = useState("");
+  const [showMatrix, setShowMatrix] = useState(!matrixEffectShown);
+  const [signingIn, setSigningIn] = useState(false); // Nuevo estado para spinner
 
   // Solo pregunta la primera vez
   useEffect(() => {
@@ -83,6 +98,34 @@ export function Main() {
       };
     }, [])
   );
+
+  // Logout automático al cerrar la app
+  useEffect(() => {
+    const handleAppStateChange = async (nextAppState) => {
+      if (nextAppState === "background" || nextAppState === "inactive") {
+        await AsyncStorage.removeItem("authToken");
+        await AsyncStorage.setItem("isLoggedOut", "true");
+      }
+    };
+    const subscription = AppState.addEventListener(
+      "change",
+      handleAppStateChange
+    );
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  // MatrixBackground solo una vez y loop independiente, nunca se reinicia
+  useEffect(() => {
+    if (!matrixLoopStarted && showMatrix) {
+      matrixEffectShown = true;
+      matrixLoopStarted = true;
+      // No ocultes el efecto, deja que MatrixBackground maneje su propio loop
+      // Si quieres ocultar visualmente después de un tiempo, puedes usar setShowMatrix(false)
+      // pero el efecto nunca se reinicia por cambios de estado
+    }
+  }, [showMatrix]);
 
   useEffect(() => {
     const checkToken = async () => {
@@ -217,6 +260,7 @@ export function Main() {
       return;
     }
 
+    setSigningIn(true); // Mostrar spinner al iniciar login
     try {
       if (isOffline) {
         // --- OFFLINE LOGIN ---
@@ -367,6 +411,7 @@ export function Main() {
       await AsyncStorage.setItem("username", username);
       await AsyncStorage.setItem("password", password);
     } catch (error) {
+      setSigningIn(false);
       setErrors({
         password: "Unexpected error. Please try again.",
       });
@@ -375,8 +420,13 @@ export function Main() {
 
   return (
     <Screen>
-      <View style={styles.container}>
-        <MatrixBackground />
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
+      >
+        {/* MatrixBackground solo la primera vez, nunca se reinicia */}
+        {showMatrix && <MatrixBackground />}
         <View style={styles.formContainer}>
           <Text style={styles.title}>Bienvenido</Text>
           <View style={styles.inputContainer}>
@@ -550,20 +600,38 @@ export function Main() {
           <TouchableOpacity
             onPress={handleLogin}
             style={styles.button}
-            disabled={!backendUrlSet}
+            disabled={!backendUrlSet || signingIn}
           >
-            <Text
-              style={styles.buttonText}
-              numberOfLines={1}
-              adjustsFontSizeToFit={true}
-              minimumFontScale={0.8}
-              ellipsizeMode="clip"
-            >
-              {isOffline ? "Sign in Offline Mode" : "Sign In"}
-            </Text>
+            {signingIn ? (
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <SvgXml
+                  xml={spinnerSvg.replace("#000000FF", "#fff")}
+                  width={28}
+                  height={28}
+                  style={{ marginRight: 10 }}
+                />
+                <Text style={styles.buttonText}>Accediendo...</Text>
+              </View>
+            ) : (
+              <Text
+                style={styles.buttonText}
+                numberOfLines={1}
+                adjustsFontSizeToFit={true}
+                minimumFontScale={0.8}
+                ellipsizeMode="clip"
+              >
+                {isOffline ? "Sign in Offline Mode" : "Sign In"}
+              </Text>
+            )}
           </TouchableOpacity>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Screen>
   );
 }

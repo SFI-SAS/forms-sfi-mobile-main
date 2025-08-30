@@ -283,7 +283,9 @@ export default function MyForms() {
   return (
     <LinearGradient colors={["#4B34C7", "#4B34C7"]} style={{ flex: 1 }}>
       <View style={{ flex: 1 }}>
+        
         <View style={styles.formsScrollWrapper}>
+          <Text style={styles.header}>Submitted Forms ✅</Text>
           <ScrollView
             style={{ flex: 1 }}
             contentContainerStyle={{
@@ -293,7 +295,7 @@ export default function MyForms() {
             }}
             showsVerticalScrollIndicator={true}
           >
-            <Text style={styles.header}>Submitted Forms</Text>
+            
             {loading ? (
               <ActivityIndicator size="large" color="#12A0AF" />
             ) : forms.length === 0 ? (
@@ -786,8 +788,7 @@ const styles = StyleSheet.create({
     fontSize: 26,
     fontWeight: "bold",
     color: "#4B34C7",
-    marginBottom: 18,
-    marginTop: 36,
+    marginBottom: 10,
     textAlign: "center",
     letterSpacing: 0.5,
     textShadowColor: "#12A0AF22",

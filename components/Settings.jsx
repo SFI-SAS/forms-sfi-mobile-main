@@ -275,7 +275,7 @@ export default function Settings() {
         <Text style={styles.screenTitle}>Settings</Text>
         {/* Backend Section */}
         <View style={styles.sectionBox}>
-          <Text style={styles.sectionTitle}>Backend Connection</Text>
+          <Text style={styles.sectionTitle}>Backend Connection 🔗</Text>
           <Text style={styles.label}>Backend URL:</Text>
           <View style={styles.inputRow}>
             <TextInput
@@ -331,7 +331,7 @@ export default function Settings() {
 
         {/* User Section */}
         <View style={styles.sectionBox}>
-          <Text style={styles.sectionTitle}>User Data</Text>
+          <Text style={styles.sectionTitle}>User Data 👤📊</Text>
           {userInfo && !editUser ? (
             <View style={styles.userBox}>
               <View style={styles.userRow}>
@@ -422,7 +422,7 @@ export default function Settings() {
 
         {/* NUEVA SECCIÓN: Formatos PDF */}
         <View style={styles.sectionBox}>
-          <Text style={styles.sectionTitle}>Formatos PDF</Text>
+          <Text style={styles.sectionTitle}>Formatos PDF 📄⬇️</Text>
           <Text style={styles.label}>
             Descarga y personaliza los formatos en PDF.
           </Text>
