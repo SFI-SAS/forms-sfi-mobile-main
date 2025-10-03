@@ -310,6 +310,7 @@ export function AppWithTabBar() {
       {/* Aquí renderiza la pantalla actual */}
       <Home activeTab={activeTab} onTabPress={handleTabPress} />
       <View style={styles.tabBarAbsolute}>
+        
         <BottomTabBar activeTab={activeTab} onTabPress={handleTabPress} />
       </View>
     </View>
@@ -1425,6 +1426,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
   },
 });
+
 
 // Cuando guardas las respuestas relacionadas en AsyncStorage, asegúrate de guardar la estructura correcta.
 // El objeto debe tener la forma:
