@@ -234,7 +234,8 @@ export default function PendingForms() {
       let responseId = null;
       if (saveResponseData) {
         const saveResponseRes = await fetch(
-          `${backendUrl}/responses/save-response/${form.id}?mode=offline`,
+          // MODIFICACIÓN: Añadir &action=send_and_close al final de los parámetros de consulta
+          `${backendUrl}/responses/save-response/${form.id}?mode=offline&action=send_and_close`,
           {
             method: "POST",
             headers: requestOptions.headers,
@@ -372,7 +373,7 @@ export default function PendingForms() {
                         }}
                       >
                         {Array.isArray(answersByForm[form.id]) &&
-                        answersByForm[form.id].length > 0 ? (
+                          answersByForm[form.id].length > 0 ? (
                           answersByForm[form.id].map((ans, i) => (
                             <View
                               key={i}

@@ -278,6 +278,7 @@ export function Main() {
             password:
               "No saved token or credentials for this user. Please log in online at least once.",
           });
+          setSigningIn(false); // ⚠️ AGREGADO
           return;
         }
       }
@@ -307,6 +308,7 @@ export function Main() {
           "Could not connect to the backend. Please check the URL or your connection."
         );
         setShowBackendError(true);
+        setSigningIn(false); // ⚠️ AGREGADO
         return;
       }
 
@@ -324,12 +326,14 @@ export function Main() {
             "Could not connect to the backend. Please check the URL or your connection."
           );
           setShowBackendError(true);
+          setSigningIn(false); // ⚠️ AGREGADO
           return;
         }
         // Si es error de usuario/contraseña, mostrar solo ese error
         setErrors({
           password: "Incorrect username or password. Please try again.",
         });
+        setSigningIn(false); // ⚠️ AGREGADO
         return;
       }
 
@@ -339,6 +343,7 @@ export function Main() {
         setErrors({
           password: "Server connection error. Please try again later.",
         });
+        setSigningIn(false); // ⚠️ AGREGADO
         return;
       }
 
@@ -349,6 +354,7 @@ export function Main() {
         setErrors({
           password: "Server response is not valid JSON.",
         });
+        setSigningIn(false); // ⚠️ AGREGADO
         return;
       }
 
@@ -379,6 +385,7 @@ export function Main() {
           "Could not connect to the backend. Please check the URL or your connection."
         );
         setShowBackendError(true);
+        setSigningIn(false); // ⚠️ AGREGADO
         return;
       }
 
@@ -386,6 +393,7 @@ export function Main() {
         setErrors({
           password: "Could not validate user session. Please try again.",
         });
+        setSigningIn(false); // ⚠️ AGREGADO
         return;
       }
 
@@ -410,6 +418,9 @@ export function Main() {
 
       await AsyncStorage.setItem("username", username);
       await AsyncStorage.setItem("password", password);
+
+      // ⚠️ AGREGADO - Reset al finalizar con éxito
+      setSigningIn(false);
     } catch (error) {
       setSigningIn(false);
       setErrors({

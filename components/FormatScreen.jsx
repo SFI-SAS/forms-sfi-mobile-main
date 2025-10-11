@@ -851,14 +851,14 @@ export default function FormatScreen(props) {
       // Crear registro de respuesta y obtener response_id
       console.log("📡 Creando registro de respuesta...");
       const saveResponseRes = await fetch(
-        `${backendUrl}/responses/save-response/${id}?mode=${mode}`,
+        // MODIFICACIÓN: Añadir &action=send_and_close a la URL
+        `${backendUrl}/responses/save-response/${id}?mode=${mode}&action=send_and_close`,
         {
           method: "POST",
           headers: requestOptions.headers,
           body: JSON.stringify(allAnswersForApi),
         }
       );
-
       const saveResponseData = await saveResponseRes.json();
       console.log("✅ Registro de respuesta creado:", saveResponseData);
       const responseId = saveResponseData.response_id;
@@ -1309,11 +1309,13 @@ export default function FormatScreen(props) {
 
       // Crear registro de respuesta y obtener response_id
       const saveResponseRes = await fetch(
-        `${backendUrl}/responses/save-response/${id}`,
+
+        `${backendUrl}/responses/save-response/${id}?mode=${mode}&action=send_and_close`,
         {
           method: "POST",
           headers: requestOptions.headers,
-          body: JSON.stringify({ mode }),
+          // **IMPORTANTE**: Quita 'mode' del cuerpo, solo debe contener las respuestas
+          body: JSON.stringify(allAnswersForApi),
         }
       );
       const saveResponseData = await saveResponseRes.json();
@@ -1637,7 +1639,7 @@ export default function FormatScreen(props) {
                                       placeholder="Buscar opción..."
                                       value={
                                         pickerSearch[
-                                          `${question.id}_${index}`
+                                        `${question.id}_${index}`
                                         ] || ""
                                       }
                                       onChangeText={(text) =>
@@ -1662,10 +1664,10 @@ export default function FormatScreen(props) {
                                     style={[
                                       styles.picker,
                                       tableAutoFilled[question.id] &&
-                                        tableAutoFilled[question.id][index] && {
-                                          backgroundColor: "#e6fafd", // Color especial si autocompletado
-                                          borderColor: "#22c55e",
-                                        },
+                                      tableAutoFilled[question.id][index] && {
+                                        backgroundColor: "#e6fafd", // Color especial si autocompletado
+                                        borderColor: "#22c55e",
+                                      },
                                     ]}
                                     enabled={!isLocked}
                                   >
@@ -1681,12 +1683,12 @@ export default function FormatScreen(props) {
                                           ] || "") === ""
                                             ? true
                                             : option
-                                                .toLowerCase()
-                                                .includes(
-                                                  pickerSearch[
-                                                    `${question.id}_${index}`
-                                                  ]?.toLowerCase() || ""
-                                                )
+                                              .toLowerCase()
+                                              .includes(
+                                                pickerSearch[
+                                                  `${question.id}_${index}`
+                                                ]?.toLowerCase() || ""
+                                              )
                                         )
                                         .map((option, i) => (
                                           <Picker.Item
@@ -1714,7 +1716,7 @@ export default function FormatScreen(props) {
                                     style={[
                                       styles.checkbox,
                                       answers[question.id]?.includes(option) &&
-                                        styles.checkboxSelected,
+                                      styles.checkboxSelected,
                                     ]}
                                     onPress={() =>
                                       !isLocked &&
@@ -1724,8 +1726,8 @@ export default function FormatScreen(props) {
                                         const updatedAnswers =
                                           currentAnswers.includes(option)
                                             ? currentAnswers.filter(
-                                                (o) => o !== option
-                                              )
+                                              (o) => o !== option
+                                            )
                                             : [...currentAnswers, option];
                                         return {
                                           ...prev,
@@ -1761,7 +1763,7 @@ export default function FormatScreen(props) {
                                     style={[
                                       styles.checkbox,
                                       answers[question.id] === option &&
-                                        styles.checkboxSelected,
+                                      styles.checkboxSelected,
                                     ]}
                                     onPress={() =>
                                       !isLocked &&
@@ -2066,10 +2068,10 @@ export default function FormatScreen(props) {
                                   style={[
                                     styles.picker,
                                     tableAutoFilled[question.id] &&
-                                      tableAutoFilled[question.id][index] && {
-                                        backgroundColor: "#e6fafd", // Color especial si autocompletado
-                                        borderColor: "#22c55e",
-                                      },
+                                    tableAutoFilled[question.id][index] && {
+                                      backgroundColor: "#e6fafd", // Color especial si autocompletado
+                                      borderColor: "#22c55e",
+                                    },
                                   ]}
                                   enabled={!isLocked}
                                 >
@@ -2085,12 +2087,12 @@ export default function FormatScreen(props) {
                                         ] || "") === ""
                                           ? true
                                           : option
-                                              .toLowerCase()
-                                              .includes(
-                                                pickerSearch[
-                                                  `${question.id}_${index}`
-                                                ]?.toLowerCase() || ""
-                                              )
+                                            .toLowerCase()
+                                            .includes(
+                                              pickerSearch[
+                                                `${question.id}_${index}`
+                                              ]?.toLowerCase() || ""
+                                            )
                                       )
                                       .map((option, i) => (
                                         <Picker.Item
@@ -2141,7 +2143,7 @@ export default function FormatScreen(props) {
                                   style={[
                                     styles.checkbox,
                                     answers[question.id]?.includes(option) &&
-                                      styles.checkboxSelected,
+                                    styles.checkboxSelected,
                                   ]}
                                   onPress={() =>
                                     !isLocked &&
@@ -2151,8 +2153,8 @@ export default function FormatScreen(props) {
                                       const updatedAnswers =
                                         currentAnswers.includes(option)
                                           ? currentAnswers.filter(
-                                              (o) => o !== option
-                                            )
+                                            (o) => o !== option
+                                          )
                                           : [...currentAnswers, option];
                                       return {
                                         ...prev,
@@ -2188,7 +2190,7 @@ export default function FormatScreen(props) {
                                   style={[
                                     styles.checkbox,
                                     answers[question.id] === option &&
-                                      styles.checkboxSelected,
+                                    styles.checkboxSelected,
                                   ]}
                                   onPress={() =>
                                     !isLocked &&
@@ -2372,26 +2374,26 @@ export default function FormatScreen(props) {
                             <View style={styles.submittedGroupAnswerBox}>
                               {Array.isArray(group[q.id])
                                 ? group[q.id]
-                                    .filter((ans) => ans && ans !== "")
-                                    .map((ans, i) => (
-                                      <Text
-                                        key={i}
-                                        style={styles.submittedGroupAnswer}
-                                        numberOfLines={1}
-                                        ellipsizeMode="tail"
-                                      >
-                                        {ans}
-                                      </Text>
-                                    ))
-                                : group[q.id] && (
+                                  .filter((ans) => ans && ans !== "")
+                                  .map((ans, i) => (
                                     <Text
+                                      key={i}
                                       style={styles.submittedGroupAnswer}
                                       numberOfLines={1}
                                       ellipsizeMode="tail"
                                     >
-                                      {group[q.id]}
+                                      {ans}
                                     </Text>
-                                  )}
+                                  ))
+                                : group[q.id] && (
+                                  <Text
+                                    style={styles.submittedGroupAnswer}
+                                    numberOfLines={1}
+                                    ellipsizeMode="tail"
+                                  >
+                                    {group[q.id]}
+                                  </Text>
+                                )}
                             </View>
                           </View>
                         ))}

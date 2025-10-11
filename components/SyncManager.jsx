@@ -25,7 +25,8 @@ const SyncManager = () => {
             const token = await AsyncStorage.getItem("authToken");
             const backendUrl = await getBackendUrl();
             const response = await fetch(
-              `${backendUrl}/save-response/${form.id}?mode=offline`,
+              // MODIFICACIÓN: Añadir &action=send_and_close
+              `${backendUrl}/save-response/${form.id}?mode=offline&action=send_and_close`,
               {
                 method: "POST",
                 headers: {
