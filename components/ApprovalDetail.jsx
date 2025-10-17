@@ -20,6 +20,7 @@ import NetInfo from "@react-native-community/netinfo";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
 import ApproversDetailModal from './ApproversDetailModal';
+import ApprovalFormRenderer from './ApprovalFormRenderer';
 
 const { width, height } = Dimensions.get("window");
 const APPROVALS_OFFLINE_KEY = "approvals_offline";
@@ -49,6 +50,40 @@ export default function ApprovalDetail() {
     const [relatedForms, setRelatedForms] = useState([]);
     const router = useRouter();
 
+    const handleAuthError = async (error) => {
+        const errorMessage = error?.message || error?.toString() || "";
+
+        // Detectar si es un error de autenticación
+        if (
+            errorMessage.includes("No authentication token") ||
+            errorMessage.includes("authentication token") ||
+            errorMessage.includes("Unauthorized") ||
+            errorMessage.includes("401")
+        ) {
+            console.log("🔒 Token inválido o ausente. Cerrando sesión...");
+
+            // Limpiar datos de sesión
+            await AsyncStorage.setItem("isLoggedOut", "true");
+            await AsyncStorage.removeItem("authToken");
+
+            // Mostrar alerta y redirigir al login
+            Alert.alert(
+                "Sesión Expirada",
+                "Tu sesión ha expirado o no es válida. Por favor, inicia sesión nuevamente.",
+                [
+                    {
+                        text: "Aceptar",
+                        onPress: () => router.replace("/"),
+                    },
+                ],
+                { cancelable: false }
+            );
+
+            return true; // Indica que se manejó un error de autenticación
+        }
+
+        return false; // No es un error de autenticación
+    };
     // Bloquea el botón físico de volver atrás
     useEffect(() => {
         const disableBack = () => true;
@@ -57,6 +92,29 @@ export default function ApprovalDetail() {
             disableBack
         );
         return () => subscription.remove();
+    }, []);
+
+    // Agregar después del useEffect que bloquea BackHandler
+    useEffect(() => {
+        const checkAuthToken = async () => {
+            const token = await AsyncStorage.getItem("authToken");
+            if (!token) {
+                console.log("🔒 No hay token al cargar ApprovalDetail. Redirigiendo al login...");
+                Alert.alert(
+                    "Sesión no válida",
+                    "No se encontró una sesión activa. Por favor, inicia sesión.",
+                    [
+                        {
+                            text: "Aceptar",
+                            onPress: () => router.replace("/"),
+                        },
+                    ],
+                    { cancelable: false }
+                );
+            }
+        };
+
+        checkAuthToken();
     }, []);
 
     useEffect(() => {
@@ -68,70 +126,111 @@ export default function ApprovalDetail() {
         const net = await NetInfo.fetch();
         setIsOffline(!net.isConnected);
     };
+    const loadDetail = async (showLoading = true) => {
+        if (showLoading) setLoading(true);
 
-    const loadDetail = async () => {
-        setLoading(true);
         try {
-            // Busca primero en memoria offline (detalle específico)
-            const storedDetail = await AsyncStorage.getItem(
-                APPROVAL_DETAIL_OFFLINE_KEY
-            );
-            let found = null;
-            if (storedDetail) {
-                const arr = JSON.parse(storedDetail);
-                found = arr.find((f) => String(f.response_id) === String(response_id));
-            }
-            if (found) {
-                setForm(found);
-                loadRelatedForms(found);
-                setLoading(false);
-                return;
-            }
-
-            // Si no está en memoria de detalles, busca en la lista general
-            const stored = await AsyncStorage.getItem(APPROVALS_OFFLINE_KEY);
-            if (stored) {
-                const arr = JSON.parse(stored);
-                found = arr.find((f) => String(f.response_id) === String(response_id));
-                if (found) {
-                    setForm(found);
-                    loadRelatedForms(found);
-                    await saveDetailOffline(found);
-                    setLoading(false);
-                    return;
-                }
-            }
-
-            // Si no está en memoria, intenta online
             const net = await NetInfo.fetch();
+            setIsOffline(!net.isConnected);
+
+            let foundData = null;
+
+            // Si hay conexión, SIEMPRE traer del servidor primero (datos frescos)
             if (net.isConnected) {
-                const token = await AsyncStorage.getItem("authToken");
-                if (!token) throw new Error("No authentication token found");
-                const backendUrl = await getBackendUrl();
-                const res = await fetch(
-                    `${backendUrl}/forms/user/assigned-forms-with-responses`,
-                    {
-                        headers: { Authorization: `Bearer ${token}` },
+                try {
+                    const token = await AsyncStorage.getItem("authToken");
+
+                    // ✅ CAMBIO 1: Verificar token antes de continuar
+                    if (!token) {
+                        console.log("🔒 No hay token disponible");
+                        await handleAuthError(new Error("No authentication token found"));
+                        return;
                     }
-                );
-                const data = await res.json();
-                const match = Array.isArray(data)
-                    ? data.find((f) => String(f.response_id) === String(response_id))
-                    : null;
-                setForm(match || null);
-                if (match) {
-                    loadRelatedForms(match);
-                    await saveDetailOffline(match);
+
+                    const backendUrl = await getBackendUrl();
+
+                    const res = await fetch(
+                        `${backendUrl}/forms/user/assigned-forms-with-responses`,
+                        {
+                            headers: { Authorization: `Bearer ${token}` },
+                        }
+                    );
+
+                    // ✅ CAMBIO 2: Verificar si la respuesta es 401 Unauthorized
+                    if (res.status === 401) {
+                        await handleAuthError(new Error("Unauthorized - Token inválido"));
+                        return;
+                    }
+
+                    if (res.ok) {
+                        const data = await res.json();
+                        foundData = Array.isArray(data)
+                            ? data.find((f) => String(f.response_id) === String(response_id))
+                            : null;
+
+                        if (foundData) {
+                            console.log("✅ Datos frescos del servidor - Requisitos:",
+                                foundData.approval_requirements);
+                            setForm(foundData);
+                            loadRelatedForms(foundData);
+                            await saveDetailOffline(foundData);
+                            setLoading(false);
+                            return;
+                        }
+                    }
+                } catch (e) {
+                    console.warn("⚠️ Error trayendo datos del servidor:", e);
+                    // ✅ CAMBIO 3: Verificar si es error de autenticación
+                    const isAuthError = await handleAuthError(e);
+                    if (isAuthError) return;
                 }
             }
+
+            // Si no hay conexión o falló, usar cache
+            if (!foundData) {
+                // Busca en memoria offline (detalle específico)
+                const storedDetail = await AsyncStorage.getItem(
+                    APPROVAL_DETAIL_OFFLINE_KEY
+                );
+                if (storedDetail) {
+                    const arr = JSON.parse(storedDetail);
+                    foundData = arr.find((f) => String(f.response_id) === String(response_id));
+                    if (foundData) {
+                        console.log("📦 Usando cache de detalles");
+                        setForm(foundData);
+                        loadRelatedForms(foundData);
+                        setLoading(false);
+                        return;
+                    }
+                }
+
+                // Si no está en memoria de detalles, busca en la lista general
+                const stored = await AsyncStorage.getItem(APPROVALS_OFFLINE_KEY);
+                if (stored) {
+                    const arr = JSON.parse(stored);
+                    foundData = arr.find((f) => String(f.response_id) === String(response_id));
+                    if (foundData) {
+                        console.log("📦 Usando cache general de aprobaciones");
+                        setForm(foundData);
+                        loadRelatedForms(foundData);
+                        await saveDetailOffline(foundData);
+                        setLoading(false);
+                        return;
+                    }
+                }
+            }
+
+            // Si no encontró nada en ningún lado
+            setForm(null);
         } catch (e) {
-            console.error("Error cargando detalle:", e);
+            console.error("❌ Error cargando detalle:", e);
+            // ✅ CAMBIO 4: Manejar error de autenticación al final
+            await handleAuthError(e);
             setForm(null);
         } finally {
             setLoading(false);
         }
     };
-
     const loadRelatedForms = (currentForm) => {
         // Cargar formularios relacionados del mismo grupo
         AsyncStorage.getItem(APPROVALS_OFFLINE_KEY).then((stored) => {
@@ -242,7 +341,13 @@ export default function ApprovalDetail() {
 
             // Modo online
             const token = await AsyncStorage.getItem("authToken");
-            if (!token) throw new Error("No authentication token found");
+
+            // ✅ CAMBIO 1: Verificar token antes de continuar
+            if (!token) {
+                await handleAuthError(new Error("No authentication token found"));
+                return;
+            }
+
             const backendUrl = await getBackendUrl();
 
             const formData = new FormData();
@@ -274,6 +379,12 @@ export default function ApprovalDetail() {
                 }
             );
 
+            // ✅ CAMBIO 2: Verificar si la respuesta es 401 Unauthorized
+            if (response.status === 401) {
+                await handleAuthError(new Error("Unauthorized - Token inválido"));
+                return;
+            }
+
             const data = await response.json();
 
             if (response.ok) {
@@ -288,11 +399,19 @@ export default function ApprovalDetail() {
             }
         } catch (error) {
             console.error("Error al actualizar la aprobación:", error);
-            Alert.alert(
-                "Error",
-                "No se pudo enviar la aprobación. Se guardará para sincronizar offline."
-            );
-            await saveOfflineApprovalAction(form.response_id, status, message, files);
+
+            // ✅ CAMBIO 3: Verificar si es error de autenticación
+            const isAuthError = await handleAuthError(error);
+
+            // Si no es error de autenticación, mostrar alerta genérica
+            if (!isAuthError) {
+                Alert.alert(
+                    "Error",
+                    "No se pudo enviar la aprobación. Se guardará para sincronizar offline."
+                );
+                await saveOfflineApprovalAction(form.response_id, status, message, files);
+            }
+
             setShowApprovalModal(false);
             router.back();
         } finally {
@@ -300,9 +419,24 @@ export default function ApprovalDetail() {
         }
     };
 
+    useEffect(() => {
+    if (showSuccessNotification) {
+        const timer = setTimeout(() => {
+            setShowSuccessNotification(false);
+        }, 2000);
+        return () => clearTimeout(timer);
+    }
+}, [showSuccessNotification]);
     const handleFillForm = async (formId, formTitle, requirementId) => {
         try {
             const token = await AsyncStorage.getItem("authToken");
+
+            // ✅ CAMBIO 1: Verificar token antes de continuar
+            if (!token) {
+                await handleAuthError(new Error("No authentication token found"));
+                return;
+            }
+
             const backendUrl = await getBackendUrl();
 
             const response = await fetch(`${backendUrl}/forms/${formId}`, {
@@ -310,6 +444,12 @@ export default function ApprovalDetail() {
                     Authorization: `Bearer ${token}`,
                 },
             });
+
+            // ✅ CAMBIO 2: Verificar si la respuesta es 401 Unauthorized
+            if (response.status === 401) {
+                await handleAuthError(new Error("Unauthorized - Token inválido"));
+                return;
+            }
 
             const formData = await response.json();
             setFormToFill({
@@ -325,15 +465,25 @@ export default function ApprovalDetail() {
             setShowFillModal(true);
         } catch (error) {
             console.error("Error al cargar formulario:", error);
-            Alert.alert("Error", "Error al cargar el formulario");
+
+            // ✅ CAMBIO 3: Verificar si es error de autenticación
+            const isAuthError = await handleAuthError(error);
+
+            // Si no es error de autenticación, mostrar alerta genérica
+            if (!isAuthError) {
+                Alert.alert("Error", "Error al cargar el formulario");
+            }
         }
     };
 
     const handleFormSubmitted = () => {
-        loadDetail();
+        console.log("📝 Formulario requisito completado - Refrescando detalles...");
+        // Llamar loadDetail sin mostrar loading para actualizar silenciosamente
+        loadDetail(false);
         setShowFillModal(false);
         setFormToFill(null);
         setShowSuccessNotification(true);
+
     };
 
     const pickFiles = async () => {
@@ -877,6 +1027,18 @@ export default function ApprovalDetail() {
                 onClose={() => setShowApproversModal(false)}
                 responseId={form.response_id}
                 formTitle={form.form_title}
+            />
+
+            <ApprovalFormRenderer
+                isOpen={showFillModal}
+                onClose={() => {
+                    setShowFillModal(false);
+                    setFormToFill(null);
+                }}
+                formToFill={formToFill}
+                onFormSubmitted={handleFormSubmitted}
+                parentResponseId={form?.response_id}
+                approvalRequirementId={formToFill?.requirementId}
             />
 
             {/* Success Notification */}

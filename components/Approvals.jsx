@@ -16,6 +16,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { MaterialIcons } from "@expo/vector-icons";
 import NetInfo from "@react-native-community/netinfo";
 import { useRouter } from "expo-router";
+import ModalFormResponses from './ModalFormResponses';
 
 const { width, height } = Dimensions.get("window");
 const APPROVALS_OFFLINE_KEY = "approvals_offline";
@@ -129,6 +130,12 @@ export default function Approvals() {
   const [refreshing, setRefreshing] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const [pendingApprovalActions, setPendingApprovalActions] = useState([]);
+  
+  // 📌 NUEVOS ESTADOS PARA EL MODAL
+  const [isFormResponsesModalOpen, setIsFormResponsesModalOpen] = useState(false);
+  const [formStatusToView, setFormStatusToView] = useState(null);
+  const [formResponsesToShow, setFormResponsesToShow] = useState([]);
+  
   const router = useRouter();
 
   useEffect(() => {
@@ -370,6 +377,54 @@ export default function Approvals() {
     });
   };
 
+  // 📌 NUEVA FUNCIÓN: Descargar archivo
+  const handleDownloadFile = async (fileName) => {
+    try {
+      const token = await AsyncStorage.getItem("authToken");
+      const backendUrl = await getBackendUrl();
+      
+      // Aquí implementarías la lógica de descarga según tu backend
+      Alert.alert("Descarga", `Descargando archivo: ${fileName}`);
+      
+      // Ejemplo de implementación básica:
+      // const response = await fetch(
+      //   `${backendUrl}/responses/download-file/${fileName}`,
+      //   { headers: { Authorization: `Bearer ${token}` } }
+      // );
+      
+      // Luego usar expo-file-system o similar para guardar el archivo
+    } catch (error) {
+      console.error("Error al descargar archivo:", error);
+      Alert.alert("Error", "No se pudo descargar el archivo");
+    }
+  };
+
+  // 📌 NUEVA FUNCIÓN: Abrir modal de formularios (aprobados/rechazados)
+  const openFormResponsesModal = (status) => {
+    setFormStatusToView(status);
+    setFormResponsesToShow(
+      status === "approved" 
+        ? aprovedForms.filter((form) =>
+            form.form_title.toLowerCase().includes(searchText.toLowerCase()) ||
+            form.submitted_by?.name.toLowerCase().includes(searchText.toLowerCase())
+          )
+        : noAprovedForms.filter((form) =>
+            form.form_title.toLowerCase().includes(searchText.toLowerCase()) ||
+            form.submitted_by?.name.toLowerCase().includes(searchText.toLowerCase())
+          )
+    );
+    setIsFormResponsesModalOpen(true);
+  };
+
+  // 📌 NUEVA FUNCIÓN: Callback para actualizar formularios después de cambios
+  const handleFormsUpdate = (updatedData, counts) => {
+    setForms(updatedData || []);
+    const pendingForms = updatedData.filter(
+      (form) => form.your_approval_status?.status === "pendiente"
+    );
+    processFormGroups(pendingForms);
+  };
+
   const aprovedForms = forms.filter(
     (form) => form.your_approval_status?.status === "aprobado"
   );
@@ -450,13 +505,9 @@ export default function Approvals() {
                 <Text style={styles.updateButtonText}>Actualizar</Text>
               </TouchableOpacity>
 
+              {/* 📌 MODIFICADO: Ahora abre el modal en lugar de navegar */}
               <TouchableOpacity
-                onPress={() =>
-                  router.push({
-                    pathname: "/approved-forms",
-                    params: { status: "approved" },
-                  })
-                }
+                onPress={() => openFormResponsesModal("approved")}
                 style={styles.viewApprovedButton}
               >
                 <MaterialIcons name="check-circle" size={18} color="#16a34a" />
@@ -465,13 +516,9 @@ export default function Approvals() {
                 </Text>
               </TouchableOpacity>
 
+              {/* 📌 MODIFICADO: Ahora abre el modal en lugar de navegar */}
               <TouchableOpacity
-                onPress={() =>
-                  router.push({
-                    pathname: "/rejected-forms",
-                    params: { status: "rejected" },
-                  })
-                }
+                onPress={() => openFormResponsesModal("rejected")}
                 style={styles.viewRejectedButton}
               >
                 <MaterialIcons name="cancel" size={18} color="#dc2626" />
@@ -773,6 +820,17 @@ export default function Approvals() {
           </View>
         )}
       </ScrollView>
+
+      {/* 📌 NUEVO: Modal de formularios aprobados/rechazados */}
+      {isFormResponsesModalOpen && formStatusToView && (
+        <ModalFormResponses
+          type={formStatusToView}
+          forms={formResponsesToShow}
+          onClose={() => setIsFormResponsesModalOpen(false)}
+          onDownloadFile={handleDownloadFile}
+          onFormsUpdate={handleFormsUpdate}
+        />
+      )}
     </View>
   );
 }

@@ -19,9 +19,10 @@ import { LinearGradient } from "expo-linear-gradient";
 
 const { width, height } = Dimensions.get("window");
 const RESPONSES_OFFLINE_KEY = "responses_with_answers_offline";
-const RESPONSES_DETAIL_OFFLINE_KEY = "responses_detail_offline"; // NUEVO
-const MY_FORMS_OFFLINE_KEY = "my_forms_offline"; // NUEVO
+const RESPONSES_DETAIL_OFFLINE_KEY = "responses_detail_offline";
+const MY_FORMS_OFFLINE_KEY = "my_forms_offline";
 const BACKEND_URL_KEY = "backend_url";
+
 const getBackendUrl = async () => {
   const stored = await AsyncStorage.getItem(BACKEND_URL_KEY);
   return stored || "";
@@ -31,7 +32,7 @@ export default function MyForms() {
   const [forms, setForms] = useState([]);
   const [expandedForms, setExpandedForms] = useState({});
   const [responsesByForm, setResponsesByForm] = useState({});
-  const [responsesDetail, setResponsesDetail] = useState({}); // { [formId]: [responses] }
+  const [responsesDetail, setResponsesDetail] = useState({});
   const [loading, setLoading] = useState(true);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [reconsiderModal, setReconsiderModal] = useState({
@@ -57,6 +58,65 @@ export default function MyForms() {
     }, [])
   );
 
+  // Función para manejar errores de autenticación
+  const handleAuthError = async (error) => {
+    const errorMessage = error?.message || error?.toString() || "";
+    
+    // Detectar si es un error de autenticación
+    if (
+      errorMessage.includes("No authentication token") ||
+      errorMessage.includes("authentication token") ||
+      errorMessage.includes("Unauthorized") ||
+      errorMessage.includes("401")
+    ) {
+      console.log("🔒 Token inválido o ausente. Cerrando sesión...");
+      
+      // Limpiar datos de sesión
+      await AsyncStorage.setItem("isLoggedOut", "true");
+      await AsyncStorage.removeItem("authToken");
+      
+      // Mostrar alerta y redirigir al login
+      Alert.alert(
+        "Sesión Expirada",
+        "Tu sesión ha expirado o no es válida. Por favor, inicia sesión nuevamente.",
+        [
+          {
+            text: "Aceptar",
+            onPress: () => router.replace("/"),
+          },
+        ],
+        { cancelable: false }
+      );
+      
+      return true; // Indica que se manejó un error de autenticación
+    }
+    
+    return false; // No es un error de autenticación
+  };
+
+  // Verificar token al cargar la pantalla
+  useEffect(() => {
+    const checkAuthToken = async () => {
+      const token = await AsyncStorage.getItem("authToken");
+      if (!token) {
+        console.log("🔒 No hay token al cargar MyForms. Redirigiendo al login...");
+        Alert.alert(
+          "Sesión no válida",
+          "No se encontró una sesión activa. Por favor, inicia sesión.",
+          [
+            {
+              text: "Aceptar",
+              onPress: () => router.replace("/"),
+            },
+          ],
+          { cancelable: false }
+        );
+      }
+    };
+    
+    checkAuthToken();
+  }, []);
+
   useEffect(() => {
     handleViewForms();
   }, []);
@@ -66,6 +126,14 @@ export default function MyForms() {
     setLoading(true);
     try {
       const accessToken = await AsyncStorage.getItem("authToken");
+      
+      // Verificar token antes de cargar formularios
+      if (!accessToken) {
+        console.log("🔒 No hay token disponible en MyForms");
+        setLoading(false);
+        return;
+      }
+
       let formsList = [];
       let grouped = {};
 
@@ -93,6 +161,12 @@ export default function MyForms() {
               headers: { Authorization: `Bearer ${accessToken}` },
             }
           );
+          
+          // Verificar si la respuesta es 401 Unauthorized
+          if (formsRes.status === 401) {
+            throw new Error("Unauthorized - Token inválido");
+          }
+          
           const formsData = await formsRes.json();
           if (!Array.isArray(formsData)) {
             throw new Error("No se pudieron cargar los formularios asignados.");
@@ -109,6 +183,12 @@ export default function MyForms() {
                   headers: { Authorization: `Bearer ${accessToken}` },
                 }
               );
+              
+              // Verificar si la respuesta es 401 Unauthorized
+              if (res.status === 401) {
+                throw new Error("Unauthorized - Token inválido");
+              }
+              
               const responses = await res.json();
               if (Array.isArray(responses) && responses.length > 0) {
                 grouped[form.id] = responses;
@@ -150,9 +230,16 @@ export default function MyForms() {
       }
     } catch (error) {
       console.error("❌ Error al cargar formularios enviados:", error);
-      setForms([]);
-      setResponsesByForm({});
-      Alert.alert("Error", "No se pudieron cargar los formularios enviados.");
+      
+      // Verificar si es un error de autenticación
+      const isAuthError = await handleAuthError(error);
+      
+      // Si no es error de autenticación, mostrar alerta genérica
+      if (!isAuthError) {
+        setForms([]);
+        setResponsesByForm({});
+        Alert.alert("Error", "No se pudieron cargar los formularios enviados.");
+      }
     } finally {
       setLoading(false);
     }
@@ -232,6 +319,12 @@ export default function MyForms() {
           "Content-Type": "application/json",
         },
       });
+      
+      // Verificar si la respuesta es 401 Unauthorized
+      if (res.status === 401) {
+        throw new Error("Unauthorized - Token inválido");
+      }
+      
       let data;
       try {
         data = await res.json();
@@ -270,13 +363,29 @@ export default function MyForms() {
       handleViewForms();
     } catch (error) {
       console.error("❌ Error en reconsideración:", error);
-      setReconsiderModal((prev) => ({
-        ...prev,
-        loading: false,
-        error:
-          error.message ||
-          "No se pudo solicitar la reconsideración. Intenta de nuevo.",
-      }));
+      
+      // Verificar si es un error de autenticación
+      const isAuthError = await handleAuthError(error);
+      
+      // Si no es error de autenticación, mostrar error en el modal
+      if (!isAuthError) {
+        setReconsiderModal((prev) => ({
+          ...prev,
+          loading: false,
+          error:
+            error.message ||
+            "No se pudo solicitar la reconsideración. Intenta de nuevo.",
+        }));
+      } else {
+        // Si es error de autenticación, cerrar el modal
+        setReconsiderModal({
+          visible: false,
+          responseId: null,
+          loading: false,
+          error: null,
+          message: "",
+        });
+      }
     }
   };
 
@@ -884,19 +993,16 @@ const styles = StyleSheet.create({
     borderColor: "#12A0AF",
     marginTop: 8,
   },
-  diligentCard: {
-    // Remove backgroundColor, border, marginBottom here if present
-    // They are now set inline above for cada envío
-    // ...existing code...
-    // Add only if you want a default padding for all, otherwise keep empty
+  diligCard: {
+    // Styles are set inline in the component
   },
-  diligentHeader: {
+  diligHeader: {
     fontSize: 17,
     fontWeight: "bold",
     color: "#4B34C7",
     marginBottom: 8,
   },
-  diligentMeta: {
+  diligMeta: {
     fontSize: 13,
     color: "#12A0AF",
     marginBottom: 8,

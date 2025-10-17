@@ -130,6 +130,7 @@ export default function FormatScreen(props) {
   const [tableRelatedQuestions, setTableRelatedQuestions] = useState({});
   const [tableAutoFilled, setTableAutoFilled] = useState({}); // Para controlar si ya se autocompletó
 
+  
   useFocusEffect(
     React.useCallback(() => {
       const disableBack = () => true;

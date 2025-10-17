@@ -7,7 +7,7 @@ import {
   Alert,
   ScrollView,
   BackHandler,
-  Dimensions, // Import Dimensions
+  Dimensions,
   Modal,
   TextInput,
   Keyboard,
@@ -15,8 +15,8 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 import { useFocusEffect } from "@react-navigation/native";
-import { useRouter } from "expo-router"; // Add this import
-import { HomeIcon } from "./Icons"; // Adjust the import path as necessary
+import { useRouter } from "expo-router";
+import { HomeIcon } from "./Icons";
 import { LinearGradient } from "expo-linear-gradient";
 
 const { width, height } = Dimensions.get("window");
@@ -24,6 +24,7 @@ const INACTIVITY_TIMEOUT = 10 * 60 * 1000; // 10 minutos
 const PENDING_SAVE_RESPONSE_KEY = "pending_save_response";
 const PENDING_SAVE_ANSWERS_KEY = "pending_save_answers";
 const BACKEND_URL_KEY = "backend_url";
+
 const getBackendUrl = async () => {
   const stored = await AsyncStorage.getItem(BACKEND_URL_KEY);
   return stored || "";
@@ -32,14 +33,15 @@ const getBackendUrl = async () => {
 export default function PendingForms() {
   const [pendingForms, setPendingForms] = useState([]);
   const [isOnline, setIsOnline] = useState(false);
-  const [loading, setLoading] = useState(false); // NUEVO: estado de carga al enviar
-  const [showAnswers, setShowAnswers] = useState({}); // { [formId]: boolean }
-  const [answersByForm, setAnswersByForm] = useState({}); // { [formId]: [answers] }
-  const [questionsByForm, setQuestionsByForm] = useState({}); // { [formId]: { [question_id]: question_text } }
+  const [loading, setLoading] = useState(false);
+  const [showAnswers, setShowAnswers] = useState({});
+  const [answersByForm, setAnswersByForm] = useState({});
+  const [questionsByForm, setQuestionsByForm] = useState({});
   const router = useRouter();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const inactivityTimer = useRef(null);
 
+  // Deshabilitar botón de retroceso
   useFocusEffect(
     React.useCallback(() => {
       const disableBack = () => true;
@@ -53,6 +55,7 @@ export default function PendingForms() {
     }, [])
   );
 
+  // Timer de inactividad
   useEffect(() => {
     const resetInactivityTimer = async () => {
       if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
@@ -76,125 +79,196 @@ export default function PendingForms() {
     };
   }, []);
 
+  // Función para manejar errores de autenticación
+  const handleAuthError = async (error) => {
+    const errorMessage = error?.message || error?.toString() || "";
+    
+    // Detectar si es un error de autenticación
+    if (
+      errorMessage.includes("No authentication token") ||
+      errorMessage.includes("authentication token") ||
+      errorMessage.includes("Unauthorized") ||
+      errorMessage.includes("401")
+    ) {
+      console.log("🔒 Token inválido o ausente. Cerrando sesión...");
+      
+      // Limpiar datos de sesión
+      await AsyncStorage.setItem("isLoggedOut", "true");
+      await AsyncStorage.removeItem("authToken");
+      
+      // Mostrar alerta y redirigir al login
+      Alert.alert(
+        "Sesión Expirada",
+        "Tu sesión ha expirado o no es válida. Por favor, inicia sesión nuevamente.",
+        [
+          {
+            text: "Aceptar",
+            onPress: () => router.replace("/"),
+          },
+        ],
+        { cancelable: false }
+      );
+      
+      return true; // Indica que se manejó un error de autenticación
+    }
+    
+    return false; // No es un error de autenticación
+  };
+
+  // Verificar token al cargar la pantalla
+  useEffect(() => {
+    const checkAuthToken = async () => {
+      const token = await AsyncStorage.getItem("authToken");
+      if (!token) {
+        console.log("🔒 No hay token al cargar PendingForms. Redirigiendo al login...");
+        Alert.alert(
+          "Sesión no válida",
+          "No se encontró una sesión activa. Por favor, inicia sesión.",
+          [
+            {
+              text: "Aceptar",
+              onPress: () => router.replace("/"),
+            },
+          ],
+          { cancelable: false }
+        );
+      }
+    };
+    
+    checkAuthToken();
+  }, []);
+
+  // Cargar formularios pendientes
   useEffect(() => {
     const fetchPendingForms = async () => {
-      // Unifica los formularios pendientes de la clave legacy y los nuevos de save-response
-      const storedPendingForms = await AsyncStorage.getItem("pending_forms");
-      const legacyPending = storedPendingForms
-        ? JSON.parse(storedPendingForms)
-        : [];
+      try {
+        // Verificar token antes de cargar formularios
+        const token = await AsyncStorage.getItem("authToken");
+        if (!token) {
+          console.log("🔒 No hay token disponible");
+          return;
+        }
 
-      // También busca los formularios pendientes por save-response (nuevo flujo)
-      const storedPendingSaveResponse = await AsyncStorage.getItem(
-        PENDING_SAVE_RESPONSE_KEY
-      );
-      const pendingSaveResponse = storedPendingSaveResponse
-        ? JSON.parse(storedPendingSaveResponse)
-        : [];
+        // Unifica los formularios pendientes de la clave legacy y los nuevos de save-response
+        const storedPendingForms = await AsyncStorage.getItem("pending_forms");
+        const legacyPending = storedPendingForms
+          ? JSON.parse(storedPendingForms)
+          : [];
 
-      // Unifica ambos, evitando duplicados por id
-      const idsLegacy = legacyPending.map((f) => f.id);
+        // También busca los formularios pendientes por save-response (nuevo flujo)
+        const storedPendingSaveResponse = await AsyncStorage.getItem(
+          PENDING_SAVE_RESPONSE_KEY
+        );
+        const pendingSaveResponse = storedPendingSaveResponse
+          ? JSON.parse(storedPendingSaveResponse)
+          : [];
 
-      // --- NUEVO: intenta obtener title y description de metadata offline ---
-      const storedMeta = await AsyncStorage.getItem("offline_forms_metadata");
-      const metaObj = storedMeta ? JSON.parse(storedMeta) : {};
+        // Unifica ambos, evitando duplicados por id
+        const idsLegacy = legacyPending.map((f) => f.id);
 
-      const unified = [
-        ...legacyPending.map((f) => ({
-          id: f.id,
-          title:
-            f.title || (metaObj && metaObj[f.id] && metaObj[f.id].title) || "",
-          description:
-            f.description ||
-            (metaObj && metaObj[f.id] && metaObj[f.id].description) ||
-            "",
-        })),
-        ...pendingSaveResponse
-          .filter((f) => !idsLegacy.includes(f.form_id))
-          .map((f) => ({
-            id: f.form_id,
+        // Intenta obtener title y description de metadata offline
+        const storedMeta = await AsyncStorage.getItem("offline_forms_metadata");
+        const metaObj = storedMeta ? JSON.parse(storedMeta) : {};
+
+        const unified = [
+          ...legacyPending.map((f) => ({
+            id: f.id,
             title:
-              f.title ||
-              (metaObj && metaObj[f.form_id] && metaObj[f.form_id].title) ||
-              "",
+              f.title || (metaObj && metaObj[f.id] && metaObj[f.id].title) || "",
             description:
               f.description ||
-              (metaObj &&
-                metaObj[f.form_id] &&
-                metaObj[f.form_id].description) ||
+              (metaObj && metaObj[f.id] && metaObj[f.id].description) ||
               "",
           })),
-      ];
+          ...pendingSaveResponse
+            .filter((f) => !idsLegacy.includes(f.form_id))
+            .map((f) => ({
+              id: f.form_id,
+              title:
+                f.title ||
+                (metaObj && metaObj[f.form_id] && metaObj[f.form_id].title) ||
+                "",
+              description:
+                f.description ||
+                (metaObj &&
+                  metaObj[f.form_id] &&
+                  metaObj[f.form_id].description) ||
+                "",
+            })),
+        ];
 
-      setPendingForms(unified);
+        setPendingForms(unified);
 
-      // Cargar respuestas offline para cada formulario
-      const answersObj = {};
-      const questionsObj = {};
-      // Cargar preguntas offline para mostrar el texto de la pregunta
-      const storedQuestions = await AsyncStorage.getItem("offline_questions");
-      const offlineQuestions = storedQuestions
-        ? JSON.parse(storedQuestions)
-        : {};
+        // Cargar respuestas offline para cada formulario
+        const answersObj = {};
+        const questionsObj = {};
+        // Cargar preguntas offline para mostrar el texto de la pregunta
+        const storedQuestions = await AsyncStorage.getItem("offline_questions");
+        const offlineQuestions = storedQuestions
+          ? JSON.parse(storedQuestions)
+          : {};
 
-      for (const form of unified) {
-        // Busca en pending_save_answers primero
-        const storedPendingSaveAnswers = await AsyncStorage.getItem(
-          PENDING_SAVE_ANSWERS_KEY
-        );
-        const pendingSaveAnswers = storedPendingSaveAnswers
-          ? JSON.parse(storedPendingSaveAnswers)
-          : [];
-        const formAnswers = pendingSaveAnswers.filter(
-          (a) => String(a.form_id) === String(form.id)
-        );
-        if (formAnswers.length > 0) {
-          answersObj[form.id] = formAnswers;
-        } else {
-          // Busca en legacy pending_forms si no hay en pending_save_answers
-          const storedPendingForms =
-            await AsyncStorage.getItem("pending_forms");
-          const legacyPending = storedPendingForms
-            ? JSON.parse(storedPendingForms)
-            : [];
-          const legacyForm = legacyPending.find(
-            (f) => String(f.id) === String(form.id)
+        for (const form of unified) {
+          // Busca en pending_save_answers primero
+          const storedPendingSaveAnswers = await AsyncStorage.getItem(
+            PENDING_SAVE_ANSWERS_KEY
           );
-          if (legacyForm && Array.isArray(legacyForm.responses)) {
-            answersObj[form.id] = legacyForm.responses;
+          const pendingSaveAnswers = storedPendingSaveAnswers
+            ? JSON.parse(storedPendingSaveAnswers)
+            : [];
+          const formAnswers = pendingSaveAnswers.filter(
+            (a) => String(a.form_id) === String(form.id)
+          );
+          if (formAnswers.length > 0) {
+            answersObj[form.id] = formAnswers;
           } else {
-            answersObj[form.id] = [];
+            // Busca en legacy pending_forms si no hay en pending_save_answers
+            const storedPendingForms =
+              await AsyncStorage.getItem("pending_forms");
+            const legacyPending = storedPendingForms
+              ? JSON.parse(storedPendingForms)
+              : [];
+            const legacyForm = legacyPending.find(
+              (f) => String(f.id) === String(form.id)
+            );
+            if (legacyForm && Array.isArray(legacyForm.responses)) {
+              answersObj[form.id] = legacyForm.responses;
+            } else {
+              answersObj[form.id] = [];
+            }
+          }
+          // Construir el mapa de question_id -> question_text para este formulario
+          if (offlineQuestions[form.id]) {
+            const qMap = {};
+            offlineQuestions[form.id].forEach((q) => {
+              qMap[q.id] = q.question_text;
+            });
+            questionsObj[form.id] = qMap;
+          } else {
+            questionsObj[form.id] = {};
           }
         }
-        // Construir el mapa de question_id -> question_text para este formulario
-        if (offlineQuestions[form.id]) {
-          const qMap = {};
-          offlineQuestions[form.id].forEach((q) => {
-            qMap[q.id] = q.question_text;
-          });
-          questionsObj[form.id] = qMap;
-        } else {
-          questionsObj[form.id] = {};
-        }
+        setAnswersByForm(answersObj);
+        setQuestionsByForm(questionsObj);
+      } catch (error) {
+        console.error("❌ Error al cargar formularios pendientes:", error);
+        await handleAuthError(error);
       }
-      setAnswersByForm(answersObj);
-      setQuestionsByForm(questionsObj);
     };
 
     fetchPendingForms();
   }, []);
 
-  // Corrige: elimina cualquier referencia a setPendingSync (no existe ni es necesaria)
+  // Listener de conectividad
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
-      // Solo actualiza el estado de conexión, NO intentes enviar formularios automáticamente
       setIsOnline(state.isConnected);
     });
     return () => unsubscribe();
   }, [pendingForms]);
 
   const handleSubmitPendingForm = async (form, tokenOverride = null) => {
-    setLoading(true); // Mostrar loading
+    setLoading(true);
     try {
       console.log("🟢 Botón ENVIAR presionado para formulario:", form);
 
@@ -234,7 +308,6 @@ export default function PendingForms() {
       let responseId = null;
       if (saveResponseData) {
         const saveResponseRes = await fetch(
-          // MODIFICACIÓN: Añadir &action=send_and_close al final de los parámetros de consulta
           `${backendUrl}/responses/save-response/${form.id}?mode=offline&action=send_and_close`,
           {
             method: "POST",
@@ -242,6 +315,12 @@ export default function PendingForms() {
             body: JSON.stringify(saveResponseData.answers),
           }
         );
+        
+        // Verificar si la respuesta es 401 Unauthorized
+        if (saveResponseRes.status === 401) {
+          throw new Error("Unauthorized - Token inválido");
+        }
+        
         const saveResponseJson = await saveResponseRes.json();
         responseId = saveResponseJson.response_id;
       }
@@ -262,7 +341,11 @@ export default function PendingForms() {
               }),
             }
           );
-          // Puedes agregar logs aquí si necesitas depurar
+          
+          // Verificar si la respuesta es 401 Unauthorized
+          if (answerRes.status === 401) {
+            throw new Error("Unauthorized - Token inválido");
+          }
         }
       }
 
@@ -298,12 +381,19 @@ export default function PendingForms() {
       Alert.alert("Sincronización", "Formulario enviado correctamente.");
     } catch (error) {
       console.error("❌ Error en handleSubmitPendingForm:", error);
-      Alert.alert(
-        "Error",
-        `No se pudo sincronizar el formulario ID ${form.id}`
-      );
+      
+      // Verificar si es un error de autenticación
+      const isAuthError = await handleAuthError(error);
+      
+      // Si no es error de autenticación, mostrar alerta genérica
+      if (!isAuthError) {
+        Alert.alert(
+          "Error",
+          `No se pudo sincronizar el formulario ID ${form.id}`
+        );
+      }
     } finally {
-      setLoading(false); // Ocultar loading
+      setLoading(false);
     }
   };
 
@@ -373,7 +463,7 @@ export default function PendingForms() {
                         }}
                       >
                         {Array.isArray(answersByForm[form.id]) &&
-                          answersByForm[form.id].length > 0 ? (
+                        answersByForm[form.id].length > 0 ? (
                           answersByForm[form.id].map((ans, i) => (
                             <View
                               key={i}
@@ -415,20 +505,9 @@ export default function PendingForms() {
                       onPress={async () => {
                         try {
                           await handleSubmitPendingForm(form);
-                          const updatedPendingForms = pendingForms.filter(
-                            (f) => f.id !== form.id
-                          );
-                          setPendingForms(updatedPendingForms);
-                          await AsyncStorage.setItem(
-                            "pending_forms",
-                            JSON.stringify(updatedPendingForms)
-                          );
-                          Alert.alert("Sync", "Form sent successfully.");
                         } catch (error) {
-                          Alert.alert(
-                            "Error",
-                            `Could not sync form ID ${form.id}`
-                          );
+                          console.error("❌ Error al presionar botón enviar:", error);
+                          await handleAuthError(error);
                         }
                       }}
                       disabled={!isOnline || loading}
@@ -459,7 +538,7 @@ export default function PendingForms() {
                 Session closed due to inactivity
               </Text>
               <Text style={styles.modalText}>
-                For security, your session was closed automatically after 2
+                For security, your session was closed automatically after 10
                 minutes of inactivity.
               </Text>
               <TouchableOpacity
@@ -526,7 +605,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 8,
     backgroundColor: "transparent",
-    // Espacio en todos los bordes respecto al padre
     marginTop: 10,
     marginLeft: 10,
     marginRight: 10,
