@@ -1,4 +1,3 @@
-// Main.jsx
 import { useEffect, useState, useCallback } from "react";
 import {
   View,
@@ -13,6 +12,7 @@ import {
   AppState,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
@@ -20,13 +20,11 @@ import MatrixBackground from "./MatrixBackground";
 import { Screen } from "./Screen";
 import { useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
-import { Ionicons } from "@expo/vector-icons"; // Importar íconos
-import { SvgXml } from "react-native-svg"; // Agrega esta importación
+import { Ionicons } from "@expo/vector-icons";
+import { SvgXml } from "react-native-svg";
 
-// Obtener dimensiones de la pantalla
 const { width, height } = Dimensions.get("window");
 
-// Función auxiliar para construir la cadena x-www-form-urlencoded
 function encodeFormData(data) {
   return Object.keys(data)
     .map(
@@ -37,16 +35,12 @@ function encodeFormData(data) {
 }
 
 const BACKEND_URL_KEY = "backend_url";
+const DEFAULT_BACKEND_URL = "https://api-forms-sfi.service.saferut.com";
 const getBackendUrl = async () => {
   const stored = await AsyncStorage.getItem(BACKEND_URL_KEY);
-  return stored || "";
+  return stored || DEFAULT_BACKEND_URL;
 };
 
-// Estado global para MatrixBackground (solo ejecuta una vez y nunca se reinicia)
-let matrixEffectShown = false;
-let matrixLoopStarted = false;
-
-// Spinner SVG igual que en Home/FormatScreen
 const spinnerSvg = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><path fill="#000000FF" stroke="#EE4138FF" stroke-width="15" transform-origin="center" d="m148 84.7 13.8-8-10-17.3-13.8 8a50 50 0 0 0-27.4-15.9v-16h-20v16A50 50 0 0 0 63 67.4l-13.8-8-10 17.3 13.8 8a50 50 0 0 0 0 31.7l-13.8 8 10 17.3 13.8-8a50 50 0 0 0 27.5 15.9v16h20v-16a50 50 0 0 0 27.4-15.9l13.8 8 10-17.3-13.8-8a50 50 0 0 0 0-31.7Zm-47.5 50.8a35 35 0 1 1 0-70 35 35 0 0 1 0 70Z"><animateTransform type="rotate" attributeName="transform" calcMode="spline" dur="1.8" values="0;120" keyTimes="0;1" keySplines="0 0 1 1" repeatCount="indefinite"></animateTransform></path></svg>
 `;
@@ -56,36 +50,33 @@ export function Main() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [isOffline, setIsOffline] = useState(false);
-  const [userData, setUserData] = useState(null); // Estado para guardar los datos del usuario
-  const [showPassword, setShowPassword] = useState(false); // Estado para mostrar/ocultar contraseña
-  const [errors, setErrors] = useState({}); // Estado para errores visuales
+  const [userData, setUserData] = useState(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [errors, setErrors] = useState({});
   const [backendUrl, setBackendUrl] = useState("");
   const [showBackendModal, setShowBackendModal] = useState(false);
   const [backendInput, setBackendInput] = useState("");
   const [backendUrlSet, setBackendUrlSet] = useState(false);
   const [showBackendError, setShowBackendError] = useState(false);
   const [backendErrorMsg, setBackendErrorMsg] = useState("");
-  const [showMatrix, setShowMatrix] = useState(!matrixEffectShown);
-  const [signingIn, setSigningIn] = useState(false); // Nuevo estado para spinner
+  const [signingIn, setSigningIn] = useState(false);
 
-  // Solo pregunta la primera vez
   useEffect(() => {
     AsyncStorage.getItem(BACKEND_URL_KEY).then((url) => {
       if (url) {
         setBackendUrl(url);
+        setBackendInput(url);
         setBackendUrlSet(true);
       } else {
-        setShowBackendModal(true); // Mostrar modal la primera vez
+        setShowBackendModal(true);
       }
     });
   }, []);
 
-  // Validación de email simple
   const isValidEmail = (email) => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   };
 
-  // Corrige el patrón de BackHandler para evitar el warning de removeEventListener
   useFocusEffect(
     useCallback(() => {
       const disableBack = () => true;
@@ -99,7 +90,6 @@ export function Main() {
     }, [])
   );
 
-  // Logout automático al cerrar la app
   useEffect(() => {
     const handleAppStateChange = async (nextAppState) => {
       if (nextAppState === "background" || nextAppState === "inactive") {
@@ -116,36 +106,19 @@ export function Main() {
     };
   }, []);
 
-  // MatrixBackground solo una vez y loop independiente, nunca se reinicia
-  useEffect(() => {
-    if (!matrixLoopStarted && showMatrix) {
-      matrixEffectShown = true;
-      matrixLoopStarted = true;
-      // No ocultes el efecto, deja que MatrixBackground maneje su propio loop
-      // Si quieres ocultar visualmente después de un tiempo, puedes usar setShowMatrix(false)
-      // pero el efecto nunca se reinicia por cambios de estado
-    }
-  }, [showMatrix]);
-
   useEffect(() => {
     const checkToken = async () => {
       try {
         const savedToken = await AsyncStorage.getItem("authToken");
         const isLoggedOut = await AsyncStorage.getItem("isLoggedOut");
 
-        console.log("🔑 Token recuperado:", savedToken);
-        console.log("🚪 Estado de sesión:", isLoggedOut);
-
-        // Solo permite acceso automático si isLoggedOut !== "true"
         if (savedToken && isLoggedOut !== "true") {
           const backendUrlToUse = await getBackendUrl();
           let responseUser;
           let isOnline = false;
           try {
-            // Verifica si hay conexión antes de intentar validar el token
             isOnline = await NetInfo.fetch().then((state) => state.isConnected);
             if (!isOnline) {
-              // Si está offline, no preguntar la URL, solo salir
               return;
             }
             responseUser = await fetch(
@@ -156,7 +129,6 @@ export function Main() {
               }
             );
           } catch (err) {
-            // Solo preguntar la URL si hay conexión pero el backend está caído
             if (isOnline) {
               setBackendUrlSet(false);
               setShowBackendModal(true);
@@ -170,7 +142,6 @@ export function Main() {
 
           if (!responseUser.ok) {
             const errorUserText = await responseUser.text();
-            // Solo preguntar la URL si hay conexión pero el backend está caído
             if (
               (await NetInfo.fetch()).isConnected &&
               (errorUserText.includes("Failed to fetch") ||
@@ -192,18 +163,16 @@ export function Main() {
           }
 
           const userData = await responseUser.json();
-          setUserData(userData); // Guardar los datos del usuario
+          setUserData(userData);
           router.push({
             pathname: "/home",
-            params: { name: userData.name, email: userData.email }, // Pasar datos como props
+            params: { name: userData.name, email: userData.email },
           });
         } else {
-          // Si está deslogueado, limpia token por seguridad
           await AsyncStorage.removeItem("authToken");
           await AsyncStorage.setItem("isLoggedOut", "true");
         }
       } catch (error) {
-        // Solo preguntar la URL si hay conexión pero el backend está caído
         NetInfo.fetch().then((state) => {
           if (
             state.isConnected &&
@@ -240,9 +209,7 @@ export function Main() {
     return () => unsubscribe();
   }, [router, isOffline]);
 
-  // Cambia el manejo de tokens para soportar múltiples usuarios
-  // Clave para guardar tokens por usuario
-  const TOKENS_KEY = "user_tokens"; // { [email]: { password, token } }
+  const TOKENS_KEY = "user_tokens";
 
   const handleLogin = async () => {
     let newErrors = {};
@@ -260,10 +227,9 @@ export function Main() {
       return;
     }
 
-    setSigningIn(true); // Mostrar spinner al iniciar login
+    setSigningIn(true);
     try {
       if (isOffline) {
-        // --- OFFLINE LOGIN ---
         const tokensRaw = await AsyncStorage.getItem(TOKENS_KEY);
         const tokens = tokensRaw ? JSON.parse(tokensRaw) : {};
         const userEntry = tokens[username.toLowerCase()];
@@ -278,14 +244,13 @@ export function Main() {
             password:
               "No saved token or credentials for this user. Please log in online at least once.",
           });
-          setSigningIn(false); // ⚠️ AGREGADO
+          setSigningIn(false);
           return;
         }
       }
 
       const backendUrlToUse = await getBackendUrl();
 
-      // Construir la cadena de parámetros manualmente
       const params = encodeFormData({
         grant_type: "password",
         username: username,
@@ -303,18 +268,16 @@ export function Main() {
           body: params,
         });
       } catch (fetchError) {
-        // Error de red/fetch
         setBackendErrorMsg(
           "Could not connect to the backend. Please check the URL or your connection."
         );
         setShowBackendError(true);
-        setSigningIn(false); // ⚠️ AGREGADO
+        setSigningIn(false);
         return;
       }
 
       if (!response.ok) {
         const errorText = await response.text();
-        // Detectar error de red (sin conexión real)
         if (
           errorText.includes("Failed to fetch") ||
           errorText.includes("Network request failed") ||
@@ -326,14 +289,13 @@ export function Main() {
             "Could not connect to the backend. Please check the URL or your connection."
           );
           setShowBackendError(true);
-          setSigningIn(false); // ⚠️ AGREGADO
+          setSigningIn(false);
           return;
         }
-        // Si es error de usuario/contraseña, mostrar solo ese error
         setErrors({
           password: "Incorrect username or password. Please try again.",
         });
-        setSigningIn(false); // ⚠️ AGREGADO
+        setSigningIn(false);
         return;
       }
 
@@ -343,7 +305,7 @@ export function Main() {
         setErrors({
           password: "Server connection error. Please try again later.",
         });
-        setSigningIn(false); // ⚠️ AGREGADO
+        setSigningIn(false);
         return;
       }
 
@@ -354,17 +316,15 @@ export function Main() {
         setErrors({
           password: "Server response is not valid JSON.",
         });
-        setSigningIn(false); // ⚠️ AGREGADO
+        setSigningIn(false);
         return;
       }
 
       const token = json.access_token;
 
-      // Guarda el token en la sesión actual
       await AsyncStorage.setItem("authToken", token);
       await AsyncStorage.setItem("isLoggedOut", "false");
 
-      // Guarda el token en el mapa de usuarios para login offline
       const tokensRaw = await AsyncStorage.getItem(TOKENS_KEY);
       const tokens = tokensRaw ? JSON.parse(tokensRaw) : {};
       tokens[username.toLowerCase()] = {
@@ -373,7 +333,6 @@ export function Main() {
       };
       await AsyncStorage.setItem(TOKENS_KEY, JSON.stringify(tokens));
 
-      // Validar el token usando GET
       let responseUser;
       try {
         responseUser = await fetch(`${backendUrlToUse}/auth/validate-token`, {
@@ -385,7 +344,7 @@ export function Main() {
           "Could not connect to the backend. Please check the URL or your connection."
         );
         setShowBackendError(true);
-        setSigningIn(false); // ⚠️ AGREGADO
+        setSigningIn(false);
         return;
       }
 
@@ -393,7 +352,7 @@ export function Main() {
         setErrors({
           password: "Could not validate user session. Please try again.",
         });
-        setSigningIn(false); // ⚠️ AGREGADO
+        setSigningIn(false);
         return;
       }
 
@@ -419,7 +378,6 @@ export function Main() {
       await AsyncStorage.setItem("username", username);
       await AsyncStorage.setItem("password", password);
 
-      // ⚠️ AGREGADO - Reset al finalizar con éxito
       setSigningIn(false);
     } catch (error) {
       setSigningIn(false);
@@ -436,8 +394,21 @@ export function Main() {
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
       >
-        {/* MatrixBackground solo la primera vez, nunca se reinicia */}
-        {showMatrix && <MatrixBackground />}
+        {/* Matrix siempre visible */}
+        <MatrixBackground />
+
+        {/* Botón de configuración en la esquina superior derecha */}
+        <TouchableOpacity
+          style={styles.configButton}
+          onPress={() => {
+            setShowBackendModal(true);
+            setShowBackendError(false);
+          }}
+          accessibilityLabel="Configurar servidor"
+        >
+          <Ionicons name="settings-outline" size={24} color="#12A0AF" />
+        </TouchableOpacity>
+
         <View style={styles.formContainer}>
           <Text style={styles.title}>Bienvenido</Text>
           <View style={styles.inputContainer}>
@@ -498,135 +469,76 @@ export function Main() {
               <Text style={styles.errorText}>{errors.password}</Text>
             )}
           </View>
-          {/* Mostrar solo si la URL no ha sido seteada o si hay error de backend */}
-          {(!backendUrlSet || showBackendError) && (
-            <Modal
-              visible={showBackendModal || showBackendError}
-              transparent
-              animationType="fade"
-              onRequestClose={() => {
-                setShowBackendModal(false);
-                setShowBackendError(false);
-              }}
-            >
-              <View
-                style={{
-                  flex: 1,
-                  backgroundColor: "rgba(0,0,0,0.4)",
-                  justifyContent: "center",
-                  alignItems: "center",
-                }}
-              >
-                <View
-                  style={{
-                    backgroundColor: "#fff",
-                    borderRadius: 10,
-                    padding: 24,
-                    width: "85%",
-                    alignItems: "center",
-                    elevation: 5,
-                  }}
-                >
-                  <Text
-                    style={{
-                      fontWeight: "bold",
-                      fontSize: 18,
-                      marginBottom: 8,
-                      color: "#222",
-                      textAlign: "center",
-                    }}
-                  >
-                    Configure backend connection
+
+          {/* Modal de configuración del servidor */}
+          <Modal
+            visible={showBackendModal || showBackendError}
+            transparent
+            animationType="fade"
+            onRequestClose={() => {
+              setShowBackendModal(false);
+              setShowBackendError(false);
+            }}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                <Text style={styles.modalTitle}>
+                  Configure backend connection
+                </Text>
+                {showBackendError && (
+                  <Text style={styles.errorMessage}>
+                    {backendErrorMsg}
                   </Text>
-                  {showBackendError && (
-                    <Text
-                      style={{
-                        color: "#ef4444",
-                        marginBottom: 8,
-                        textAlign: "center",
-                        fontWeight: "bold",
-                      }}
-                    >
-                      {backendErrorMsg}
-                    </Text>
-                  )}
-                  <TextInput
-                    style={{
-                      borderWidth: 1,
-                      borderColor: "#12A0AF",
-                      borderRadius: 8,
-                      padding: 10,
-                      width: "100%",
-                      marginBottom: 10,
-                    }}
-                    placeholder="https://your-api-from-safemetrics.com"
-                    value={backendInput}
-                    onChangeText={setBackendInput}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      width: "100%",
-                      justifyContent: "space-between",
+                )}
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="https://your-api-from-safemetrics.com"
+                  value={backendInput}
+                  onChangeText={setBackendInput}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity
+                    style={styles.saveButton}
+                    onPress={async () => {
+                      let url = backendInput.trim();
+                      if (!/^https?:\/\//.test(url)) {
+                        url = "https://" + url;
+                      }
+                      setBackendUrl(url);
+                      await AsyncStorage.setItem(BACKEND_URL_KEY, url);
+                      setBackendUrlSet(true);
+                      setShowBackendModal(false);
+                      setShowBackendError(false);
                     }}
                   >
+                    <Text style={styles.saveButtonText}>Save</Text>
+                  </TouchableOpacity>
+                  {backendUrlSet && (
                     <TouchableOpacity
-                      style={{
-                        backgroundColor: "#2563eb",
-                        borderRadius: 6,
-                        padding: 12,
-                        alignItems: "center",
-                        flex: 1,
-                        marginRight: 8,
-                      }}
-                      onPress={async () => {
-                        let url = backendInput.trim();
-                        if (!/^https?:\/\//.test(url)) {
-                          url = "https://" + url;
-                        }
-                        setBackendUrl(url);
-                        await AsyncStorage.setItem(BACKEND_URL_KEY, url);
-                        setBackendUrlSet(true);
+                      style={styles.closeButton}
+                      onPress={() => {
                         setShowBackendModal(false);
                         setShowBackendError(false);
                       }}
                     >
-                      <Text
-                        style={{
-                          color: "white",
-                          fontWeight: "bold",
-                          fontSize: 16,
-                        }}
-                      >
-                        Save
-                      </Text>
+                      <Text style={styles.closeButtonText}>Close</Text>
                     </TouchableOpacity>
-                  </View>
+                  )}
                 </View>
               </View>
-            </Modal>
-          )}
+            </View>
+          </Modal>
+
           <TouchableOpacity
             onPress={handleLogin}
             style={styles.button}
             disabled={!backendUrlSet || signingIn}
           >
             {signingIn ? (
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <SvgXml
-                  xml={spinnerSvg.replace("#000000FF", "#fff")}
-                  width={28}
-                  height={28}
-                  style={{ marginRight: 10 }}
-                />
+              <View style={styles.signingInContainer}>
+                <ActivityIndicator size="small" color="#fff" style={{ marginRight: 10 }} />
                 <Text style={styles.buttonText}>Accediendo...</Text>
               </View>
             ) : (
@@ -654,8 +566,25 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  configButton: {
+    position: "absolute",
+    top: Platform.OS === "ios" ? 50 : 30,
+    right: 20,
+    backgroundColor: "#fff",
+    borderRadius: 25,
+    width: 50,
+    height: 50,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+    zIndex: 1000,
+  },
   formContainer: {
-    width: width * 0.9, // 90% del ancho de la pantalla
+    width: width * 0.9,
     padding: 20,
     backgroundColor: "#ffffff",
     borderRadius: 10,
@@ -666,7 +595,7 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   title: {
-    fontSize: width * 0.08, // Tamaño de fuente dinámico (8% del ancho de la pantalla)
+    fontSize: width * 0.08,
     fontWeight: "bold",
     color: "#4B34C7",
     textAlign: "center",
@@ -676,7 +605,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   label: {
-    fontSize: width * 0.04, // Tamaño de fuente dinámico (4% del ancho de la pantalla)
+    fontSize: width * 0.04,
     fontWeight: "bold",
     color: "#4B34C7",
     marginBottom: 4,
@@ -687,7 +616,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 8,
     padding: 10,
-    fontSize: width * 0.04, // Tamaño de fuente dinámico
+    fontSize: width * 0.04,
   },
   errorText: {
     color: "#dc2626",
@@ -697,14 +626,84 @@ const styles = StyleSheet.create({
   },
   button: {
     backgroundColor: "#12A0AF",
-    paddingVertical: height * 0.02, // Altura dinámica (2% de la altura de la pantalla)
+    paddingVertical: height * 0.02,
     borderRadius: 8,
     alignItems: "center",
     marginTop: 16,
   },
   buttonText: {
     color: "#ffffff",
-    fontSize: width * 0.045, // Tamaño de fuente dinámico (4.5% del ancho de la pantalla)
+    fontSize: width * 0.045,
     fontWeight: "bold",
+  },
+  signingInContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalContent: {
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    padding: 24,
+    width: "85%",
+    alignItems: "center",
+    elevation: 5,
+  },
+  modalTitle: {
+    fontWeight: "bold",
+    fontSize: 18,
+    marginBottom: 8,
+    color: "#222",
+    textAlign: "center",
+  },
+  errorMessage: {
+    color: "#ef4444",
+    marginBottom: 8,
+    textAlign: "center",
+    fontWeight: "bold",
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: "#12A0AF",
+    borderRadius: 8,
+    padding: 10,
+    width: "100%",
+    marginBottom: 10,
+  },
+  modalButtons: {
+    flexDirection: "row",
+    width: "100%",
+    justifyContent: "space-between",
+  },
+  saveButton: {
+    backgroundColor: "#2563eb",
+    borderRadius: 6,
+    padding: 12,
+    alignItems: "center",
+    flex: 1,
+    marginRight: 8,
+  },
+  saveButtonText: {
+    color: "white",
+    fontWeight: "bold",
+    fontSize: 16,
+  },
+  closeButton: {
+    backgroundColor: "#6b7280",
+    borderRadius: 6,
+    padding: 12,
+    alignItems: "center",
+    flex: 1,
+  },
+  closeButtonText: {
+    color: "white",
+    fontWeight: "bold",
+    fontSize: 16,
   },
 });

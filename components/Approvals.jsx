@@ -7,8 +7,9 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
-  Modal,
+  RefreshControl,
   Dimensions,
+  TextInput,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
@@ -18,30 +19,135 @@ import { useRouter } from "expo-router";
 
 const { width, height } = Dimensions.get("window");
 const APPROVALS_OFFLINE_KEY = "approvals_offline";
-const APPROVALS_OFFLINE_ACTIONS_KEY = "approvals_offline_actions"; // NUEVO
+const APPROVALS_OFFLINE_ACTIONS_KEY = "approvals_offline_actions";
 const BACKEND_URL_KEY = "backend_url";
+
 const getBackendUrl = async () => {
   const stored = await AsyncStorage.getItem(BACKEND_URL_KEY);
   return stored || "";
 };
 
+// Componente ApprovalRequirements
+const ApprovalRequirements = ({ requirements, onFillForm }) => {
+  return (
+    <View style={styles.requirementsContainer}>
+      <View style={styles.requirementsHeader}>
+        <MaterialIcons name="warning" size={20} color="#d97706" />
+        <Text style={styles.requirementsTitle}>
+          Formatos requeridos antes de la aprobación
+        </Text>
+      </View>
+
+      <View style={styles.requirementsList}>
+        {requirements.map((requirement) => (
+          <View key={requirement.requirement_id} style={styles.requirementCard}>
+            <View style={styles.requirementContent}>
+              <View
+                style={[
+                  styles.requirementIconContainer,
+                  {
+                    backgroundColor: requirement.fulfillment_status.is_fulfilled
+                      ? "#dcfce7"
+                      : "#f3f4f6",
+                  },
+                ]}
+              >
+                {requirement.fulfillment_status.is_fulfilled ? (
+                  <MaterialIcons name="check-circle" size={20} color="#16a34a" />
+                ) : (
+                  <MaterialIcons name="description" size={20} color="#6b7280" />
+                )}
+              </View>
+
+              <View style={styles.requirementInfo}>
+                <Text style={styles.requirementFormTitle}>
+                  {requirement.required_form.form_title}
+                </Text>
+                <Text style={styles.requirementFormDescription}>
+                  {requirement.required_form.form_description}
+                </Text>
+                <Text style={styles.requirementApprover}>
+                  Responsable: {requirement.approver.name}
+                </Text>
+                {requirement.fulfillment_status.is_fulfilled && (
+                  <Text style={styles.requirementCompletedDate}>
+                    ✓ Completado:{" "}
+                    {requirement.fulfillment_status.fulfilling_response_submitted_at
+                      ? new Date(
+                          requirement.fulfillment_status.fulfilling_response_submitted_at
+                        ).toLocaleDateString()
+                      : "Fecha no disponible"}
+                  </Text>
+                )}
+              </View>
+            </View>
+
+            <View style={styles.requirementActions}>
+              {requirement.fulfillment_status.is_fulfilled ? (
+                <View style={styles.completedBadge}>
+                  <Text style={styles.completedBadgeText}>Completado</Text>
+                </View>
+              ) : (
+                <>
+                  <View style={styles.pendingBadge}>
+                    <Text style={styles.pendingBadgeText}>Pendiente</Text>
+                  </View>
+                  {onFillForm && (
+                    <TouchableOpacity
+                      style={styles.fillButton}
+                      onPress={() =>
+                        onFillForm(
+                          requirement.required_form.form_id,
+                          requirement.required_form.form_title,
+                          requirement.requirement_id
+                        )
+                      }
+                    >
+                      <MaterialIcons
+                        name="open-in-new"
+                        size={14}
+                        color="#fff"
+                      />
+                      <Text style={styles.fillButtonText}>Llenar</Text>
+                    </TouchableOpacity>
+                  )}
+                </>
+              )}
+            </View>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+};
+
 export default function Approvals() {
+  const [forms, setForms] = useState([]);
+  const [searchText, setSearchText] = useState("");
+  const [formGroups, setFormGroups] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [allApprovals, setAllApprovals] = useState([]);
-  const [show, setShow] = useState("pending"); // "pending" | "approved" | "rejected" | "total"
+  const [refreshing, setRefreshing] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const [pendingApprovalActions, setPendingApprovalActions] = useState([]);
-  const [accepting, setAccepting] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
     loadApprovals();
     loadPendingApprovalActions();
+
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      setIsOffline(!state.isConnected);
+      if (state.isConnected) {
+        syncPendingActions();
+      }
+    });
+
+    return () => unsubscribe();
   }, []);
 
-  // Cargar aprobaciones desde API o memoria
-  const loadApprovals = async () => {
-    setLoading(true);
+  const loadApprovals = async (showLoading = true) => {
+    if (showLoading) setLoading(true);
+
     try {
       const net = await NetInfo.fetch();
       setIsOffline(!net.isConnected);
@@ -57,27 +163,87 @@ export default function Approvals() {
             headers: { Authorization: `Bearer ${token}` },
           }
         );
+
+        if (!res.ok) throw new Error("Error al cargar aprobaciones");
+
         const data = await res.json();
         console.log("🟢 Aprobaciones recibidas:", data);
-        setAllApprovals(data || []);
-        await AsyncStorage.setItem(APPROVALS_OFFLINE_KEY, JSON.stringify(data));
+        setForms(data || []);
+        await AsyncStorage.setItem(
+          APPROVALS_OFFLINE_KEY,
+          JSON.stringify(data)
+        );
+
+        // Procesar grupos de formularios
+        const pendingForms = data.filter(
+          (form) => form.your_approval_status?.status === "pendiente"
+        );
+        processFormGroups(pendingForms);
       } else {
-        // Modo offline
         const stored = await AsyncStorage.getItem(APPROVALS_OFFLINE_KEY);
         if (stored) {
           const offlineData = JSON.parse(stored);
-          setAllApprovals(offlineData);
-          console.log("🟠 Aprobaciones cargadas offline:", offlineData);
+          setForms(offlineData);
+          const pendingForms = offlineData.filter(
+            (form) => form.your_approval_status?.status === "pendiente"
+          );
+          processFormGroups(pendingForms);
         } else {
-          setAllApprovals([]);
+          setForms([]);
+          setFormGroups([]);
         }
       }
     } catch (e) {
-      setAllApprovals([]);
       console.error("❌ Error cargando aprobaciones:", e);
+      const stored = await AsyncStorage.getItem(APPROVALS_OFFLINE_KEY);
+      if (stored) {
+        const offlineData = JSON.parse(stored);
+        setForms(offlineData);
+        const pendingForms = offlineData.filter(
+          (form) => form.your_approval_status?.status === "pendiente"
+        );
+        processFormGroups(pendingForms);
+      } else {
+        setForms([]);
+        setFormGroups([]);
+      }
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
+  };
+
+  const processFormGroups = (pendingForms) => {
+    const grouped = pendingForms.reduce((acc, form) => {
+      const key = `${form.submitted_by?.user_id}-${form.form_id}`;
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(form);
+      return acc;
+    }, {});
+
+    const groups = Object.entries(grouped).map(([key, forms]) => {
+      const sortedForms = forms.sort(
+        (a, b) =>
+          new Date(a.submitted_at).getTime() -
+          new Date(b.submitted_at).getTime()
+      );
+
+      return {
+        key,
+        form_title: forms[0].form_title,
+        form_id: forms[0].form_id,
+        submitted_by: forms[0].submitted_by,
+        forms: sortedForms,
+        currentIndex: 0,
+      };
+    });
+
+    setFormGroups(groups);
+  };
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadApprovals(false);
   };
 
   const loadPendingApprovalActions = async () => {
@@ -89,734 +255,1098 @@ export default function Approvals() {
     }
   };
 
-  // Filtrar por estado de aprobación
-  const filterByStatus = (status) =>
-    allApprovals.filter(
-      (item) =>
-        item.your_approval_status && item.your_approval_status.status === status
-    );
-
-  // Contadores
-  const pending = filterByStatus("pendiente");
-  const approved = filterByStatus("aprobado");
-  const rejected = allApprovals.filter(
-    (item) =>
-      item.your_approval_status &&
-      item.your_approval_status.status === "rechazado"
-  );
-  const total = allApprovals.length;
-
-  // Guardar acción offline (aprobación/rechazo)
-  const saveOfflineApprovalAction = async (
-    response_id,
-    action,
-    message = ""
-  ) => {
+  const syncPendingActions = async () => {
     try {
-      const key = APPROVALS_OFFLINE_ACTIONS_KEY;
-      const stored = await AsyncStorage.getItem(key);
-      const arr = stored ? JSON.parse(stored) : [];
-      const now = new Date();
-      const reviewed_at = now.toISOString();
-      const form = allApprovals.find(
-        (f) => String(f.response_id) === String(response_id)
-      );
-      const selectedSequence = form?.your_approval_status?.sequence_number || 1;
-      arr.push({
-        response_id,
-        body: {
-          status: action,
-          reviewed_at,
-          message,
-          selectedSequence,
-        },
-        timestamp: Date.now(),
-      });
-      await AsyncStorage.setItem(key, JSON.stringify(arr));
-      setPendingApprovalActions(arr);
-      console.log("🟠 Offline approval action saved:", {
-        response_id,
-        action,
-        message,
-        selectedSequence,
-      });
-    } catch (e) {
-      console.error("❌ Error saving offline action:", e);
-    }
-  };
-
-  // Sincronizar acciones pendientes cuando hay internet
-  useEffect(() => {
-    const syncPendingActions = async () => {
       const net = await NetInfo.fetch();
       if (!net.isConnected) return;
+
       const stored = await AsyncStorage.getItem(APPROVALS_OFFLINE_ACTIONS_KEY);
       const actions = stored ? JSON.parse(stored) : [];
+
       if (actions.length === 0) return;
+
       const token = await AsyncStorage.getItem("authToken");
       if (!token) return;
+
       const backendUrl = await getBackendUrl();
       let remaining = [];
+      let syncedCount = 0;
+
       for (const action of actions) {
         try {
+          const formData = new FormData();
+          formData.append("update_data_json", JSON.stringify(action.body));
+
+          if (action.files && action.files.length > 0) {
+            for (const file of action.files) {
+              formData.append("files", {
+                uri: file.uri,
+                name: file.name,
+                type: file.type,
+              });
+            }
+          }
+
           const res = await fetch(
-            `${backendUrl}/forms/update-response-approval/${action.response_id}`,
+            `${backendUrl}/approvers/update-response-approval/${action.response_id}`,
             {
               method: "PUT",
               headers: {
                 Authorization: `Bearer ${token}`,
-                "Content-Type": "application/json",
               },
-              body: JSON.stringify(action.body),
+              body: formData,
             }
           );
-          const data = await res.json();
+
           if (res.ok) {
-            console.log("🟢 Acción de aprobación sincronizada:", action);
-            // Elimina de la lista de pendientes
+            syncedCount++;
           } else {
-            console.error("❌ Error al sincronizar acción:", data);
             remaining.push(action);
           }
         } catch (e) {
-          console.error("❌ Error al sincronizar acción:", e);
           remaining.push(action);
         }
       }
+
       await AsyncStorage.setItem(
         APPROVALS_OFFLINE_ACTIONS_KEY,
         JSON.stringify(remaining)
       );
       setPendingApprovalActions(remaining);
-      // Recargar aprobaciones para actualizar las listas
-      loadApprovals();
-    };
-    syncPendingActions();
-  }, [isOffline]);
 
-  // Botón aprobar/rechazar
-  const handleApproveReject = async (item, action) => {
-    const message = "";
-    if (isOffline) {
-      await saveOfflineApprovalAction(item.response_id, action, message);
-      Alert.alert(
-        "Saved Offline",
-        `The ${action === "aprobado" ? "approval" : "rejection"} action was saved and will sync when you are online.`
-      );
-      loadApprovals();
-    } else {
-      try {
-        const token = await AsyncStorage.getItem("authToken");
-        if (!token) throw new Error("No authentication token found");
-        const backendUrl = await getBackendUrl();
-        const now = new Date();
-        const reviewed_at = now.toISOString();
-        const selectedSequence =
-          item.your_approval_status?.sequence_number || 1;
-        const body = {
-          status: action,
-          reviewed_at,
-          message,
-          selectedSequence,
-        };
-        const res = await fetch(
-          `${backendUrl}/forms/update-response-approval/${item.response_id}`,
-          {
-            method: "PUT",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(body),
-          }
-        );
-        const data = await res.json();
-        if (res.ok) {
-          Alert.alert(
-            "Success",
-            `Form ${action === "aprobado" ? "approved" : "rejected"} successfully.`
-          );
-          loadApprovals();
-        } else {
-          throw new Error(data?.detail || "Approval error");
-        }
-      } catch (e) {
+      if (syncedCount > 0) {
         Alert.alert(
-          "Error",
-          "Could not send approval. It will be saved for offline sync."
+          "Sincronización completada",
+          `Se sincronizaron ${syncedCount} acción(es) pendiente(s)`
         );
-        await saveOfflineApprovalAction(item.response_id, action, message);
         loadApprovals();
       }
+    } catch (e) {
+      console.error("❌ Error en sincronización:", e);
     }
   };
 
-  // Cambia la función para detectar reconsideration_requested en los rechazados
-  const handleAcceptReconsideration = async (item) => {
-    setAccepting(true);
-    try {
-      const token = await AsyncStorage.getItem("authToken");
-      if (!token) throw new Error("No authentication token found");
-      const backendUrl = await getBackendUrl();
-      const approver = (item.all_approvers || []).find(
-        (appr) =>
-          appr.reconsideration_requested === true && appr.status === "rechazado"
-      );
-      if (!approver) {
-        throw new Error("There is no reconsideration pending for this form.");
-      }
-      const now = new Date();
-      const reviewed_at = now.toISOString();
-      const body = {
-        status: "aprobado",
-        reviewed_at,
-        message: "Reconsideration accepted",
-        selectedSequence: approver.sequence_number || 1,
-      };
-
-      const res = await fetch(
-        `${backendUrl}/forms/update-response-approval/${item.response_id}`,
-        {
-          method: "PUT",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(body),
+  const navigateResponse = (groupKey, direction) => {
+    setFormGroups((prev) =>
+      prev.map((group) => {
+        if (group.key === groupKey) {
+          let newIndex = group.currentIndex;
+          if (direction === "next" && group.currentIndex < group.forms.length - 1) {
+            newIndex = group.currentIndex + 1;
+          } else if (direction === "prev" && group.currentIndex > 0) {
+            newIndex = group.currentIndex - 1;
+          }
+          return { ...group, currentIndex: newIndex };
         }
-      );
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(
-          data?.detail || "Could not accept reconsideration. Please try again."
-        );
-      }
-      Alert.alert(
-        "Reconsideration accepted",
-        "The reconsideration was accepted."
-      );
-      loadApprovals();
-    } catch (error) {
-      Alert.alert(
-        "Error",
-        error.message || "Could not accept reconsideration."
-      );
-    } finally {
-      setAccepting(false);
-    }
+        return group;
+      })
+    );
   };
+
+  const hasUnfulfilledRequirements = (form) => {
+    if (!form.approval_requirements?.has_requirements) {
+      return false;
+    }
+    return form.approval_requirements.requirements.some(
+      (req) => !req.fulfillment_status.is_fulfilled
+    );
+  };
+
+  const calcularDias = (fecha, plazo) => {
+    const fechaEnviada = new Date(fecha);
+    const hoy = new Date();
+    const diferenciaMs = hoy.getTime() - fechaEnviada.getTime();
+    const diasPasados = Math.floor(diferenciaMs / (1000 * 60 * 60 * 24));
+    const diasRestantes = plazo - diasPasados;
+    const vencido = diasPasados > plazo;
+    return { diasPasados, diasRestantes, vencido };
+  };
+
+  const handleViewDetail = (group) => {
+    const currentForm = group.forms[group.currentIndex];
+    router.push({
+      pathname: "/approval-detail",
+      params: { response_id: currentForm.response_id },
+    });
+  };
+
+  const aprovedForms = forms.filter(
+    (form) => form.your_approval_status?.status === "aprobado"
+  );
+  const noAprovedForms = forms.filter(
+    (form) => form.your_approval_status?.status === "rechazado"
+  );
+
+  const filteredGroups = formGroups.filter(
+    (group) =>
+      group.form_title.toLowerCase().includes(searchText.toLowerCase()) ||
+      group.submitted_by?.name.toLowerCase().includes(searchText.toLowerCase())
+  );
+
+  const totalPendingForms = formGroups.reduce(
+    (total, group) => total + group.forms.length,
+    0
+  );
 
   return (
-    <LinearGradient colors={["#f7fafc", "#e6fafd"]} style={{ flex: 1 }}>
-      <View style={styles.container}>
-        <View style={styles.headerRow}>
-          <MaterialIcons name="check-circle" size={32} color="#12A0AF" />
-          <View style={{ marginLeft: 10 }}>
-            <Text style={styles.headerTitle}>Approvals Center</Text>
-            <Text style={styles.headerSubtitle}>
-              Review and approve pending forms
-            </Text>
+    <View style={styles.container}>
+      <ScrollView
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={["#0F8594"]}
+          />
+        }
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header Mejorado */}
+        <LinearGradient
+          colors={["rgba(255, 255, 255, 0.9)", "rgba(255, 255, 255, 0.7)"]}
+          style={styles.headerCard}
+        >
+          <View style={styles.headerBackground}>
+            <View style={[styles.decorCircle, styles.decorCircle1]} />
+            <View style={[styles.decorCircle, styles.decorCircle2]} />
+          </View>
+
+          <View style={styles.headerContent}>
+            <View style={styles.headerTop}>
+              <View style={styles.headerLeft}>
+                <LinearGradient
+                  colors={["#0F8594", "#14b8a6"]}
+                  style={styles.headerIconContainer}
+                >
+                  <MaterialIcons name="check-circle" size={32} color="#fff" />
+                </LinearGradient>
+                <View style={styles.headerTextContainer}>
+                  <Text style={styles.headerTitle}>Centro de Aprobaciones</Text>
+                  <Text style={styles.headerSubtitle}>
+                    Revisa y aprueba formularios pendientes
+                    {refreshing && " • Actualizando..."}
+                  </Text>
+                </View>
+              </View>
+
+              {isOffline && (
+                <View style={styles.offlineIndicator}>
+                  <MaterialIcons name="cloud-off" size={20} color="#ef4444" />
+                </View>
+              )}
+            </View>
+
+            <View style={styles.headerActions}>
+              <TouchableOpacity
+                onPress={() => loadApprovals(true)}
+                disabled={loading}
+                style={styles.updateButton}
+              >
+                <MaterialIcons
+                  name="refresh"
+                  size={18}
+                  color="#2563eb"
+                  style={{ transform: [{ rotate: loading ? "360deg" : "0deg" }] }}
+                />
+                <Text style={styles.updateButtonText}>Actualizar</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() =>
+                  router.push({
+                    pathname: "/approved-forms",
+                    params: { status: "approved" },
+                  })
+                }
+                style={styles.viewApprovedButton}
+              >
+                <MaterialIcons name="check-circle" size={18} color="#16a34a" />
+                <Text style={styles.viewApprovedButtonText}>
+                  Aprobados ({aprovedForms.length})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() =>
+                  router.push({
+                    pathname: "/rejected-forms",
+                    params: { status: "rejected" },
+                  })
+                }
+                style={styles.viewRejectedButton}
+              >
+                <MaterialIcons name="cancel" size={18} color="#dc2626" />
+                <Text style={styles.viewRejectedButtonText}>
+                  Rechazados ({noAprovedForms.length})
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </LinearGradient>
+
+        {/* Barra de búsqueda */}
+        <View style={styles.searchContainer}>
+          <MaterialIcons
+            name="search"
+            size={20}
+            color="#9ca3af"
+            style={styles.searchIcon}
+          />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Buscar por nombre del formato o usuario..."
+            value={searchText}
+            onChangeText={setSearchText}
+            placeholderTextColor="#9ca3af"
+          />
+        </View>
+
+        {/* Estadísticas */}
+        <View style={styles.statsContainer}>
+          <View style={styles.statCard}>
+            <View style={[styles.statIconContainer, { backgroundColor: "#fef3c7" }]}>
+              <MaterialIcons name="schedule" size={24} color="#f59e0b" />
+            </View>
+            <Text style={styles.statValue}>{totalPendingForms}</Text>
+            <Text style={styles.statLabel}>Pendientes</Text>
+          </View>
+
+          <View style={styles.statCard}>
+            <View style={[styles.statIconContainer, { backgroundColor: "#dcfce7" }]}>
+              <MaterialIcons name="check-circle" size={24} color="#16a34a" />
+            </View>
+            <Text style={styles.statValue}>{aprovedForms.length}</Text>
+            <Text style={styles.statLabel}>Aprobados</Text>
+          </View>
+
+          <View style={styles.statCard}>
+            <View style={[styles.statIconContainer, { backgroundColor: "#fee2e2" }]}>
+              <MaterialIcons name="cancel" size={24} color="#dc2626" />
+            </View>
+            <Text style={styles.statValue}>{noAprovedForms.length}</Text>
+            <Text style={styles.statLabel}>Rechazados</Text>
+          </View>
+
+          <View style={styles.statCard}>
+            <View style={[styles.statIconContainer, { backgroundColor: "#dbeafe" }]}>
+              <MaterialIcons name="info" size={24} color="#2563eb" />
+            </View>
+            <Text style={styles.statValue}>{forms.length}</Text>
+            <Text style={styles.statLabel}>Total</Text>
           </View>
         </View>
-        {/* Counters */}
-        <View style={styles.countersRow}>
-          <CounterBox
-            icon="schedule"
-            color="#fbbf24"
-            label="Pending"
-            value={pending.length}
-            active={show === "pending"}
-            onPress={() => setShow("pending")}
-          />
-          <CounterBox
-            icon="check-circle"
-            color="#22c55e"
-            label="Approved"
-            value={approved.length}
-            active={show === "approved"}
-            onPress={() => setShow("approved")}
-          />
-          <CounterBox
-            icon="cancel"
-            color="#ef4444"
-            label="Rejected"
-            value={rejected.length}
-            active={show === "rejected"}
-            onPress={() => setShow("rejected")}
-          />
-          <CounterBox
-            icon="info"
-            color="#2563eb"
-            label="Total"
-            value={total}
-            active={show === "total"}
-            onPress={() => setShow("total")}
-          />
-        </View>
-        {/* Pending approval/reject actions */}
+
+        {/* Acciones pendientes de sincronización */}
         {pendingApprovalActions.length > 0 && (
-          <View style={{ marginBottom: 12, marginTop: 8 }}>
-            <Text
-              style={{ color: "#ef4444", fontWeight: "bold", marginBottom: 4 }}
-            >
-              Pending approval/reject actions:
-            </Text>
+          <View style={styles.pendingActionsContainer}>
+            <View style={styles.pendingActionsHeader}>
+              <MaterialIcons name="sync" size={20} color="#ef4444" />
+              <Text style={styles.pendingActionsTitle}>
+                Acciones pendientes de sincronización
+              </Text>
+            </View>
             {pendingApprovalActions.map((action, idx) => (
-              <View
-                key={idx}
-                style={{
-                  backgroundColor: "#fff7f7",
-                  borderColor: "#ef4444",
-                  borderWidth: 1,
-                  borderRadius: 8,
-                  padding: 8,
-                  marginBottom: 6,
-                }}
-              >
-                <Text style={{ color: "#222" }}>
-                  Form ID: {action.response_id} - Action:{" "}
+              <View key={idx} style={styles.pendingActionCard}>
+                <View style={styles.pendingActionInfo}>
+                  <Text style={styles.pendingActionText}>
+                    Formulario ID: {action.response_id}
+                  </Text>
                   <Text
-                    style={{
-                      fontWeight: "bold",
-                      color:
-                        action.body.status === "aprobado"
-                          ? "#22c55e"
-                          : "#ef4444",
-                    }}
+                    style={[
+                      styles.pendingActionStatus,
+                      {
+                        color:
+                          action.body.status === "aprobado"
+                            ? "#22c55e"
+                            : "#ef4444",
+                      },
+                    ]}
                   >
                     {action.body.status === "aprobado"
-                      ? "approved"
-                      : "rejected"}
+                      ? "Aprobado"
+                      : "Rechazado"}
                   </Text>
-                </Text>
-                <Text style={{ color: "#888", fontSize: 12 }}>
-                  Saved offline at:{" "}
-                  {new Date(action.timestamp).toLocaleString()}
+                </View>
+                <Text style={styles.pendingActionDate}>
+                  Guardado: {new Date(action.timestamp).toLocaleString()}
                 </Text>
               </View>
             ))}
+            <TouchableOpacity
+              onPress={syncPendingActions}
+              style={styles.syncButton}
+              disabled={isOffline}
+            >
+              <MaterialIcons name="sync" size={20} color="#fff" />
+              <Text style={styles.syncButtonText}>
+                {isOffline ? "Sin conexión" : "Sincronizar ahora"}
+              </Text>
+            </TouchableOpacity>
           </View>
         )}
-        {/* Forms list */}
-        <View style={styles.listContainer}>
-          {loading ? (
-            <ActivityIndicator size="large" color="#12A0AF" />
-          ) : (
-            <ScrollView
-              contentContainerStyle={{
-                flexGrow: 1,
-                alignItems: "center",
-                justifyContent: "center",
-                paddingVertical: 10,
-              }}
-            >
-              {/* ...existing code for pending, approved, rejected... */}
-              {show === "pending" && pending.length === 0 && (
-                <View style={styles.emptyBox}>
-                  <MaterialIcons
-                    name="celebration"
-                    size={48}
-                    color="#12A0AF"
-                    style={{ marginBottom: 8 }}
-                  />
-                  <Text style={styles.emptyTitle}>All up to date!</Text>
-                  <Text style={styles.emptySubtitle}>
-                    No pending forms to review.
-                  </Text>
-                </View>
-              )}
-              {show === "pending" &&
-                pending.map((item, idx) => (
-                  <ApprovalCard
-                    key={idx}
-                    item={item}
-                    onApprove={() => handleApproveReject(item, "aprobado")}
-                    onReject={() => handleApproveReject(item, "rechazado")}
-                    onPress={() =>
-                      router.push({
-                        pathname: "/approval-detail",
-                        params: { response_id: item.response_id },
-                      })
-                    }
-                  />
-                ))}
-              {show === "approved" && approved.length === 0 && (
-                <View style={styles.emptyBox}>
-                  <MaterialIcons
-                    name="check-circle"
-                    size={48}
-                    color="#22c55e"
-                    style={{ marginBottom: 8 }}
-                  />
-                  <Text style={styles.emptyTitle}>No approved</Text>
-                  <Text style={styles.emptySubtitle}>No approved forms.</Text>
-                </View>
-              )}
-              {show === "approved" &&
-                approved.map((item, idx) => (
-                  <ApprovalCard
-                    key={idx}
-                    item={item}
-                    approved
-                    onPress={() =>
-                      router.push({
-                        pathname: "/approval-detail",
-                        params: { response_id: item.response_id },
-                      })
-                    }
-                  />
-                ))}
-              {show === "rejected" && rejected.length === 0 && (
-                <View style={styles.emptyBox}>
-                  <MaterialIcons
-                    name="cancel"
-                    size={48}
-                    color="#ef4444"
-                    style={{ marginBottom: 8 }}
-                  />
-                  <Text style={styles.emptyTitle}>No rejected</Text>
-                  <Text style={styles.emptySubtitle}>No rejected forms.</Text>
-                </View>
-              )}
-              {show === "rejected" &&
-                rejected.map((item, idx) => (
-                  <ApprovalCard
-                    key={idx}
-                    item={item}
-                    rejected
-                    onPress={() =>
-                      router.push({
-                        pathname: "/approval-detail",
-                        params: { response_id: item.response_id },
-                      })
-                    }
-                    onAcceptReconsideration={handleAcceptReconsideration}
-                    accepting={accepting}
-                  />
-                ))}
-              {/* NUEVO: Mostrar historial de aprobados y rechazados en "Total" */}
-              {show === "total" && total === 0 && (
-                <View style={styles.emptyBox}>
-                  <MaterialIcons
-                    name="info"
-                    size={48}
-                    color="#2563eb"
-                    style={{ marginBottom: 8 }}
-                  />
-                  <Text style={styles.emptyTitle}>No forms</Text>
-                  <Text style={styles.emptySubtitle}>No forms found.</Text>
-                </View>
-              )}
-              {show === "total" && total > 0 && (
-                <>
-                  <Text
-                    style={{
-                      fontWeight: "bold",
-                      fontSize: width * 0.045,
-                      color: "#22c55e",
-                      marginBottom: 8,
-                      marginTop: 8,
-                      textAlign: "center",
-                    }}
-                  >
-                    Approved History
-                  </Text>
-                  {approved.length === 0 ? (
-                    <Text style={styles.emptySubtitle}>No approved forms.</Text>
-                  ) : (
-                    approved.map((item, idx) => (
-                      <ApprovalCard
-                        key={`approved-${idx}`}
-                        item={item}
-                        approved
-                        onPress={() =>
-                          router.push({
-                            pathname: "/approval-detail",
-                            params: { response_id: item.response_id },
-                          })
+
+        {/* Lista de formularios pendientes */}
+        {loading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#0F8594" />
+            <Text style={styles.loadingText}>Cargando aprobaciones...</Text>
+          </View>
+        ) : filteredGroups.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyStateIcon}>🎉</Text>
+            <Text style={styles.emptyStateTitle}>¡Todo al día!</Text>
+            <Text style={styles.emptyStateText}>
+              No hay formularios pendientes por revisar.
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.formsList}>
+            {filteredGroups.map((group) => {
+              const currentForm = group.forms[group.currentIndex];
+              if (!currentForm) return null;
+
+              const { diasPasados, diasRestantes, vencido } = calcularDias(
+                currentForm.submitted_at,
+                currentForm.deadline_days
+              );
+
+              return (
+                <View key={`${group.key}-${group.currentIndex}`} style={styles.formCard}>
+                  <View style={styles.formCardContent}>
+                    <View style={styles.formHeader}>
+                      <Text style={styles.formTitle}>{currentForm.form_title}</Text>
+
+                      {/* Indicador de múltiples respuestas */}
+                      {group.forms.length > 1 && (
+                        <View style={styles.multiResponseContainer}>
+                          <View style={styles.multiResponseBadge}>
+                            <MaterialIcons name="tag" size={14} color="#2563eb" />
+                            <Text style={styles.multiResponseText}>
+                              {group.forms.length} respuestas
+                            </Text>
+                          </View>
+
+                          {/* Navegador */}
+                          <View style={styles.navigationContainer}>
+                            <TouchableOpacity
+                              onPress={() => navigateResponse(group.key, "prev")}
+                              disabled={group.currentIndex === 0}
+                              style={[
+                                styles.navButton,
+                                group.currentIndex === 0 && styles.navButtonDisabled,
+                              ]}
+                            >
+                              <MaterialIcons
+                                name="chevron-left"
+                                size={18}
+                                color={
+                                  group.currentIndex === 0 ? "#d1d5db" : "#4b5563"
+                                }
+                              />
+                            </TouchableOpacity>
+
+                            <View style={styles.navCounter}>
+                              <Text style={styles.navCounterText}>
+                                {group.currentIndex + 1} de {group.forms.length}
+                              </Text>
+                            </View>
+
+                            <TouchableOpacity
+                              onPress={() => navigateResponse(group.key, "next")}
+                              disabled={
+                                group.currentIndex === group.forms.length - 1
+                              }
+                              style={[
+                                styles.navButton,
+                                group.currentIndex === group.forms.length - 1 &&
+                                  styles.navButtonDisabled,
+                              ]}
+                            >
+                              <MaterialIcons
+                                name="chevron-right"
+                                size={18}
+                                color={
+                                  group.currentIndex === group.forms.length - 1
+                                    ? "#d1d5db"
+                                    : "#4b5563"
+                                }
+                              />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      )}
+                    </View>
+
+                    <Text style={styles.formDescription}>
+                      {currentForm.form_description}
+                    </Text>
+
+                    <View style={styles.formMeta}>
+                      <Text style={styles.formMetaItem}>
+                        📤 {currentForm.submitted_by?.name || "Desconocido"}
+                      </Text>
+                      <Text style={styles.formMetaItem}>
+                        📅{" "}
+                        {new Date(currentForm.submitted_at).toLocaleDateString()}
+                      </Text>
+                      <Text style={styles.formMetaItem}>
+                        🆔 Respuesta #{currentForm.response_id}
+                      </Text>
+                    </View>
+
+                    {/* Deadline badge */}
+                    {currentForm.deadline_days !== undefined && (
+                      <View
+                        style={[
+                          styles.deadlineBadge,
+                          vencido
+                            ? styles.deadlineVencido
+                            : diasRestantes === 0
+                            ? styles.deadlineHoy
+                            : diasRestantes <= 2
+                            ? styles.deadlineProximo
+                            : styles.deadlineNormal,
+                        ]}
+                      >
+                        <Text style={styles.deadlineBadgeText}>
+                          {vencido
+                            ? `⚠️ Vencido hace ${
+                                diasPasados - currentForm.deadline_days
+                              } día(s)`
+                            : diasRestantes === 0
+                            ? "⏰ Vence hoy"
+                            : diasRestantes <= 2
+                            ? `⚠️ ${diasRestantes} día(s) restantes`
+                            : `⏳ ${diasRestantes} días restantes`}
+                        </Text>
+                      </View>
+                    )}
+
+                    {/* Ver detalle button */}
+                    <TouchableOpacity
+                      style={styles.viewDetailButton}
+                      onPress={() => handleViewDetail(group)}
+                    >
+                      <MaterialIcons name="visibility" size={18} color="#fff" />
+                      <Text style={styles.viewDetailButtonText}>Ver detalle</Text>
+                    </TouchableOpacity>
+
+                    {/* Cadena de aprobación */}
+                    <View style={styles.approvalChainContainer}>
+                      <Text style={styles.approvalChainTitle}>
+                        Cadena de aprobación:
+                      </Text>
+                      <View style={styles.approvalChainList}>
+                        {currentForm.all_approvers?.map((approver, index) => (
+                          <View
+                            key={index}
+                            style={[
+                              styles.approverBadge,
+                              approver.status === "aprobado"
+                                ? styles.approverApproved
+                                : approver.status === "rechazado"
+                                ? styles.approverRejected
+                                : styles.approverPending,
+                            ]}
+                          >
+                            <Text style={styles.approverBadgeText}>
+                              #{approver.sequence_number} {approver.user?.name} •{" "}
+                              {approver.status}
+                              {approver.is_mandatory && " (Obligatorio)"}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+
+                    {/* Requisitos de aprobación */}
+                    {currentForm.approval_requirements?.has_requirements && (
+                      <ApprovalRequirements
+                        requirements={
+                          currentForm.approval_requirements.requirements
                         }
                       />
-                    ))
-                  )}
-                  <Text
-                    style={{
-                      fontWeight: "bold",
-                      fontSize: width * 0.045,
-                      color: "#ef4444",
-                      marginBottom: 8,
-                      marginTop: 18,
-                      textAlign: "center",
-                    }}
-                  >
-                    Rejected History
-                  </Text>
-                  {rejected.length === 0 ? (
-                    <Text style={styles.emptySubtitle}>No rejected forms.</Text>
-                  ) : (
-                    rejected.map((item, idx) => (
-                      <ApprovalCard
-                        key={`rejected-${idx}`}
-                        item={item}
-                        rejected
-                        onPress={() =>
-                          router.push({
-                            pathname: "/approval-detail",
-                            params: { response_id: item.response_id },
-                          })
-                        }
-                        onAcceptReconsideration={handleAcceptReconsideration}
-                        accepting={accepting}
-                      />
-                    ))
-                  )}
-                </>
-              )}
-            </ScrollView>
-          )}
-        </View>
-      </View>
-    </LinearGradient>
-  );
-}
-
-function CounterBox({ icon, color, label, value, active, onPress }) {
-  return (
-    <TouchableOpacity
-      style={[
-        styles.counterBox,
-        { borderColor: color, backgroundColor: active ? color + "22" : "#fff" },
-      ]}
-      onPress={onPress}
-      activeOpacity={0.8}
-    >
-      <MaterialIcons name={icon} size={28} color={color} />
-      <Text style={[styles.counterValue, { color }]}>{value}</Text>
-      <Text style={styles.counterLabel}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
-function ApprovalCard({
-  item,
-  approved,
-  rejected,
-  onApprove,
-  onReject,
-  onPress,
-  onAcceptReconsideration,
-  accepting,
-}) {
-  // Detect if there is reconsideration_requested in any approver
-  const hasReconsideration =
-    Array.isArray(item.all_approvers) &&
-    item.all_approvers.some(
-      (appr) =>
-        appr.reconsideration_requested === true && appr.status === "rechazado"
-    );
-
-  return (
-    <TouchableOpacity
-      activeOpacity={0.85}
-      onPress={onPress}
-      style={[
-        styles.approvalCard,
-        approved && { borderColor: "#22c55e" },
-        rejected && { borderColor: "#ef4444" },
-      ]}
-    >
-      <View style={{ flexDirection: "row", alignItems: "center" }}>
-        <MaterialIcons
-          name={
-            approved ? "check-circle" : rejected ? "cancel" : "hourglass-empty"
-          }
-          size={28}
-          color={approved ? "#22c55e" : rejected ? "#ef4444" : "#fbbf24"}
-          style={{ marginRight: 10 }}
-        />
-        <View>
-          <Text style={styles.approvalTitle}>{item.form_title}</Text>
-          <Text style={styles.approvalMeta}>
-            User: {item.submitted_by?.name || "Unknown"}
-          </Text>
-          <Text style={styles.approvalMeta}>
-            Date: {item.submitted_at?.split("T")[0] || "No date"}
-          </Text>
-          <Text style={styles.approvalMeta}>
-            Status:{" "}
-            {item.your_approval_status?.status === "aprobado"
-              ? "approved"
-              : item.your_approval_status?.status === "rechazado"
-                ? "rejected"
-                : item.your_approval_status?.status === "pendiente"
-                  ? "pending"
-                  : item.your_approval_status?.status || "-"}
-          </Text>
-        </View>
-      </View>
-      {/* Show form answers */}
-      <View style={{ marginTop: 8 }}>
-        {Array.isArray(item.answers) &&
-          item.answers.map((ans, i) => (
-            <View key={i} style={{ flexDirection: "row", marginBottom: 2 }}>
-              <Text style={{ fontWeight: "bold", color: "#4B34C7" }}>
-                {ans.question_text}:
-              </Text>
-              <Text style={{ marginLeft: 4, color: "#222" }}>
-                {ans.answer_text || ans.file_path || "-"}
-              </Text>
-            </View>
-          ))}
-      </View>
-      {/* Approve/Reject buttons only if pending */}
-      {!approved && !rejected && (
-        <View style={styles.actionRow}>
-          <TouchableOpacity style={styles.approveBtn} onPress={onApprove}>
-            <Text style={styles.actionBtnText}>Approve</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.rejectBtn} onPress={onReject}>
-            <Text style={styles.actionBtnText}>Reject</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-      {/* Button to accept reconsideration ONLY if rejected and has reconsideration_requested */}
-      {rejected && hasReconsideration && (
-        <TouchableOpacity
-          style={styles.reconsiderationBtn}
-          onPress={() => onAcceptReconsideration(item)}
-          disabled={accepting}
-        >
-          <Text style={styles.reconsiderationBtnText}>
-            {accepting ? "Accepting..." : "Accept reconsideration"}
-          </Text>
-        </TouchableOpacity>
-      )}
-    </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: width * 0.04, backgroundColor: "transparent" },
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
+  container: {
+    flex: 1,
+    backgroundColor: "#f9fafb",
   },
-  headerSubtitle: {
-    fontSize: width * 0.035,
-    color: "#12A0AF",
-    marginTop: 2,
+  headerCard: {
+    borderRadius: 24,
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 12,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 5,
   },
-  countersRow: {
+  headerBackground: {
+    position: "absolute",
+    width: "100%",
+    height: "100%",
+  },
+  decorCircle: {
+    position: "absolute",
+    borderRadius: 9999,
+  },
+  decorCircle1: {
+    width: 200,
+    height: 200,
+    backgroundColor: "rgba(15, 133, 148, 0.1)",
+    top: -100,
+    right: -50,
+  },
+  decorCircle2: {
+    width: 150,
+    height: 150,
+    backgroundColor: "rgba(20, 184, 166, 0.1)",
+    bottom: -75,
+    left: -50,
+  },
+  headerContent: {
+    padding: 20,
+  },
+  headerTop: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginVertical: 10,
-    gap: 6,
+    alignItems: "flex-start",
+    marginBottom: 16,
   },
-  counterBox: {
-    flex: 1,
+  headerLeft: {
+    flexDirection: "row",
     alignItems: "center",
-    borderWidth: 2,
-    borderRadius: 12,
-    paddingVertical: 8,
-    marginHorizontal: 2,
-    backgroundColor: "#fff",
-  },
-  counterValue: {
-    fontWeight: "bold",
-    fontSize: width * 0.05,
-    marginTop: 2,
-  },
-  counterLabel: {
-    fontSize: width * 0.032,
-    color: "#444",
-    marginTop: 2,
-  },
-  listContainer: {
     flex: 1,
-    marginTop: 8,
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 8,
-    minHeight: height * 0.3,
   },
-  emptyBox: {
-    alignItems: "center",
+  headerIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
     justifyContent: "center",
-    marginTop: 40,
+    alignItems: "center",
+    shadowColor: "#0F8594",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  emptyTitle: {
+  headerTextContainer: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  headerTitle: {
+    fontSize: 20,
     fontWeight: "bold",
-    fontSize: width * 0.05,
-    color: "#12A0AF",
-    marginBottom: 2,
+    color: "#1f2937",
+    marginBottom: 4,
   },
-  emptySubtitle: {
-    fontSize: width * 0.038,
-    color: "#888",
-    textAlign: "center",
+  headerSubtitle: {
+    fontSize: 13,
+    color: "#0F8594",
   },
-  approvalCard: {
-    borderWidth: 2,
-    borderColor: "#fbbf24",
-    borderRadius: 12,
-    padding: 14,
+  offlineIndicator: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#fee2e2",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  headerActions: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  updateButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: "#eff6ff",
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
+    borderRadius: 8,
+  },
+  updateButtonText: {
+    color: "#2563eb",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  viewApprovedButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: "#f0fdf4",
+    borderWidth: 1,
+    borderColor: "#bbf7d0",
+    borderRadius: 8,
+  },
+  viewApprovedButtonText: {
+    color: "#16a34a",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  viewRejectedButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: "#fef2f2",
+    borderWidth: 1,
+    borderColor: "#fecaca",
+    borderRadius: 8,
+  },
+  viewRejectedButtonText: {
+    color: "#dc2626",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  searchContainer: {
+    marginHorizontal: 16,
     marginBottom: 12,
-    backgroundColor: "#f9fafb",
-    width: width * 0.92,
-    alignSelf: "center",
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
     shadowColor: "#000",
-    shadowOpacity: 0.07,
-    shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
     elevation: 2,
   },
-  approvalTitle: {
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: "#1f2937",
+  },
+  statsContainer: {
+    flexDirection: "row",
+    marginHorizontal: 16,
+    marginBottom: 12,
+    gap: 8,
+  },
+  statCard: {
+    flex: 1,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 12,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  statIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  statValue: {
+    fontSize: 20,
     fontWeight: "bold",
-    fontSize: width * 0.045,
-    color: "#222",
+    color: "#1f2937",
     marginBottom: 2,
   },
-  approvalMeta: {
-    fontSize: width * 0.035,
-    color: "#12A0AF",
-    marginBottom: 1,
+  statLabel: {
+    fontSize: 11,
+    color: "#6b7280",
   },
-  actionRow: {
+  pendingActionsContainer: {
+    backgroundColor: "#fff7ed",
+    borderWidth: 1,
+    borderColor: "#fed7aa",
+    borderRadius: 12,
+    padding: 12,
+    marginHorizontal: 16,
+    marginBottom: 12,
+  },
+  pendingActionsHeader: {
     flexDirection: "row",
-    justifyContent: "flex-end",
-    marginTop: 10,
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  pendingActionsTitle: {
+    marginLeft: 8,
+    fontSize: 14,
+    fontWeight: "bold",
+    color: "#dc2626",
+  },
+  pendingActionCard: {
+    backgroundColor: "#fff",
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "#fed7aa",
+  },
+  pendingActionInfo: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  pendingActionText: {
+    fontSize: 13,
+    color: "#1f2937",
+    fontWeight: "600",
+  },
+  pendingActionStatus: {
+    fontSize: 13,
+    fontWeight: "bold",
+  },
+  pendingActionDate: {
+    fontSize: 11,
+    color: "#6b7280",
+  },
+  syncButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#2563eb",
+    padding: 10,
+    borderRadius: 8,
+    marginTop: 4,
+    gap: 6,
+  },
+  syncButtonText: {
+    color: "#fff",
+    fontWeight: "bold",
+    fontSize: 13,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingVertical: 60,
+  },
+  loadingText: {
+    marginTop: 12,
+    color: "#0F8594",
+    fontSize: 14,
+  },
+  emptyState: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 60,
+    paddingHorizontal: 20,
+  },
+  emptyStateIcon: {
+    fontSize: 64,
+    marginBottom: 16,
+  },
+  emptyStateTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#0F8594",
+    marginBottom: 8,
+  },
+  emptyStateText: {
+    fontSize: 14,
+    color: "#6b7280",
+    textAlign: "center",
+  },
+  formsList: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  formCard: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    marginBottom: 12,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  formCardContent: {
+    padding: 16,
+  },
+  formHeader: {
+    marginBottom: 8,
+  },
+  formTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#1f2937",
+    marginBottom: 8,
+  },
+  multiResponseContainer: {
+    marginTop: 8,
+  },
+  multiResponseBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#dbeafe",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    alignSelf: "flex-start",
+    marginBottom: 8,
+  },
+  multiResponseText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#2563eb",
+  },
+  navigationContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#f3f4f6",
+    borderRadius: 8,
+    padding: 4,
+    alignSelf: "flex-start",
+  },
+  navButton: {
+    padding: 4,
+    borderRadius: 6,
+  },
+  navButtonDisabled: {
+    opacity: 0.4,
+  },
+  navCounter: {
+    backgroundColor: "#fff",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+    minWidth: 70,
+    alignItems: "center",
+  },
+  navCounterText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#1f2937",
+  },
+  formDescription: {
+    fontSize: 14,
+    color: "#6b7280",
+    marginBottom: 8,
+    lineHeight: 20,
+  },
+  formMeta: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+    marginBottom: 12,
+  },
+  formMetaItem: {
+    fontSize: 12,
+    color: "#6b7280",
+  },
+  deadlineBadge: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    marginBottom: 12,
+  },
+  deadlineVencido: {
+    backgroundColor: "#fee2e2",
+  },
+  deadlineHoy: {
+    backgroundColor: "#fed7aa",
+  },
+  deadlineProximo: {
+    backgroundColor: "#fef3c7",
+  },
+  deadlineNormal: {
+    backgroundColor: "#d1fae5",
+  },
+  deadlineBadgeText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#1f2937",
+  },
+  viewDetailButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "#6b7280",
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  viewDetailButtonText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  approvalChainContainer: {
+    backgroundColor: "#f9fafb",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+  },
+  approvalChainTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#1f2937",
+    marginBottom: 8,
+  },
+  approvalChainList: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  approverBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  approverApproved: {
+    backgroundColor: "#dcfce7",
+  },
+  approverRejected: {
+    backgroundColor: "#fee2e2",
+  },
+  approverPending: {
+    backgroundColor: "#fef3c7",
+  },
+  approverBadgeText: {
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  requirementsContainer: {
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: "#fffbeb",
+    borderWidth: 1,
+    borderColor: "#fcd34d",
+    borderRadius: 8,
+  },
+  requirementsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 12,
+  },
+  requirementsTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#92400e",
+  },
+  requirementsList: {
     gap: 10,
   },
-  approveBtn: {
-    backgroundColor: "#22c55e",
+  requirementCard: {
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#fcd34d",
     borderRadius: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 16,
-    marginLeft: 8,
+    padding: 10,
   },
-  rejectBtn: {
-    backgroundColor: "#ef4444",
+  requirementContent: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    marginBottom: 8,
+  },
+  requirementIconContainer: {
+    width: 36,
+    height: 36,
     borderRadius: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 16,
-    marginLeft: 8,
-  },
-  actionBtnText: {
-    color: "#fff",
-    fontWeight: "bold",
-    fontSize: width * 0.035,
-  },
-  reconsiderationBtn: {
-    marginTop: 10,
-    backgroundColor: "#FF9D2DFF",
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 18,
+    justifyContent: "center",
     alignItems: "center",
-    alignSelf: "flex-end",
   },
-  reconsiderationBtnText: {
+  requirementInfo: {
+    flex: 1,
+  },
+  requirementFormTitle: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#1f2937",
+    marginBottom: 2,
+  },
+  requirementFormDescription: {
+    fontSize: 12,
+    color: "#6b7280",
+    marginBottom: 2,
+  },
+  requirementApprover: {
+    fontSize: 11,
+    color: "#6b7280",
+  },
+  requirementCompletedDate: {
+    fontSize: 11,
+    color: "#16a34a",
+    marginTop: 4,
+  },
+  requirementActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    justifyContent: "flex-end",
+  },
+  completedBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: "#dcfce7",
+    borderRadius: 999,
+  },
+  completedBadgeText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#16a34a",
+  },
+  pendingBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: "#fee2e2",
+    borderRadius: 999,
+  },
+  pendingBadgeText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#dc2626",
+  },
+  fillButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: "#2563eb",
+    borderRadius: 8,
+  },
+  fillButtonText: {
+    fontSize: 11,
+    fontWeight: "600",
     color: "#fff",
-    fontWeight: "bold",
-    fontSize: 14,
   },
 });
