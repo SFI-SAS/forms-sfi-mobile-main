@@ -30,7 +30,7 @@ export default function Layout() {
     if (tab === "my-forms") router.replace("/my-forms");
     if (tab === "pending-forms") router.replace("/pending-forms");
     if (tab === "approvals") router.replace("/approvals");
-    if (tab === "settings") router.replace("/settings"); // NUEVO
+    if (tab === "settings") router.replace("/settings");
     if (tab === "logout") {
       // Limpia token y marca sesión cerrada
       await AsyncStorage.setItem("isLoggedOut", "true");
@@ -39,7 +39,11 @@ export default function Layout() {
     }
   };
 
-  // Solo muestra la tab-bar si NO estamos en la pantalla de login (main o /)
+  // ✅ MODIFICACIÓN: Agregar condición para ocultar en format-screen
+  const currentPath = segments.join("/");
+  const isFormatScreen = currentPath.includes("format-screen");
+
+  // Solo muestra la tab-bar si NO estamos en login NI en format-screen
   const showTabBar =
     !segments.includes("main") &&
     segments[0] !== "" &&
@@ -47,7 +51,8 @@ export default function Layout() {
     segments[0] !== null &&
     segments[0] !== "/" &&
     segments.join("/") !== "" &&
-    segments.join("/") !== "main";
+    segments.join("/") !== "main" &&
+    !isFormatScreen; // ✅ LÍNEA AGREGADA
 
   return (
     <View style={styles.container}>
@@ -94,8 +99,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
     borderTopWidth: 1,
     borderTopColor: '#e0e0e0',
-    elevation: 10, // Para Android
-    shadowOffset: { width: 0, height: -2 }, // Para iOS
+    elevation: 10,
+    shadowOffset: { width: 0, height: -2 },
     shadowColor: '#000',
     shadowOpacity: 0.1,
     shadowRadius: 4,

@@ -202,20 +202,26 @@ const CategoryCard = ({ category, onToggle, isExpanded, onFormPress }) => (
 const BottomTabBar = ({ activeTab, onTabPress }) => (
   <View style={styles.tabBarContainer}>
     <TabBarButton
-      icon={<HomeIcon color={activeTab === "home" ? "#12A0AF" : "#4B34C7"} />}
+      icon={
+        <View>
+          <HomeIcon color={activeTab === "home" ? "#12A0AF" : "#4B34C7"} />
+        </View>
+      }
       label="Home"
       active={activeTab === "home"}
       onPress={() => onTabPress("home")}
     />
     <TabBarButton
       icon={
-        <Image
-          source={require("../assets/fact_check_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24.png")}
-          style={[
-            styles.tabBarIcon,
-            activeTab === "my-forms" && { tintColor: "#12A0AF" },
-          ]}
-        />
+        <View>
+          <Image
+            source={require("../assets/fact_check_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24.png")}
+            style={[
+              styles.tabBarIcon,
+              activeTab === "my-forms" && { tintColor: "#12A0AF" },
+            ]}
+          />
+        </View>
       }
       label="Submitted"
       active={activeTab === "my-forms"}
@@ -223,13 +229,15 @@ const BottomTabBar = ({ activeTab, onTabPress }) => (
     />
     <TabBarButton
       icon={
-        <Image
-          source={require("../assets/sync_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24.png")}
-          style={[
-            styles.tabBarIcon,
-            activeTab === "pending-forms" && { tintColor: "#12A0AF" },
-          ]}
-        />
+        <View>
+          <Image
+            source={require("../assets/sync_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24.png")}
+            style={[
+              styles.tabBarIcon,
+              activeTab === "pending-forms" && { tintColor: "#12A0AF" },
+            ]}
+          />
+        </View>
       }
       label="Pending"
       active={activeTab === "pending-forms"}
@@ -237,13 +245,15 @@ const BottomTabBar = ({ activeTab, onTabPress }) => (
     />
     <TabBarButton
       icon={
-        <Image
-          source={require("../assets/logout_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24 (1).png")}
-          style={[
-            styles.tabBarIcon,
-            activeTab === "logout" && { tintColor: "#ef4444" },
-          ]}
-        />
+        <View>
+          <Image
+            source={require("../assets/logout_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24 (1).png")}
+            style={[
+              styles.tabBarIcon,
+              activeTab === "logout" && { tintColor: "#ef4444" },
+            ]}
+          />
+        </View>
       }
       label="Logout"
       active={activeTab === "logout"}
@@ -263,20 +273,22 @@ const TabBarButton = ({ icon, label, active, onPress, danger }) => (
     onPress={onPress}
     activeOpacity={0.8}
   >
-    {typeof icon === "string" ? (
-      <Image source={icon} style={styles.tabBarIcon} />
-    ) : (
-      icon
-    )}
-    <Text
-      style={[
-        styles.tabBarLabel,
-        active && styles.tabBarLabelActive,
-        danger && styles.tabBarLabelDanger,
-      ]}
-    >
-      {label}
-    </Text>
+    <View style={{ alignItems: 'center' }}>
+      {typeof icon === "string" ? (
+        <Image source={icon} style={styles.tabBarIcon} />
+      ) : (
+        <View>{icon}</View>
+      )}
+      <Text
+        style={[
+          styles.tabBarLabel,
+          active && styles.tabBarLabelActive,
+          danger && styles.tabBarLabelDanger,
+        ]}
+      >
+        {label}
+      </Text>
+    </View>
   </TouchableOpacity>
 );
 
@@ -722,17 +734,17 @@ export default function Home() {
     }
   };
 
-  const handleFormPress = (form) => {
-    console.log("📋 Formulario seleccionado:", form.form_design[0].children); // Log the selected form
-    router.push({
-      pathname: "/format-screen",
-      params: {
-        id: form.id,
-        created_at: form.created_at,
-        title: form.title,
-      },
-    });
-  };
+const handleFormPress = (form) => {
+  console.log("📋 Formulario seleccionado:", form.id);
+  router.push({
+    pathname: "/format-screen",
+    params: {
+      id: form.id,
+      created_at: form.created_at,
+      title: form.title,
+    },
+  });
+};
 
   const handleNavigateToMyForms = () => {
     router.push("/my-forms");

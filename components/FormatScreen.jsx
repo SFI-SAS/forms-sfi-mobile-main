@@ -34,6 +34,9 @@ const FORMS_METADATA_KEY = "offline_forms_metadata";
 const RELATED_ANSWERS_KEY = "offline_related_answers";
 const PENDING_SAVE_RESPONSE_KEY = "pending_save_response";
 const PENDING_SAVE_ANSWERS_KEY = "pending_save_answers";
+const PRIMARY_BLUE = "#007AFF"; // El azul corporativo de iOS/Apple
+const DARK_GRAY = "#171717"; // Casi negro para máximo contraste
+const MEDIUM_GRAY = "#636366"; // Gris oscuro para el subtítulo
 
 // Copia el SVG como string
 const spinnerSvg = `
@@ -116,6 +119,8 @@ export default function FormatScreen(props) {
     visible: false,
     questionId: null,
   });
+
+  
   const [showSerialModal, setShowSerialModal] = useState({
     visible: false,
     serial: "",
@@ -130,7 +135,7 @@ export default function FormatScreen(props) {
   const [tableRelatedQuestions, setTableRelatedQuestions] = useState({});
   const [tableAutoFilled, setTableAutoFilled] = useState({}); // Para controlar si ya se autocompletó
 
-  
+
   useFocusEffect(
     React.useCallback(() => {
       const disableBack = () => true;
@@ -147,11 +152,72 @@ export default function FormatScreen(props) {
   // NUEVO: Cargar preguntas y respuestas relacionadas SOLO de AsyncStorage
   const loadAllOfflineData = async (formId) => {
     try {
-      // Preguntas
+      console.log("📥 Iniciando carga de formulario...");
+
+      // Verificar si hay conexión a internet
+      const isOnline = await NetInfo.fetch().then(state => state.isConnected);
+      console.log("🌐 Estado conexión:", isOnline ? "ONLINE" : "OFFLINE");
+
+      // Cargar preguntas guardadas localmente
       const storedQuestions = await AsyncStorage.getItem(QUESTIONS_KEY);
-      const offlineQuestions = storedQuestions
-        ? JSON.parse(storedQuestions)
-        : {};
+      const offlineQuestions = storedQuestions ? JSON.parse(storedQuestions) : {};
+
+      // SI TIENES INTERNET - Descargar versión fresca del backend
+      if (isOnline) {
+        console.log("📡 Descargando formulario desde servidor...");
+        try {
+          const backendUrl = await getBackendUrl();
+          const token = await AsyncStorage.getItem("authToken");
+
+          // Usar el endpoint exacto que vimos
+          const res = await fetch(`${backendUrl}/forms/${formId}/`, {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+          });
+          const formData = await res.json();
+          console.log("✅ Respuesta del servidor:", formData);
+
+          // El servidor devuelve { "questions": [...], "form_design": [...] }
+          if (formData && formData.questions) {
+            offlineQuestions[formId] = formData.questions;
+            await AsyncStorage.setItem(QUESTIONS_KEY, JSON.stringify(offlineQuestions));
+            console.log("💾 Formulario guardado en local storage");
+
+            // Extraer logo del form_design
+            // Extraer logo del form_design
+            if (formData.form_design && Array.isArray(formData.form_design)) {
+              const designConfig = formData.form_design.find(item => item && item.logo);
+              if (designConfig && designConfig.logo && designConfig.logo.enabled && designConfig.logo.url) {
+                console.log("🖼️ Logo encontrado en form_design:", designConfig.logo.url);
+
+                // Guardar metadata con logo
+                const storedMeta = await AsyncStorage.getItem(FORMS_METADATA_KEY);
+                const metaObj = storedMeta ? JSON.parse(storedMeta) : {};
+                metaObj[formId] = {
+                  ...metaObj[formId],
+                  logo_url: designConfig.logo.url,
+                  title: formData.title || ""
+                };
+                await AsyncStorage.setItem(FORMS_METADATA_KEY, JSON.stringify(metaObj));
+
+                // Actualizar estado inmediatamente
+                setFormMeta((prev) => ({
+                  ...prev,
+                  logo_url: designConfig.logo.url
+                }));
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("⚠️ No se pudo descargar, usando versión local:", e.message);
+          // Continúa con la versión local si hay error
+        }
+      }
+
+      // Verificar si hay preguntas (descargadas o locales)
       if (!offlineQuestions[formId]) {
         Alert.alert(
           "Modo Offline",
@@ -160,21 +226,23 @@ export default function FormatScreen(props) {
         setLoading(false);
         return;
       }
+
+      // Cargar las preguntas en el estado
       setQuestions(offlineQuestions[formId]);
-      // Respuestas relacionadas para preguntas tipo tabla
+      console.log("✅ Preguntas cargadas:", offlineQuestions[formId].length);
+
+      // ========== RESTO DEL CÓDIGO (IGUAL QUE ANTES) ==========
       const storedRelated = await AsyncStorage.getItem(RELATED_ANSWERS_KEY);
       const offlineRelated = storedRelated ? JSON.parse(storedRelated) : {};
       const tableAnswersObj = {};
-      // Carga para cada pregunta tipo tabla
       const locationRelatedObj = {};
       const correlationsObj = {};
       const relatedQuestionsObj = {};
+
       offlineQuestions[formId].forEach((q) => {
         if (q.question_type === "table") {
           const rel = offlineRelated[q.id];
-          // --- FIX: Asegura que las opciones del picker sean un array de strings válidos ---
           if (rel && Array.isArray(rel.data)) {
-            // Si los items tienen 'name', úsalo como opción
             tableAnswersObj[q.id] = rel.data
               .map((item) => {
                 if (typeof item === "object" && item.name) return item.name;
@@ -183,14 +251,13 @@ export default function FormatScreen(props) {
               })
               .filter((item) => typeof item === "string" && item.length > 0);
           } else if (rel && Array.isArray(rel)) {
-            // Compatibilidad: si rel es array plano
             tableAnswersObj[q.id] = rel.filter(
               (item) => typeof item === "string" && item.length > 0
             );
           } else {
             tableAnswersObj[q.id] = [];
           }
-          // Guarda correlaciones y pregunta relacionada si existen
+
           if (rel && rel.correlations) {
             correlationsObj[q.id] = rel.correlations;
           }
@@ -198,22 +265,18 @@ export default function FormatScreen(props) {
             relatedQuestionsObj[q.id] = rel.related_question;
           }
         }
-        // NUEVO: Si es location y tiene related_answers, extraerlos
+
         if (
           q.question_type === "location" &&
           Array.isArray(q.related_answers) &&
           q.related_answers.length > 0
         ) {
-          // related_answers es un array de objetos con answers: [{question_id, answer_text}]
-          // Buscar el campo de coordenadas y el campo de label (puede variar según el formulario)
           locationRelatedObj[q.id] = q.related_answers.map((rel) => {
-            // Busca el campo de coordenadas (answer_text que parece lat,long)
             const coordAns = rel.answers.find(
               (a) =>
                 a.answer_text &&
                 a.answer_text.match(/^-?\d+\.\d+,\s*-?\d+\.\d+/)
             );
-            // Busca el campo de label (el otro campo, si existe)
             const labelAns = rel.answers.find(
               (a) => !a.answer_text.match(/^-?\d+\.\d+,\s*-?\d+\.\d+/)
             );
@@ -229,13 +292,15 @@ export default function FormatScreen(props) {
           });
         }
       });
+
       setTableAnswers(tableAnswersObj);
       setLocationRelatedAnswers(locationRelatedObj);
       setTableCorrelations(correlationsObj);
       setTableRelatedQuestions(relatedQuestionsObj);
+
     } catch (error) {
-      console.error("❌ Error cargando datos offline:", error);
-      Alert.alert("Error", "No se pudieron cargar los datos offline.");
+      console.error("❌ Error cargando datos:", error);
+      Alert.alert("Error", "No se pudieron cargar los datos.");
     } finally {
       setLoading(false);
     }
@@ -395,16 +460,30 @@ export default function FormatScreen(props) {
     });
   };
 
+  // Agregar estas funciones después de handleRemoveTextField
+  const handleAddTableAnswer = (questionId) => {
+    console.log(`➕ Agregando nuevo campo tabla para pregunta ID ${questionId}`);
+    setTableAnswersState((prev) => ({
+      ...prev,
+      [questionId]: [...(prev[questionId] || []), ""],
+    }));
+  };
+
+  const handleRemoveTableAnswer = (questionId, index) => {
+    console.log(`➖ Removiendo campo tabla ${index} para pregunta ID ${questionId}`);
+    setTableAnswersState((prev) => ({
+      ...prev,
+      [questionId]: prev[questionId].filter((_, i) => i !== index),
+    }));
+  };
+
   // NUEVO: Función para autocompletar campos relacionados de tipo tabla (bidireccional, por valor)
   const handleTableSelectChangeWithCorrelation = (questionId, index, value) => {
-    console.log("[DEBUG] Selección en tabla:", { questionId, index, value });
+
     setTableAnswersState((prev) => {
       const updatedAnswers = [...(prev[questionId] || [])];
       updatedAnswers[index] = value;
-      console.log("[DEBUG] Estado tras selección principal:", {
-        ...prev,
-        [questionId]: updatedAnswers,
-      });
+
       return { ...prev, [questionId]: updatedAnswers };
     });
 
@@ -1062,6 +1141,9 @@ export default function FormatScreen(props) {
             ? answers[questionId]?.[0]
             : answers[questionId])
         ) {
+          const value = Array.isArray(answers[questionId])
+            ? answers[questionId][0]
+            : answers[questionId];
           repeatedAnswers.push({
             question_id: questionId,
             answer_text: value,
@@ -1509,28 +1591,32 @@ export default function FormatScreen(props) {
           stickyHeaderIndices={[0]}
         >
           {/* Sticky Header con logo y título */}
-          <View style={styles.stickyHeader}>
-            {logoUrlParam || formMeta.logo_url ? (
-              <Image
-                source={{ uri: logoUrlParam || formMeta.logo_url }}
-                style={styles.formLogo}
-                resizeMode="contain"
-              />
-            ) : null}
-            <View style={{ flex: 1 }}>
-              <Text style={styles.header}>
-                {title ? title.toLocaleUpperCase() : ""}
-              </Text>
-              <Text style={styles.subHeader}>ID: 00{id}</Text>
+          <View style={styles.stickyHeaderContainer}> {/* Nuevo contenedor para la barra de color */}
+            <View style={styles.stickyHeader}>
+              {((logoUrlParam && String(logoUrlParam).length > 0) || (formMeta.logo_url && String(formMeta.logo_url).length > 0)) ? (
+                <View style={styles.logoContainer}>
+                  <Image
+                    source={{ uri: String(logoUrlParam || formMeta.logo_url) }}
+                    style={styles.formLogo}
+                    resizeMode="contain"
+                  />
+                </View>
+              ) : null}
+
+              <View style={styles.headerContent}>
+                <Text style={styles.header}>
+                  {title ? String(title).toUpperCase() : "TÍTULO DEL DOCUMENTO"}
+                </Text>
+                <Text style={styles.subHeader}>
+                  {id ? `ID: 00${String(id)}` : "ID: N/A"}
+                </Text>
+              </View>
             </View>
+            {/* Esta View crea la barra de color elegante en la parte inferior */}
+            <View style={styles.accentBar} />
           </View>
 
-          <Text style={styles.instructions}>
-            Responde las preguntas a continuación:
-          </Text>
-          <Text style={styles.instructions}>
-            Recuerda que puedes subir archivos (si es necesario).
-          </Text>
+    
 
           {/* Preguntas NO repetidas */}
           {questions.some((q) => !q.is_repeated) && (
@@ -1610,19 +1696,13 @@ export default function FormatScreen(props) {
                               </Text>
                             </TouchableOpacity>
                             {/* Mostrar serial SIEMPRE debajo del campo */}
-                            {fileSerials[question.id] && (
+                            {fileSerials[question.id] ? (
                               <View style={{ marginTop: 6, marginLeft: 2 }}>
-                                <Text
-                                  style={{
-                                    color: "#2563eb",
-                                    fontWeight: "bold",
-                                    fontSize: 13,
-                                  }}
-                                >
-                                  Serial asignado: {fileSerials[question.id]}
+                                <Text style={{ color: "#2563eb", fontWeight: "bold", fontSize: 13 }}>
+                                  Serial asignado: {String(fileSerials[question.id] || "")}
                                 </Text>
                               </View>
-                            )}
+                            ) : null}
                           </View>
                         )}
                         {/* Table */}
@@ -1903,8 +1983,8 @@ export default function FormatScreen(props) {
                                   {relatedOptions.map((opt, idx) => (
                                     <Picker.Item
                                       key={idx}
-                                      label={opt.label + " (" + opt.value + ")"}
-                                      value={opt.value}
+                                      label={String(opt.label || "") + " (" + String(opt.value || "") + ")"}
+                                      value={String(opt.value || "")}
                                     />
                                   ))}
                                 </Picker>
@@ -2329,8 +2409,8 @@ export default function FormatScreen(props) {
                                 {relatedOptions.map((opt, idx) => (
                                   <Picker.Item
                                     key={idx}
-                                    label={opt.label + " (" + opt.value + ")"}
-                                    value={opt.value}
+                                    label={String(opt.label || "") + " (" + String(opt.value || "") + ")"}
+                                    value={String(opt.value || "")}
                                   />
                                 ))}
                               </Picker>
@@ -2413,12 +2493,12 @@ export default function FormatScreen(props) {
               disabled={submitting}
             >
               {submitting ? (
-                <>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <Animated.View style={{ transform: [{ rotate: spin }] }}>
                     <SvgXml xml={spinnerSvg} width={40} height={40} />
                   </Animated.View>
                   <Text style={styles.submitButtonText}>Enviando...</Text>
-                </>
+                </View>
               ) : (
                 <Text style={styles.submitButtonText}>Guardar Formulario</Text>
               )}
@@ -2430,11 +2510,10 @@ export default function FormatScreen(props) {
             onPress={() => router.push("/home")}
             disabled={submitting}
           >
-            <Text style={styles.backButtonText}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
               <HomeIcon color={"white"} />
-              {"  "}
-              Home
-            </Text>
+              <Text style={[styles.backButtonText, { marginLeft: 8 }]}>Home</Text>
+            </View>
           </TouchableOpacity>
         </ScrollView>
         {/* ...existing modals... */}
@@ -2444,380 +2523,475 @@ export default function FormatScreen(props) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f7fafc" },
+
+
+  container: {
+    flex: 1,
+    backgroundColor: "#F8F9FC"
+  },
   scrollContent: {
-    padding: width * 0.05,
-    paddingBottom: height * 0.05,
+    paddingHorizontal: width * 0.045,
+    paddingTop: 8,
+    paddingBottom: height * 0.08,
     flexGrow: 1,
   },
+  // Asumiendo que 'width' es la dimensión de la pantalla importada de Dimensions
+  // Definimos el color primario
+
+  stickyHeaderContainer: {
+    backgroundColor: "#FFFFFF",
+    zIndex: 10,
+    // Esta vez, no hay sombra en el encabezado principal
+    shadowColor: "transparent",
+    elevation: 0,
+  },
+
+  stickyHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 16, // Más compacto
+    paddingHorizontal: 20,
+  },
+
+  logoContainer: {
+    marginRight: 12, // Menos espacio, acercando el logo al texto
+    // Fondo muy claro para el logo, sutilmente diferente del blanco
+    backgroundColor: '#F7F7F7',
+    borderRadius: 4,
+    padding: 4, // Un padding interno sutil para "enmarcar" el logo
+  },
+
+  formLogo: {
+    width: 48, // Mucho más discreto y pequeño
+    height: 48,
+    borderRadius: 4, // Bordes cuadrados para un look más moderno
+    backgroundColor: 'transparent',
+  },
+
+  headerContent: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+
   header: {
-    fontSize: width * 0.065,
-    fontWeight: "bold",
-    color: "#4B34C7",
-    marginBottom: height * 0.02,
-    textAlign: "center",
-    letterSpacing: 0.5,
-    textShadowColor: "#12A0AF22",
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
+    // El texto es el protagonista
+    fontSize: width * 0.046,
+    fontWeight: "600", // Semi-negrita (más legible que la negrita total)
+    color: DARK_GRAY, // Contraste máximo
+    marginBottom: 2,
+    letterSpacing: 0.1, // Tracking muy sutil
   },
+
   subHeader: {
-    fontSize: width * 0.045,
-    fontWeight: "bold",
-    color: "#12A0AF",
-    marginBottom: height * 0.01,
-    textAlign: "center",
+    fontSize: width * 0.032, // Muy pequeño y discreto
+    fontWeight: "500",
+    color: MEDIUM_GRAY, // Gris oscuro para profesionalismo
   },
-  instructions: {
-    fontSize: width * 0.042,
-    color: "#4B34C7",
-    marginBottom: height * 0.01,
-    textAlign: "center",
+
+  // --- La clave de este diseño: la barra de acento ---
+  accentBar: {
+    height: 3, // Barra delgada
+    backgroundColor: PRIMARY_BLUE, // Color corporativo
+    width: '100%',
+    // Sombra muy ligera para dar un poco de profundidad a la barra
+    shadowColor: PRIMARY_BLUE,
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
   },
+
   questionsContainer: {
-    backgroundColor: "#fff",
-    marginBottom: height * 0.02,
-    padding: 14,
-    borderRadius: width * 0.03,
-    borderColor: "#12A0AF",
-    borderWidth: 1.5,
-    shadowColor: "#12A0AF",
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
+    backgroundColor: "#FFFFFF",
+    marginBottom: 16,
+    marginTop: 12,
+    paddingTop: 0,
+    paddingLeft: 0,
+    paddingRight: 0,
+    paddingBottom: 0,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    shadowColor: "#1F2937",
+    shadowOpacity: 0.04,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
     elevation: 3,
+    overflow: "hidden",
   },
   loadingText: {
-    fontSize: width * 0.05,
+    fontSize: width * 0.042,
     textAlign: "center",
     marginVertical: height * 0.02,
-    color: "#12A0AF",
+    color: "#9CA3AF",
+    fontWeight: "400",
   },
-  questionContainer: { marginBottom: height * 0.025 },
+  questionContainer: {
+    marginBottom: 0,
+    paddingVertical: 20,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F3F4F6",
+  },
   questionLabel: {
-    fontSize: width * 0.048,
-    fontWeight: "bold",
-    color: "#4B34C7",
-    marginBottom: height * 0.01,
+    fontSize: width * 0.042,
+    fontWeight: "600",
+    color: "#1F2937",
+    marginBottom: 14,
+    lineHeight: width * 0.052,
   },
   requiredText: {
-    color: "#ef4444",
-    fontWeight: "bold",
-    marginLeft: width * 0.01,
-  },
-  submitButton: {
-    marginTop: height * 0.03,
-    padding: height * 0.022,
-    backgroundColor: "#12A0AF",
-    borderRadius: width * 0.025,
-    alignItems: "center",
-    borderColor: "#4B34C7",
-    borderWidth: 1.5,
-    shadowColor: "#12A0AF",
-    shadowOpacity: 0.13,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-  },
-  submitButtonText: {
-    color: "white",
-    fontWeight: "bold",
-    fontSize: width * 0.048,
-    letterSpacing: 0.2,
-  },
-  backButton: {
-    marginTop: height * 0.02,
-    padding: height * 0.018,
-    backgroundColor: "#EB2525FF",
-    borderRadius: width * 0.025,
-    alignItems: "center",
-    borderColor: "#4B34C7",
-    borderWidth: 1.5,
-    shadowColor: "#EB2525FF",
-    shadowOpacity: 0.13,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-  },
-  backButtonText: {
-    color: "white",
-    fontWeight: "bold",
-    fontSize: width * 0.045,
-    letterSpacing: 0.2,
+    color: "#EF4444",
+    fontWeight: "600",
+    marginLeft: 4,
   },
   input: {
-    borderWidth: 1.5,
-    borderColor: "#12A0AF",
-    borderRadius: width * 0.02,
-    padding: height * 0.015,
-    backgroundColor: "#f3f4f6",
-    fontSize: width * 0.045,
-    width: width * 0.75,
-    marginBottom: 6,
-    color: "#222",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 10,
+    paddingVertical: height * 0.016,
+    paddingHorizontal: 16,
+    backgroundColor: "#FFFFFF",
+    fontSize: width * 0.04,
+    width: "100%",
+    marginBottom: 8,
+    color: "#1F2937",
+    fontWeight: "400",
   },
   picker: {
-    borderWidth: 1.5,
-    borderColor: "#12A0AF",
-    borderRadius: width * 0.02,
-    backgroundColor: "#f3f4f6",
-    marginTop: 0,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    marginTop: 4,
     width: "100%",
-    color: "#222",
+    color: "#1F2937",
+    fontWeight: "400",
+  },
+  pickerSearchWrapper: {
+    width: "100%",
+    marginBottom: 8,
+  },
+  pickerSearchInput: {
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 10,
+    paddingVertical: height * 0.012,
+    paddingHorizontal: 14,
+    marginBottom: 6,
+    backgroundColor: "#FFFFFF",
+    fontSize: width * 0.038,
+    width: "100%",
+    fontWeight: "400",
+    color: "#6B7280",
   },
   fileButton: {
-    backgroundColor: "#9225EBFF",
-    padding: height * 0.018,
-    borderRadius: width * 0.02,
+    backgroundColor: "#4F46E5",
+    paddingVertical: height * 0.018,
+    paddingHorizontal: 18,
+    borderRadius: 10,
     alignItems: "center",
-    borderColor: "#12A0AF",
-    borderWidth: 1.5,
-    width: width * 0.75,
-    marginTop: 4,
+    borderColor: "#E5E7EB",
+    borderWidth: 1,
+    width: "100%",
+    marginTop: 6,
+    shadowColor: "#4F46E5",
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
   },
   fileButtonText: {
-    color: "white",
-    fontWeight: "bold",
-    fontSize: width * 0.045,
+    color: "#FFFFFF",
+    fontWeight: "600",
+    fontSize: width * 0.04,
+    letterSpacing: 0.1,
   },
   dateButton: {
-    backgroundColor: "#EB9525FF",
-    padding: height * 0.018,
-    borderRadius: width * 0.02,
+    backgroundColor: "#F59E0B",
+    paddingVertical: height * 0.018,
+    paddingHorizontal: 18,
+    borderRadius: 10,
     alignItems: "center",
-    marginTop: height * 0.01,
-    borderColor: "#12A0AF",
-    borderWidth: 1.5,
+    marginTop: 8,
+    borderColor: "#E5E7EB",
+    borderWidth: 1,
+    width: "100%",
+    shadowColor: "#F59E0B",
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
   },
   dateButtonText: {
-    color: "white",
-    fontWeight: "bold",
-    fontSize: width * 0.045,
+    color: "#FFFFFF",
+    fontWeight: "600",
+    fontSize: width * 0.04,
+    letterSpacing: 0.1,
+  },
+  locationButton: {
+    backgroundColor: "#10B981",
+    borderRadius: 10,
+    paddingVertical: 15,
+    paddingHorizontal: 18,
+    alignItems: "center",
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    width: "100%",
+    shadowColor: "#10B981",
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
+  },
+  locationButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "600",
+    fontSize: width * 0.04,
+    textAlign: "center",
+    letterSpacing: 0.1,
   },
   checkboxContainer: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: height * 0.01,
+    marginBottom: 14,
+    paddingVertical: 6,
   },
   checkbox: {
-    width: width * 0.08,
-    height: width * 0.08,
+    width: width * 0.06,
+    height: width * 0.06,
     borderWidth: 2,
-    borderColor: "#12A0AF",
-    borderRadius: width * 0.02,
+    borderColor: "#D1D5DB",
+    borderRadius: 6,
     justifyContent: "center",
     alignItems: "center",
-    marginRight: width * 0.03,
-    backgroundColor: "#fff",
+    marginRight: 12,
+    backgroundColor: "#FFFFFF",
   },
   checkboxSelected: {
-    backgroundColor: "#12A0AF",
-    borderColor: "#4B34C7",
+    backgroundColor: "#4F46E5",
+    borderColor: "#4F46E5",
   },
   checkboxCheckmark: {
-    color: "white",
-    fontWeight: "bold",
-    fontSize: width * 0.04,
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: width * 0.036,
   },
   checkboxLabel: {
-    fontSize: width * 0.045,
-    color: "#222",
+    fontSize: width * 0.04,
+    color: "#374151",
+    fontWeight: "400",
+    flex: 1,
   },
   dynamicFieldContainer: {
     flexDirection: "column",
     alignItems: "flex-start",
-    marginTop: height * 0.01,
-    marginBottom: height * 0.01,
-    width: width * 0.75,
+    marginTop: 6,
+    marginBottom: 10,
+    width: "100%",
     justifyContent: "flex-start",
   },
   addButton: {
-    backgroundColor: "#22c55e",
-    padding: height * 0.018,
-    borderRadius: width * 0.6,
+    backgroundColor: "#10B981",
+    paddingVertical: height * 0.015,
+    paddingHorizontal: 18,
+    borderRadius: 10,
     alignItems: "center",
-    marginTop: height * 0.01,
-    width: width * 0.14,
-    borderColor: "#12A0AF",
-    borderWidth: 1.5,
+    marginTop: 10,
+    borderColor: "#E5E7EB",
+    borderWidth: 1,
+    alignSelf: "flex-start",
+    shadowColor: "#10B981",
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   addButtonText: {
-    color: "white",
-    fontWeight: "bold",
-    fontSize: width * 0.045,
+    color: "#FFFFFF",
+    fontWeight: "600",
+    fontSize: width * 0.038,
   },
   removeButton: {
-    backgroundColor: "#ef4444",
-    padding: height * 0.012,
-    borderRadius: width * 0.02,
-    marginLeft: width * 0.02,
+    backgroundColor: "#EF4444",
+    paddingVertical: height * 0.01,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginLeft: 10,
+    justifyContent: "center",
   },
   removeButtonText: {
-    color: "white",
-    fontWeight: "bold",
+    color: "#FFFFFF",
+    fontWeight: "600",
+    fontSize: width * 0.036,
+  },
+  submitButton: {
+    marginTop: height * 0.03,
+    paddingVertical: height * 0.022,
+    backgroundColor: "#4F46E5",
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 0,
+    shadowColor: "#4F46E5",
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+    flexDirection: "row",
+  },
+  submitButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "600",
     fontSize: width * 0.045,
+    letterSpacing: 0.3,
+
+  },
+  backButton: {
+    marginTop: height * 0.015,
+    paddingVertical: height * 0.018,
+    backgroundColor: "#6B7280",
+    borderRadius: 12,
+    alignItems: "center",
+    borderWidth: 0,
+    shadowColor: "#6B7280",
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  backButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "600",
+    fontSize: width * 0.042,
+    letterSpacing: 0.2,
+  },
+  submittedGroupsContainer: {
+    marginTop: height * 0.02,
+    marginBottom: height * 0.015,
+    backgroundColor: "#F0F9FF",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    shadowColor: "#1F2937",
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  submittedGroupsTitle: {
+    fontWeight: "600",
+    fontSize: width * 0.042,
+    marginBottom: 12,
+    color: "#1E40AF",
+  },
+  submittedGroupCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    marginBottom: 12,
+    borderColor: "#E5E7EB",
+    borderWidth: 1,
+    shadowColor: "#1F2937",
+    shadowOpacity: 0.03,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
+  },
+  submittedGroupHeader: {
+    fontWeight: "600",
+    fontSize: width * 0.037,
+    marginBottom: 10,
+    color: "#1E40AF",
+    backgroundColor: "#F3F4F6",
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+  },
+  submittedGroupRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginBottom: 10,
+    flexWrap: "wrap",
+    paddingVertical: 4,
+  },
+  submittedGroupQuestion: {
+    fontWeight: "600",
+    fontSize: width * 0.035,
+    color: "#4B5563",
+    flexShrink: 1,
+    maxWidth: "40%",
+  },
+  submittedGroupAnswerBox: {
+    flex: 1,
+    marginLeft: 10,
+    flexDirection: "column",
+  },
+  submittedGroupAnswer: {
+    fontSize: width * 0.035,
+    color: "#1F2937",
+    backgroundColor: "#F9FAFB",
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginBottom: 4,
+    maxWidth: "100%",
+    borderLeftWidth: 3,
+    borderLeftColor: "#4F46E5",
   },
   spinnerContainer: {
     width: 40,
     height: 40,
     backgroundColor: "transparent",
   },
-  submittedGroupsContainer: {
-    marginTop: height * 0.01,
-    marginBottom: height * 0.01,
-    backgroundColor: "#e6fafd",
-    borderRadius: width * 0.02,
-    borderColor: "#12A0AF",
-    borderWidth: 1.5,
-    padding: width * 0.025,
-    maxWidth: "100%",
-  },
-  submittedGroupsTitle: {
-    fontWeight: "bold",
-    fontSize: width * 0.045,
-    marginBottom: height * 0.01,
-    color: "#12A0AF",
-  },
-  submittedGroupCard: {
-    backgroundColor: "#fff",
-    borderRadius: width * 0.015,
-    padding: width * 0.02,
-
-    marginBottom: height * 0.01,
-    borderColor: "#12A0AF",
-    borderWidth: 1,
-  },
-  submittedGroupHeader: {
-    fontWeight: "bold",
-    fontSize: width * 0.038,
-    marginBottom: height * 0.005,
-    color: "#4B34C7",
-  },
-  submittedGroupRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    marginBottom: height * 0.005,
-    flexWrap: "wrap",
-  },
-  submittedGroupQuestion: {
-    fontWeight: "bold",
-    fontSize: width * 0.035,
-    color: "#12A0AF",
-    flexShrink: 1,
-    maxWidth: "45%",
-  },
-  submittedGroupAnswerBox: {
-    flex: 1,
-    marginLeft: width * 0.01,
-    flexDirection: "column",
-    flexWrap: "wrap",
-  },
-  submittedGroupAnswer: {
-    fontSize: width * 0.035,
-    color: "#222",
-    backgroundColor: "#f7fafc",
-    borderRadius: width * 0.01,
-    paddingHorizontal: width * 0.01,
-    marginBottom: 2,
-    maxWidth: "100%",
-  },
-  pickerSearchWrapper: {
-    width: "100%",
-    marginBottom: 2,
-  },
-  pickerSearchInput: {
-    borderWidth: 1,
-    borderColor: "#bbb",
-    borderRadius: width * 0.015,
-    padding: height * 0.012,
-    marginBottom: 4,
-    backgroundColor: "#fff",
-    fontSize: width * 0.04,
-    width: "100%",
-  },
   modalOverlay: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "rgba(18,160,175,0.13)",
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
   },
   modalContent: {
-    width: "80%",
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 22,
+    width: "88%",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    paddingVertical: 28,
+    paddingHorizontal: 24,
     alignItems: "center",
-    borderWidth: 2,
-    borderColor: "#12A0AF",
-    shadowColor: "#4B34C7",
-    shadowOpacity: 0.13,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 8,
+    borderWidth: 0,
+    shadowColor: "#1F2937",
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 12,
   },
   modalTitle: {
     fontSize: 18,
-    fontWeight: "bold",
-    marginBottom: 10,
+    fontWeight: "600",
+    marginBottom: 16,
     textAlign: "center",
-    color: "#4B34C7",
+    color: "#1F2937",
   },
   modalButton: {
     flex: 1,
-    padding: 10,
-    borderRadius: 5,
+    paddingVertical: 14,
+    borderRadius: 10,
     alignItems: "center",
-    marginHorizontal: 5,
-    backgroundColor: "#12A0AF",
+    marginHorizontal: 6,
+    backgroundColor: "#4F46E5",
+    shadowColor: "#4F46E5",
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
   },
   modalButtonText: {
-    color: "white",
+    color: "#FFFFFF",
     fontSize: 15,
-    fontWeight: "bold",
-    textAlign: "center",
-  },
-  stickyHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#fff",
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#e5e7eb",
-    borderRadius: 12,
-    zIndex: 10,
-    elevation: 8,
-    shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-  },
-  formLogo: {
-    width: 56, // Ajustado a 56px para mejor presencia en header
-    height: 56,
-    borderRadius: 12,
-    marginRight: 14,
-    backgroundColor: "#fff",
-    borderWidth: 1.5,
-    borderColor: "#12A0AF",
-    alignSelf: "center",
-  },
-  locationButton: {
-    backgroundColor: "#4B34C7",
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    alignItems: "center",
-    marginBottom: 6,
-    borderWidth: 1.5,
-    borderColor: "#12A0AF",
-    width: "75%",
-    alignSelf: "flex-start",
-  },
-  locationButtonText: {
-    color: "#fff",
-    fontWeight: "bold",
-    fontSize: width * 0.045,
+    fontWeight: "600",
     textAlign: "center",
   },
 });
