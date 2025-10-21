@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { MaterialIcons } from "@expo/vector-icons";
-import ApproversDetailModal from "./ApproversDetailModal";
+import ApproversDetailModal from "./approval_of_formtos/ApproversDetailModal";
 const { width, height } = Dimensions.get("window");
 const BACKEND_URL_KEY = "backend_url";
 
