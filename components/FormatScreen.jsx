@@ -101,7 +101,32 @@ export default function FormatScreen(props) {
   const [tableRelatedQuestions, setTableRelatedQuestions] = useState({});
   const [tableAutoFilled, setTableAutoFilled] = useState({});
   const [locationError, setLocationError] = useState({});
+  const [signatureUris, setSignatureUris] = useState({});
+  const [selectedSigner, setSelectedSigner] = useState({});
+  
+const onOpenSignerSelect = (questionId) => {
+    // placeholder: abrir selector de firmantes en siguiente paso
+    Alert.alert("Seleccionar firmante", `Abrir selector para pregunta ${questionId}`);
+  };
 
+  const onStartSigning = (questionId) => {
+    // placeholder: abrir pantalla de firma en siguiente paso
+    Alert.alert("Firmar", `Abrir pantalla de firma para pregunta ${questionId}`);
+  };
+
+  const onClearSignature = (questionId) => {
+    setSignatureUris((prev) => {
+      const copy = { ...prev };
+      delete copy[questionId];
+      return copy;
+    });
+    setSelectedSigner((prev) => {
+      const copy = { ...prev };
+      delete copy[questionId];
+      return copy;
+    });
+  };
+  
   useFocusEffect(
     React.useCallback(() => {
       const disableBack = () => true;
@@ -1262,6 +1287,7 @@ export default function FormatScreen(props) {
     }
   };
 
+  console.log(questions)
   return (
     <View style={styles.mainContainer}>
       <LinearGradient
@@ -1313,42 +1339,96 @@ export default function FormatScreen(props) {
                 ) : (
                   questions
                     .filter((question) => !question.is_repeated)
-                    .map((question) => (
-                      <QuestionRenderer
-                        key={question.id}
-                        question={question}
-                        isLocked={nonRepeatedLocked}
-                        answers={answers}
-                        textAnswers={textAnswers}
-                        tableAnswersState={tableAnswersState}
-                        tableAnswers={tableAnswers}
-                        datePickerVisible={datePickerVisible}
-                        fileSerials={fileSerials}
-                        fileUris={fileUris}
-                        pickerSearch={pickerSearch}
-                        tableAutoFilled={tableAutoFilled}
-                        locationError={locationError}
-                        locationRelatedAnswers={locationRelatedAnswers}
-                        locationSelected={locationSelected}
-                        allowAddRemove={false}
-                        setAnswers={setAnswers}
-                        handleTextChange={handleTextChange}
-                        handleRemoveTextField={handleRemoveTextField}
-                        handleAddTextField={handleAddTextField}
-                        handleTableSelectChangeWithCorrelation={
-                          handleTableSelectChangeWithCorrelation
-                        }
-                        setPickerSearch={setPickerSearch}
-                        setDatePickerVisible={setDatePickerVisible}
-                        handleDateChange={handleDateChange}
-                        handleFileButtonPress={handleFileButtonPress}
-                        handleCaptureLocation={handleCaptureLocation}
-                        setLocationSelected={setLocationSelected}
-                        handleAddTableAnswer={handleAddTableAnswer}
-                        handleRemoveTableAnswer={handleRemoveTableAnswer}
-                      />
-                    ))
-                )}
+                    .map((question) =>
+                      question.question_type === "firm" ? (
+                        <View key={question.id} style={styles.signatureContainer}>
+                          <Text style={styles.signatureLabel}>
+                            {question.question_text}
+                          </Text>
+
+                          <View style={styles.signatureRow}>
+                            <TouchableOpacity
+                              style={styles.signerSelect}
+                              onPress={() => onOpenSignerSelect(question.id)}
+                              activeOpacity={0.8}
+                            >
+                              <Text style={styles.signerText}>
+                                {selectedSigner[question.id] || "Seleccionar firmante"}
+                              </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              style={styles.signButton}
+                              onPress={() => onStartSigning(question.id)}
+                              activeOpacity={0.85}
+                            >
+                              <Text style={styles.signButtonText}>Firmar</Text>
+                            </TouchableOpacity>
+                          </View>
+
+                          <View style={styles.signaturePreviewRow}>
+                            {signatureUris[question.id] ? (
+                              <Image
+                                source={{ uri: signatureUris[question.id] }}
+                                style={styles.signatureImage}
+                                resizeMode="contain"
+                              />
+                            ) : (
+                              <View style={styles.signaturePlaceholder}>
+                                <Text style={styles.placeholderText}>Sin firma</Text>
+                              </View>
+                            )}
+
+                            <TouchableOpacity
+                              style={styles.clearButton}
+                              onPress={() => onClearSignature(question.id)}
+                              activeOpacity={0.8}
+                            >
+                              <Text style={styles.clearButtonText}>Limpiar</Text>
+                            </TouchableOpacity>
+                          </View>
+
+                          <Text style={styles.hintText}>
+                            Pulsa "Firmar" para abrir la pantalla de firma (UI-only).
+                          </Text>
+                        </View>
+                      ) : (
+                        <QuestionRenderer
+                          key={question.id}
+                          question={question}
+                          isLocked={nonRepeatedLocked}
+                          answers={answers}
+                          textAnswers={textAnswers}
+                          tableAnswersState={tableAnswersState}
+                          tableAnswers={tableAnswers}
+                          datePickerVisible={datePickerVisible}
+                          fileSerials={fileSerials}
+                          fileUris={fileUris}
+                          pickerSearch={pickerSearch}
+                          tableAutoFilled={tableAutoFilled}
+                          locationError={locationError}
+                          locationRelatedAnswers={locationRelatedAnswers}
+                          locationSelected={locationSelected}
+                          allowAddRemove={false}
+                          setAnswers={setAnswers}
+                          handleTextChange={handleTextChange}
+                          handleRemoveTextField={handleRemoveTextField}
+                          handleAddTextField={handleAddTextField}
+                          handleTableSelectChangeWithCorrelation={
+                            handleTableSelectChangeWithCorrelation
+                          }
+                          setPickerSearch={setPickerSearch}
+                          setDatePickerVisible={setDatePickerVisible}
+                          handleDateChange={handleDateChange}
+                          handleFileButtonPress={handleFileButtonPress}
+                          handleCaptureLocation={handleCaptureLocation}
+                          setLocationSelected={setLocationSelected}
+                          handleAddTableAnswer={handleAddTableAnswer}
+                          handleRemoveTableAnswer={handleRemoveTableAnswer}
+                        />
+                      )
+                    )
+                 )}
               </View>
             </View>
           )}
@@ -1828,5 +1908,103 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "600",
     letterSpacing: 0.2,
+  },
+  signatureContainer: {
+    marginBottom: 16,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: "#F7FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  signatureLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#2D3748",
+    marginBottom: 8,
+  },
+  signatureRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  signerSelect: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    marginRight: 8,
+    justifyContent: "center",
+  },
+  signerText: {
+    fontSize: 14,
+    color: "#2D3748",
+  },
+  signButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+    backgroundColor: "#0F8593",
+    justifyContent: "center",
+  },
+  signButtonText: {
+    fontSize: 14,
+    color: "#FFFFFF",
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  signaturePreviewRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  signatureImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    marginRight: 12,
+  },
+  signaturePlaceholder: {
+    flex: 1,
+    height: 80,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#EDF2F7",
+  },
+  placeholderText: {
+    fontSize: 14,
+    color: "#A0AEC0",
+  },
+  clearButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    backgroundColor: "#F56565",
+    justifyContent: "center",
+  },
+  clearButtonText: {
+    fontSize: 14,
+    color: "#FFFFFF",
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  hintText: {
+    fontSize: 12,
+    color: "#718096",
+    marginTop: 8,
+    textAlign: "center",
   },
 });
