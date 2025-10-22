@@ -1442,26 +1442,26 @@ export default function FormatScreen(props) {
                           <View style={styles.submittedValueContainer}>
                             {Array.isArray(group[q.id])
                               ? group[q.id]
-                                  .filter((ans) => ans && ans !== "")
-                                  .map((ans, i) => (
-                                    <Text
-                                      key={i}
-                                      style={styles.submittedValue}
-                                      numberOfLines={2}
-                                      ellipsizeMode="tail"
-                                    >
-                                      {ans}
-                                    </Text>
-                                  ))
-                              : group[q.id] && (
+                                .filter((ans) => ans && ans !== "")
+                                .map((ans, i) => (
                                   <Text
+                                    key={i}
                                     style={styles.submittedValue}
                                     numberOfLines={2}
                                     ellipsizeMode="tail"
                                   >
-                                    {group[q.id]}
+                                    {ans}
                                   </Text>
-                                )}
+                                ))
+                              : group[q.id] && (
+                                <Text
+                                  style={styles.submittedValue}
+                                  numberOfLines={2}
+                                  ellipsizeMode="tail"
+                                >
+                                  {group[q.id]}
+                                </Text>
+                              )}
                           </View>
                         </View>
                       ))}
@@ -1472,68 +1472,64 @@ export default function FormatScreen(props) {
             )}
 
           {/* Botones de Acción */}
+          {/* Botones de Acción */}
           <View style={styles.actionsContainer}>
-            {isRepeatedQuestions.length > 1 && (
-              <TouchableOpacity
-                style={[styles.actionButton, styles.secondaryButton]}
-                onPress={submitting ? null : handleProgressiveSubmit}
-                disabled={submitting}
-                activeOpacity={0.8}
-              >
-                {submitting ? (
-                  <View style={styles.buttonContent}>
-                    <Animated.View style={{ transform: [{ rotate: spin }] }}>
-                      <SvgXml xml={spinnerSvg} width={24} height={24} />
-                    </Animated.View>
-                    <Text style={styles.buttonTextSecondary}>Procesando...</Text>
-                  </View>
-                ) : (
-                  <View style={styles.buttonContent}>
-                    <Text style={styles.buttonIcon}>➕</Text>
-                    <Text style={styles.buttonTextSecondary}>
-                      Enviar y Agregar Más
-                    </Text>
-                  </View>
-                )}
-              </TouchableOpacity>
-            )}
+            {/* Botón Cancelar (Volver al Inicio) */}
+            <TouchableOpacity
+              style={[styles.actionButton, styles.homeButton]}
+              onPress={() => router.push("/home")}
+              disabled={submitting}
+              activeOpacity={0.7}
+            >
+              <View style={styles.buttonContent}>
+                <Text style={styles.buttonTextHome}>Cancelar</Text>
+              </View>
+            </TouchableOpacity>
 
-            {isRepeatedQuestions.length <= 1 && (
+            {/* Botón Principal */}
+            {isRepeatedQuestions.length > 1 ? (
               <TouchableOpacity
                 style={[styles.actionButton, styles.primaryButton]}
-                onPress={submitting ? null : handleSubmitForm}
+                onPress={submitting ? null : handleProgressiveSubmit}
                 disabled={submitting}
-                activeOpacity={0.8}
+                activeOpacity={0.7}
               >
                 {submitting ? (
                   <View style={styles.buttonContent}>
                     <Animated.View style={{ transform: [{ rotate: spin }] }}>
-                      <SvgXml xml={spinnerSvg} width={24} height={24} />
+                      <SvgXml xml={spinnerSvg} width={20} height={20} />
                     </Animated.View>
                     <Text style={styles.buttonTextPrimary}>Enviando...</Text>
                   </View>
                 ) : (
                   <View style={styles.buttonContent}>
-                    <Text style={styles.buttonIcon}>✓</Text>
-                    <Text style={styles.buttonTextPrimary}>
-                      Guardar Formulario
-                    </Text>
+                    <Text style={[styles.buttonIcon, { color: "#FFFFFF" }]}>✓</Text>
+                    <Text style={styles.buttonTextPrimary}>Enviar</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[styles.actionButton, styles.primaryButton]}
+                onPress={submitting ? null : handleSubmitForm}
+                disabled={submitting}
+                activeOpacity={0.7}
+              >
+                {submitting ? (
+                  <View style={styles.buttonContent}>
+                    <Animated.View style={{ transform: [{ rotate: spin }] }}>
+                      <SvgXml xml={spinnerSvg} width={20} height={20} />
+                    </Animated.View>
+                    <Text style={styles.buttonTextPrimary}>Enviando...</Text>
+                  </View>
+                ) : (
+                  <View style={styles.buttonContent}>
+                    <Text style={[styles.buttonIcon, { color: "#FFFFFF" }]}>✓</Text>
+                    <Text style={styles.buttonTextPrimary}>Enviar</Text>
                   </View>
                 )}
               </TouchableOpacity>
             )}
-
-            <TouchableOpacity
-              style={[styles.actionButton, styles.homeButton]}
-              onPress={() => router.push("/home")}
-              disabled={submitting}
-              activeOpacity={0.8}
-            >
-              <View style={styles.buttonContent}>
-                <HomeIcon color={"#FFFFFF"} />
-                <Text style={styles.buttonTextHome}>Volver al Inicio</Text>
-              </View>
-            </TouchableOpacity>
           </View>
         </ScrollView>
       </LinearGradient>
@@ -1553,7 +1549,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingBottom: height * 0.03,
   },
-  
+
   // Header Empresarial
   stickyHeader: {
     backgroundColor: "#FFFFFF",
@@ -1773,56 +1769,64 @@ const styles = StyleSheet.create({
   },
 
   // Botones de Acción
+  // Botones de Acción
   actionsContainer: {
     marginTop: 28,
     paddingHorizontal: 20,
+    flexDirection: 'row',
     gap: 12,
+    alignItems: 'center',
   },
   actionButton: {
-    borderRadius: 10,
-    paddingVertical: 16,
+    flex: 1,
+    borderRadius: 12,
+    paddingVertical: 13,
     paddingHorizontal: 20,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+    minHeight: 45,
   },
   primaryButton: {
-    backgroundColor: "#0F8593",
+    backgroundColor: "#0F8390", // Azul como en la imagen
   },
   secondaryButton: {
-    backgroundColor: "#48BB78",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1.5,
+    borderColor: "#CBD5E1",
   },
   homeButton: {
-    backgroundColor: "#718096",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1.5,
+    borderColor: "#CBD5E1",
   },
   buttonContent: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 10,
+    gap: 8,
   },
   buttonIcon: {
-    fontSize: 18,
-    color: "#FFFFFF",
+    fontSize: 20,
   },
   buttonTextPrimary: {
     color: "#FFFFFF",
     fontSize: 16,
-    fontWeight: "700",
-    letterSpacing: 0.5,
+    fontWeight: "600",
+    letterSpacing: 0.2,
   },
   buttonTextSecondary: {
-    color: "#FFFFFF",
+    color: "#475569",
     fontSize: 16,
-    fontWeight: "700",
-    letterSpacing: 0.5,
+    fontWeight: "600",
+    letterSpacing: 0.2,
   },
   buttonTextHome: {
-    color: "#FFFFFF",
+    color: "#475569",
     fontSize: 15,
     fontWeight: "600",
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
   },
 });
