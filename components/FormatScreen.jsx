@@ -22,7 +22,7 @@ import { HomeIcon } from "./Icons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Location from "expo-location";
 import QuestionRenderer from "./FormatRenderer/QuestionRenderer";
-
+import FirmField from "./FirmField";
 const { width, height } = Dimensions.get("window");
 
 const QUESTIONS_KEY = "offline_questions";
@@ -103,7 +103,7 @@ export default function FormatScreen(props) {
   const [locationError, setLocationError] = useState({});
   const [signatureUris, setSignatureUris] = useState({});
   const [selectedSigner, setSelectedSigner] = useState({});
-  
+  const [selectedUserId, setSelectedUserId] = useState("");
 const onOpenSignerSelect = (questionId) => {
     // placeholder: abrir selector de firmantes en siguiente paso
     Alert.alert("Seleccionar firmante", `Abrir selector para pregunta ${questionId}`);
@@ -1341,57 +1341,65 @@ const onOpenSignerSelect = (questionId) => {
                     .filter((question) => !question.is_repeated)
                     .map((question) =>
                       question.question_type === "firm" ? (
-                        <View key={question.id} style={styles.signatureContainer}>
-                          <Text style={styles.signatureLabel}>
-                            {question.question_text}
-                          </Text>
-
-                          <View style={styles.signatureRow}>
-                            <TouchableOpacity
-                              style={styles.signerSelect}
-                              onPress={() => onOpenSignerSelect(question.id)}
-                              activeOpacity={0.8}
-                            >
-                              <Text style={styles.signerText}>
-                                {selectedSigner[question.id] || "Seleccionar firmante"}
-                              </Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                              style={styles.signButton}
-                              onPress={() => onStartSigning(question.id)}
-                              activeOpacity={0.85}
-                            >
-                              <Text style={styles.signButtonText}>Firmar</Text>
-                            </TouchableOpacity>
-                          </View>
-
-                          <View style={styles.signaturePreviewRow}>
-                            {signatureUris[question.id] ? (
-                              <Image
-                                source={{ uri: signatureUris[question.id] }}
-                                style={styles.signatureImage}
-                                resizeMode="contain"
-                              />
-                            ) : (
-                              <View style={styles.signaturePlaceholder}>
-                                <Text style={styles.placeholderText}>Sin firma</Text>
-                              </View>
-                            )}
-
-                            <TouchableOpacity
-                              style={styles.clearButton}
-                              onPress={() => onClearSignature(question.id)}
-                              activeOpacity={0.8}
-                            >
-                              <Text style={styles.clearButtonText}>Limpiar</Text>
-                            </TouchableOpacity>
-                          </View>
-
-                          <Text style={styles.hintText}>
-                            Pulsa "Firmar" para abrir la pantalla de firma (UI-only).
-                          </Text>
-                        </View>
+  <FirmField
+        key="firma_digital_001"
+        label="Firma Digital del Documento"
+        options={[
+          {
+            id: "usr_001",
+            name: "Juan Pérez García",
+            num_document: "1098765432"
+          },
+          {
+            id: "usr_002",
+            name: "María González López",
+            num_document: "1087654321"
+          },
+          {
+            id: "usr_003",
+            name: "Carlos Rodríguez Méndez",
+            num_document: "1076543210"
+          },
+          {
+            id: "usr_004",
+            name: "Ana Martínez Sánchez",
+            num_document: "1065432109"
+          }
+        ]}
+        required={true}
+  onChange={(e) => {
+          console.log('📝 Usuario seleccionado:', e.target.value);
+          setSelectedUserId(e.target.value); // ⭐ ACTUALIZAR ESTADO
+        }}
+        value={selectedUserId}  // Cambia esto al ID del usuario seleccionado: "usr_001", "usr_002", etc.
+        disabled={false}
+        error={false}
+        documentHash="a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6"
+        apiUrl="https://api-signfacial-safe.service.saferut.com"
+        autoCloseDelay={10000}
+        onFirmSuccess={(data) => {
+          console.log('✅ Firma completada exitosamente:', data);
+          console.log('Person ID:', data.firmData.person_id);
+          console.log('Person Name:', data.firmData.person_name);
+          console.log('QR URL:', data.firmData.qr_url);
+        }}
+        onFirmError={(error) => {
+          console.error('❌ Error en la firma:', error);
+        }}
+        onValueChange={(firmCompleteData) => {
+          console.log('💾 Guardando datos de firma:', firmCompleteData);
+          // Aquí guardas los datos completos en tu formulario
+          // firmCompleteData contiene:
+          // {
+          //   firmData: {
+          //     success: true,
+          //     person_id: "usr_001",
+          //     person_name: "Juan Pérez García",
+          //     qr_url: "https://..."
+          //   }
+          // }
+        }}
+      />
                       ) : (
                         <QuestionRenderer
                           key={question.id}
