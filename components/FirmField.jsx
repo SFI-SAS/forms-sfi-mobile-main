@@ -8,6 +8,8 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  Platform,
+  PermissionsAndroid,
 } from "react-native";
 import { Picker } from "@react-native-picker/picker";
 import { WebView } from "react-native-webview";
@@ -15,7 +17,7 @@ import { WebView } from "react-native-webview";
 /**
  * Componente de Firma Digital para React Native
  * Adaptado desde el componente TSX web con SFI Facial
- * 
+ *
  * @param {Object} props
  * @param {string} props.label - Etiqueta del campo
  * @param {Array} props.options - Array de usuarios: [{id, name, num_document}]
@@ -75,9 +77,38 @@ const FirmField = ({
   };
 
   /**
+   * Solicitar permisos de cámara en Android (solo cámara)
+   */
+  const requestCameraPermissions = async () => {
+    if (Platform.OS === "android") {
+      try {
+        const result = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.CAMERA,
+          {
+            title: "Permiso de cámara",
+            message:
+              "Se requiere acceso a la cámara para el reconocimiento facial",
+            buttonNeutral: "Preguntar después",
+            buttonNegative: "Cancelar",
+            buttonPositive: "Aceptar",
+          }
+        );
+
+        return result === PermissionsAndroid.RESULTS.GRANTED;
+      } catch (e) {
+        console.error("Error pidiendo permiso de cámara:", e);
+        return false;
+      }
+    }
+
+    // iOS: permisos gestionados por Info.plist / WKWebView
+    return true;
+  };
+
+  /**
    * Iniciar proceso de firma
    */
-  const handleFirmar = () => {
+  const handleFirmar = async () => {
     if (!selectedUser) {
       setFirmError("Debe seleccionar un usuario antes de firmar");
       Alert.alert("Error", "Debe seleccionar un usuario antes de firmar");
@@ -86,7 +117,20 @@ const FirmField = ({
 
     if (!documentHash) {
       setFirmError("No se ha proporcionado el hash del documento a firmar");
-      Alert.alert("Error", "No se ha proporcionado el hash del documento a firmar");
+      Alert.alert(
+        "Error",
+        "No se ha proporcionado el hash del documento a firmar"
+      );
+      return;
+    }
+
+    // pedir permisos de cámara/micrófono (Android)
+    const permsOk = await requestCameraPermissions();
+    if (!permsOk) {
+      Alert.alert(
+        "Permisos necesarios",
+        "Se requieren permisos de cámara y micrófono para el reconocimiento facial."
+      );
       return;
     }
 
@@ -150,7 +194,9 @@ const FirmField = ({
           break;
 
         case "liveness-progress":
-          setProcessStatus(`👤 ${data.instruction} (${Math.round(data.progress * 100)}%)`);
+          setProcessStatus(
+            `👤 ${data.instruction} (${Math.round(data.progress * 100)}%)`
+          );
           setAuthStatus("loading");
           console.log("👤 LIVENESS PROGRESS:", data);
           break;
@@ -163,22 +209,32 @@ const FirmField = ({
           break;
 
         case "sign-validation-progress":
-          setProcessStatus(`🔄 Validando: intento ${data.attempt}/${data.max_attempts}`);
+          setProcessStatus(
+            `🔄 Validando: intento ${data.attempt}/${data.max_attempts}`
+          );
           setAuthStatus("loading");
           console.log("🔄 SIGN VALIDATION PROGRESS:", data);
           break;
 
         case "sign-validation-result":
           if (data.success) {
-            setProcessStatus(`✅ Autenticación exitosa: ${Math.round(data.confidence * 100)}% confianza`);
+            setProcessStatus(
+              `✅ Autenticación exitosa: ${Math.round(data.confidence * 100)}% confianza`
+            );
             setAuthStatus("success");
-            setAuthMessage(`Identidad verificada con ${Math.round(data.confidence * 100)}% de confianza`);
+            setAuthMessage(
+              `Identidad verificada con ${Math.round(data.confidence * 100)}% de confianza`
+            );
             console.log("✅ SIGN VALIDATION SUCCESS:", data);
           } else {
             setProcessStatus(`❌ Autenticación fallida: ${data.message}`);
             setAuthStatus("validation-failed");
-            setAuthMessage("Usuario no encontrado o problemas con la autenticación");
-            setFirmError("Usuario no encontrado o problemas con la autenticación");
+            setAuthMessage(
+              "Usuario no encontrado o problemas con la autenticación"
+            );
+            setFirmError(
+              "Usuario no encontrado o problemas con la autenticación"
+            );
             console.log("❌ SIGN VALIDATION FAILED:", data);
           }
           break;
@@ -189,7 +245,11 @@ const FirmField = ({
           break;
 
         case "sign-request-progress":
-          setProcessStatus(data.status === "uploading" ? "📊 Enviando datos..." : "⚙️ Procesando firma...");
+          setProcessStatus(
+            data.status === "uploading"
+              ? "📊 Enviando datos..."
+              : "⚙️ Procesando firma..."
+          );
           console.log("📊 SIGN REQUEST PROGRESS:", data);
           break;
 
@@ -200,8 +260,12 @@ const FirmField = ({
           } else {
             setProcessStatus(`❌ Error del servidor: ${data.message}`);
             setAuthStatus("error");
-            setAuthMessage("Usuario no encontrado o problemas con la autenticación");
-            setFirmError("Usuario no encontrado o problemas con la autenticación");
+            setAuthMessage(
+              "Usuario no encontrado o problemas con la autenticación"
+            );
+            setFirmError(
+              "Usuario no encontrado o problemas con la autenticación"
+            );
             console.log("❌ SIGN RESPONSE ERROR:", data);
           }
           break;
@@ -216,24 +280,36 @@ const FirmField = ({
 
         case "sign-timeout-error":
           setAuthStatus("timeout");
-          setAuthMessage("Tiempo de espera agotado - problemas con la autenticación");
-          setFirmError("Tiempo de espera agotado - problemas con la autenticación");
+          setAuthMessage(
+            "Tiempo de espera agotado - problemas con la autenticación"
+          );
+          setFirmError(
+            "Tiempo de espera agotado - problemas con la autenticación"
+          );
           setIsLoading(false);
           console.error("⏱️ SIGN TIMEOUT:", data);
           break;
 
         case "sign-network-error":
           setAuthStatus("network-error");
-          setAuthMessage("Usuario no encontrado o problemas con la autenticación");
-          setFirmError("Usuario no encontrado o problemas con la autenticación");
+          setAuthMessage(
+            "Usuario no encontrado o problemas con la autenticación"
+          );
+          setFirmError(
+            "Usuario no encontrado o problemas con la autenticación"
+          );
           setIsLoading(false);
           console.error("🌐 SIGN NETWORK ERROR:", data);
           break;
 
         case "sign-validation-failed":
           setAuthStatus("validation-failed");
-          setAuthMessage("Usuario no encontrado o problemas con la autenticación");
-          setFirmError("Usuario no encontrado o problemas con la autenticación");
+          setAuthMessage(
+            "Usuario no encontrado o problemas con la autenticación"
+          );
+          setFirmError(
+            "Usuario no encontrado o problemas con la autenticación"
+          );
           setIsLoading(false);
           console.error("🚫 SIGN VALIDATION INSUFFICIENT:", data);
           break;
@@ -342,7 +418,9 @@ const FirmField = ({
       case "timeout":
         return {
           message: "❌ Autenticación Fallida",
-          subMessage: authMessage || "Usuario no encontrado o problemas con la autenticación",
+          subMessage:
+            authMessage ||
+            "Usuario no encontrado o problemas con la autenticación",
           bgColor: "#FEE2E2",
           borderColor: "#FECACA",
           textColor: "#991B1B",
@@ -540,7 +618,10 @@ const FirmField = ({
           <Picker
             selectedValue={value || ""}
             onValueChange={(itemValue) => {
-              console.log("🔄 Picker onChange - valor seleccionado:", itemValue);
+              console.log(
+                "🔄 Picker onChange - valor seleccionado:",
+                itemValue
+              );
               if (onChange) {
                 // Llamar onChange con el formato correcto
                 onChange({ target: { value: itemValue } });
@@ -590,7 +671,9 @@ const FirmField = ({
       {/* Estado de firma exitosa */}
       {firmData && authStatus === "success" && (
         <View style={styles.successContainer}>
-          <Text style={styles.successTitle}>✅ Firma completada exitosamente</Text>
+          <Text style={styles.successTitle}>
+            ✅ Firma completada exitosamente
+          </Text>
           <Text style={styles.successText}>
             Usuario: {firmData.person_name} • ID: {firmData.person_id}
           </Text>
@@ -671,20 +754,31 @@ const FirmField = ({
               )}
 
               {/* WebView con SFI Facial */}
-              {showModal && selectedUser && documentHash ? (
+              {showModal ? (
                 <View style={styles.webViewContainer}>
                   <WebView
-                    source={{ html: getWebViewHTML() }}
+                    source={{
+                      html: getWebViewHTML(),
+                      baseUrl:
+                        "https://reconocimiento-facial-safe.service.saferut.com/index.js",
+                    }}
                     onMessage={handleWebViewMessage}
                     javaScriptEnabled={true}
                     domStorageEnabled={true}
                     mediaPlaybackRequiresUserAction={false}
                     allowsInlineMediaPlayback={true}
-                    style={styles.webView}
+                    originWhitelist={["*"]}
+                    mixedContentMode="always"
+                    allowUniversalAccessFromFileURLs={true}
+                    startInLoadingState={true}
+                    onLoad={() => {
+                      console.log("WebView cargado (onLoad)");
+                    }}
                     onError={(syntheticEvent) => {
                       const { nativeEvent } = syntheticEvent;
                       console.error("WebView error:", nativeEvent);
                     }}
+                    style={styles.webView}
                   />
                 </View>
               ) : (

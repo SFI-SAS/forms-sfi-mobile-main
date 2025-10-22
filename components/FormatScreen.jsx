@@ -23,6 +23,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as Location from "expo-location";
 import QuestionRenderer from "./FormatRenderer/QuestionRenderer";
 import FirmField from "./FirmField";
+import axios from "axios";
 const { width, height } = Dimensions.get("window");
 
 const QUESTIONS_KEY = "offline_questions";
@@ -104,14 +105,82 @@ export default function FormatScreen(props) {
   const [signatureUris, setSignatureUris] = useState({});
   const [selectedSigner, setSelectedSigner] = useState({});
   const [selectedUserId, setSelectedUserId] = useState("");
-const onOpenSignerSelect = (questionId) => {
+  const [facialUsers, setFacialUsers] = useState([]);
+
+  useEffect(() => {
+    const fetchFacialUsers = async () => {
+      try {
+        const token = await AsyncStorage.getItem("authToken");
+        if (!token) {
+          console.error("No se encontró el token de autenticación");
+          setFacialUsers([]);
+          return;
+        }
+
+        const backendUrl = await getBackendUrl();
+        if (!backendUrl) {
+          console.error("No se encontró BACKEND_URL");
+          setFacialUsers([]);
+          return;
+        }
+
+        const res = await axios.get(
+          `${backendUrl}/responses/answers/regisfacial`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
+        const mapped = Array.isArray(res.data)
+          ? res.data
+              .map((item) => {
+                try {
+                  const parsed = JSON.parse(item.answer_text || "{}");
+                  const faceData = parsed.faceData || parsed;
+                  if (!faceData) return null;
+                  return {
+                    id:
+                      faceData.person_id ||
+                      faceData.personId ||
+                      String(Math.random()),
+                    name:
+                      faceData.personName ||
+                      faceData.person_name ||
+                      faceData.name ||
+                      "Sin nombre",
+                    person_id: faceData.person_id || faceData.personId || "",
+                    hash: item.encrypted_hash || item.hash || "",
+                  };
+                } catch (err) {
+                  console.error("Error parseando datos faciales:", err);
+                  return null;
+                }
+              })
+              .filter(Boolean)
+          : [];
+
+        setFacialUsers(mapped);
+      } catch (error) {
+        console.error("Error cargando datos faciales:", error);
+        setFacialUsers([]);
+      }
+    };
+
+    fetchFacialUsers();
+  }, []);
+  const onOpenSignerSelect = (questionId) => {
     // placeholder: abrir selector de firmantes en siguiente paso
-    Alert.alert("Seleccionar firmante", `Abrir selector para pregunta ${questionId}`);
+    Alert.alert(
+      "Seleccionar firmante",
+      `Abrir selector para pregunta ${questionId}`
+    );
   };
 
   const onStartSigning = (questionId) => {
     // placeholder: abrir pantalla de firma en siguiente paso
-    Alert.alert("Firmar", `Abrir pantalla de firma para pregunta ${questionId}`);
+    Alert.alert(
+      "Firmar",
+      `Abrir pantalla de firma para pregunta ${questionId}`
+    );
   };
 
   const onClearSignature = (questionId) => {
@@ -126,7 +195,7 @@ const onOpenSignerSelect = (questionId) => {
       return copy;
     });
   };
-  
+
   useFocusEffect(
     React.useCallback(() => {
       const disableBack = () => true;
@@ -1275,10 +1344,7 @@ const onOpenSignerSelect = (questionId) => {
       }
       setSubmittedRepeatedGroups((prev) => [...prev, group]);
 
-      Alert.alert(
-        "Éxito",
-        "Respuestas enviadas. Puedes seguir agregando más."
-      );
+      Alert.alert("Éxito", "Respuestas enviadas. Puedes seguir agregando más.");
     } catch (error) {
       console.error("❌ Error en el proceso de envío:", error);
       Alert.alert("Error", "No se pudo completar el envío del formulario");
@@ -1287,7 +1353,7 @@ const onOpenSignerSelect = (questionId) => {
     }
   };
 
-  console.log(questions)
+  console.log(questions);
   return (
     <View style={styles.mainContainer}>
       <LinearGradient
@@ -1334,72 +1400,72 @@ const onOpenSignerSelect = (questionId) => {
                     <Animated.View style={{ transform: [{ rotate: spin }] }}>
                       <SvgXml xml={spinnerSvg} width={50} height={50} />
                     </Animated.View>
-                    <Text style={styles.loadingText}>Cargando formulario...</Text>
+                    <Text style={styles.loadingText}>
+                      Cargando formulario...
+                    </Text>
                   </View>
                 ) : (
                   questions
                     .filter((question) => !question.is_repeated)
                     .map((question) =>
                       question.question_type === "firm" ? (
-  <FirmField
-        key="firma_digital_001"
-        label="Firma Digital del Documento"
-        options={[
-          {
-            id: "usr_001",
-            name: "Juan Pérez García",
-            num_document: "1098765432"
-          },
-          {
-            id: "usr_002",
-            name: "María González López",
-            num_document: "1087654321"
-          },
-          {
-            id: "usr_003",
-            name: "Carlos Rodríguez Méndez",
-            num_document: "1076543210"
-          },
-          {
-            id: "usr_004",
-            name: "Ana Martínez Sánchez",
-            num_document: "1065432109"
-          }
-        ]}
-        required={true}
-  onChange={(e) => {
-          console.log('📝 Usuario seleccionado:', e.target.value);
-          setSelectedUserId(e.target.value); // ⭐ ACTUALIZAR ESTADO
-        }}
-        value={selectedUserId}  // Cambia esto al ID del usuario seleccionado: "usr_001", "usr_002", etc.
-        disabled={false}
-        error={false}
-        documentHash="a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6"
-        apiUrl="https://api-signfacial-safe.service.saferut.com"
-        autoCloseDelay={10000}
-        onFirmSuccess={(data) => {
-          console.log('✅ Firma completada exitosamente:', data);
-          console.log('Person ID:', data.firmData.person_id);
-          console.log('Person Name:', data.firmData.person_name);
-          console.log('QR URL:', data.firmData.qr_url);
-        }}
-        onFirmError={(error) => {
-          console.error('❌ Error en la firma:', error);
-        }}
-        onValueChange={(firmCompleteData) => {
-          console.log('💾 Guardando datos de firma:', firmCompleteData);
-          // Aquí guardas los datos completos en tu formulario
-          // firmCompleteData contiene:
-          // {
-          //   firmData: {
-          //     success: true,
-          //     person_id: "usr_001",
-          //     person_name: "Juan Pérez García",
-          //     qr_url: "https://..."
-          //   }
-          // }
-        }}
-      />
+                        <FirmField
+                          key={question.id}
+                          label={question.question_text || "Firma Digital"}
+                          options={facialUsers.map((u) => ({
+                            id: u.id,
+                            name: u.name,
+                            num_document: u.person_id,
+                          }))}
+                          required={question.required ?? false}
+                          // onChange puede recibir un evento o el valor directamente
+                          onChange={(ev) => {
+                            const val = ev?.target?.value ?? ev ?? "";
+                            console.log("📝 Usuario seleccionado:", val);
+                            setSelectedUserId(val);
+                            handleAnswerChange(question.id, val);
+                          }}
+                          value={selectedUserId}
+                          disabled={submitting}
+                          error={false}
+                          documentHash={String(
+                            facialUsers.find((f) => f.id === selectedUserId)
+                              ?.hash || ""
+                          )}
+                          apiUrl="https://api-signfacial-safe.service.saferut.com"
+                          autoCloseDelay={10000}
+                          onFirmSuccess={(data) => {
+                            console.log(
+                              "✅ Firma completada exitosamente:",
+                              data
+                            );
+                          }}
+                          onFirmError={(error) => {
+                            console.error("❌ Error en la firma:", error);
+                          }}
+                          onValueChange={(firmCompleteData) => {
+                            console.log(
+                              "💾 Guardando datos de firma:",
+                              firmCompleteData
+                            );
+                            // guarda el objeto completo como string en answers
+                            handleAnswerChange(
+                              question.id,
+                              JSON.stringify(firmCompleteData)
+                            );
+                            // si firmCompleteData contiene una URL para preview, guárala
+                            const preview =
+                              firmCompleteData?.firmData?.qr_url ||
+                              firmCompleteData?.firmData?.signature_url ||
+                              firmCompleteData?.signatureUri;
+                            if (preview) {
+                              setSignatureUris((prev) => ({
+                                ...prev,
+                                [question.id]: preview,
+                              }));
+                            }
+                          }}
+                        />
                       ) : (
                         <QuestionRenderer
                           key={question.id}
@@ -1436,7 +1502,7 @@ const onOpenSignerSelect = (questionId) => {
                         />
                       )
                     )
-                 )}
+                )}
               </View>
             </View>
           )}
@@ -1445,7 +1511,12 @@ const onOpenSignerSelect = (questionId) => {
           {isRepeatedQuestions.length > 0 && (
             <View style={styles.questionsSection}>
               <View style={styles.sectionHeader}>
-                <View style={[styles.sectionIndicator, { backgroundColor: "#2D3748" }]} />
+                <View
+                  style={[
+                    styles.sectionIndicator,
+                    { backgroundColor: "#2D3748" },
+                  ]}
+                />
                 <Text style={styles.sectionTitle}>Información Adicional</Text>
               </View>
               <View style={styles.questionsContainer}>
@@ -1454,7 +1525,9 @@ const onOpenSignerSelect = (questionId) => {
                     <Animated.View style={{ transform: [{ rotate: spin }] }}>
                       <SvgXml xml={spinnerSvg} width={50} height={50} />
                     </Animated.View>
-                    <Text style={styles.loadingText}>Cargando formulario...</Text>
+                    <Text style={styles.loadingText}>
+                      Cargando formulario...
+                    </Text>
                   </View>
                 ) : (
                   isRepeatedQuestions.map((question) => (
@@ -1516,7 +1589,9 @@ const onOpenSignerSelect = (questionId) => {
                     <View key={idx} style={styles.submittedCard}>
                       <View style={styles.submittedCardHeader}>
                         <View style={styles.submittedBadge}>
-                          <Text style={styles.submittedBadgeText}>#{idx + 1}</Text>
+                          <Text style={styles.submittedBadgeText}>
+                            #{idx + 1}
+                          </Text>
                         </View>
                         <Text style={styles.submittedCardTitle}>
                           Registro {idx + 1}
@@ -1530,26 +1605,26 @@ const onOpenSignerSelect = (questionId) => {
                           <View style={styles.submittedValueContainer}>
                             {Array.isArray(group[q.id])
                               ? group[q.id]
-                                .filter((ans) => ans && ans !== "")
-                                .map((ans, i) => (
+                                  .filter((ans) => ans && ans !== "")
+                                  .map((ans, i) => (
+                                    <Text
+                                      key={i}
+                                      style={styles.submittedValue}
+                                      numberOfLines={2}
+                                      ellipsizeMode="tail"
+                                    >
+                                      {ans}
+                                    </Text>
+                                  ))
+                              : group[q.id] && (
                                   <Text
-                                    key={i}
                                     style={styles.submittedValue}
                                     numberOfLines={2}
                                     ellipsizeMode="tail"
                                   >
-                                    {ans}
+                                    {group[q.id]}
                                   </Text>
-                                ))
-                              : group[q.id] && (
-                                <Text
-                                  style={styles.submittedValue}
-                                  numberOfLines={2}
-                                  ellipsizeMode="tail"
-                                >
-                                  {group[q.id]}
-                                </Text>
-                              )}
+                                )}
                           </View>
                         </View>
                       ))}
@@ -1591,7 +1666,9 @@ const onOpenSignerSelect = (questionId) => {
                   </View>
                 ) : (
                   <View style={styles.buttonContent}>
-                    <Text style={[styles.buttonIcon, { color: "#FFFFFF" }]}>✓</Text>
+                    <Text style={[styles.buttonIcon, { color: "#FFFFFF" }]}>
+                      ✓
+                    </Text>
                     <Text style={styles.buttonTextPrimary}>Enviar</Text>
                   </View>
                 )}
@@ -1612,7 +1689,9 @@ const onOpenSignerSelect = (questionId) => {
                   </View>
                 ) : (
                   <View style={styles.buttonContent}>
-                    <Text style={[styles.buttonIcon, { color: "#FFFFFF" }]}>✓</Text>
+                    <Text style={[styles.buttonIcon, { color: "#FFFFFF" }]}>
+                      ✓
+                    </Text>
                     <Text style={styles.buttonTextPrimary}>Enviar</Text>
                   </View>
                 )}
@@ -1695,7 +1774,6 @@ const styles = StyleSheet.create({
     color: "#4A5568",
     letterSpacing: 0.5,
   },
-
 
   instructionIconContainer: {
     marginRight: 14,
@@ -1861,9 +1939,9 @@ const styles = StyleSheet.create({
   actionsContainer: {
     marginTop: 28,
     paddingHorizontal: 20,
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 12,
-    alignItems: 'center',
+    alignItems: "center",
   },
   actionButton: {
     flex: 1,
