@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   View,
   Text,
@@ -11,6 +11,8 @@ import {
   Platform,
   PermissionsAndroid,
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import NetInfo from "@react-native-community/netinfo";
 import { Picker } from "@react-native-picker/picker";
 import { WebView } from "react-native-webview";
 import * as WebBrowser from "expo-web-browser";
@@ -65,7 +67,9 @@ const FirmField = ({
   const [countdown, setCountdown] = useState(0);
   const [authStatus, setAuthStatus] = useState("idle"); // 'idle' | 'loading' | 'success' | 'error' | 'network-error' | 'validation-failed' | 'timeout'
   const [authMessage, setAuthMessage] = useState("");
+  // (no mostramos botón de guardar — cerramos modal automáticamente al completar firma)
   // (no usar file-asset temporal; el WebView usará getWebViewHTML())
+  const PENDING_SIGNATURES_KEY = "pending_signatures";
 
   // Obtener datos del usuario seleccionado
   const selectedUser = options.find((user) => user.id === value);
@@ -180,228 +184,183 @@ const FirmField = ({
   /**
    * Manejar mensajes desde el WebView (comunicación SFI Facial)
    */
-  const handleWebViewMessage = (event) => {
+  const handleWebViewMessage = async (event) => {
     try {
-      const data = JSON.parse(event.nativeEvent.data);
-      console.log("📥 Mensaje recibido desde WebView:", data);
+      const raw = event?.nativeEvent?.data;
+      if (!raw) return;
+      const msg = JSON.parse(raw);
+      const { type, ...payload } = msg;
 
-      switch (data.type) {
-        case "script-loaded":
-          setIsScriptLoaded(true);
-          setProcessStatus("✅ Librería SFI Facial cargada");
-          console.log("✅ Script SFI Facial cargado correctamente");
-          break;
+      console.log("📥 Mensaje desde WebView:", type, payload);
 
-        case "script-error":
-          setFirmError("Error al cargar la librería de firma digital");
-          setAuthStatus("error");
-          setAuthMessage("Error al cargar la librería de firma digital");
-          console.error("❌ Error cargando SFI Facial:", data.error);
-          break;
-
-        case "liveness-progress":
-          setProcessStatus(
-            `👤 ${data.instruction} (${Math.round(data.progress * 100)}%)`
-          );
-          setAuthStatus("loading");
-          console.log("👤 LIVENESS PROGRESS:", data);
-          break;
-
-        case "sign-validation-start":
-          setProcessStatus("🔍 Validando identidad...");
-          setAuthStatus("loading");
-          setAuthMessage("Procesando autenticación biométrica...");
-          console.log("🔍 SIGN VALIDATION START:", data);
-          break;
-
-        case "sign-validation-progress":
-          setProcessStatus(
-            `🔄 Validando: intento ${data.attempt}/${data.max_attempts}`
-          );
-          setAuthStatus("loading");
-          console.log("🔄 SIGN VALIDATION PROGRESS:", data);
-          break;
-
-        case "sign-validation-result":
-          if (data.success) {
-            setProcessStatus(
-              `✅ Autenticación exitosa: ${Math.round(data.confidence * 100)}% confianza`
-            );
-            setAuthStatus("success");
-            setAuthMessage(
-              `Identidad verificada con ${Math.round(data.confidence * 100)}% de confianza`
-            );
-            console.log("✅ SIGN VALIDATION SUCCESS:", data);
-          } else {
-            setProcessStatus(`❌ Autenticación fallida: ${data.message}`);
-            setAuthStatus("validation-failed");
-            setAuthMessage(
-              "Usuario no encontrado o problemas con la autenticación"
-            );
-            setFirmError(
-              "Usuario no encontrado o problemas con la autenticación"
-            );
-            console.log("❌ SIGN VALIDATION FAILED:", data);
-          }
-          break;
-
-        case "sign-request-start":
-          setProcessStatus("📤 Generando firma digital...");
-          console.log("📤 SIGN REQUEST START:", data);
-          break;
-
-        case "sign-request-progress":
-          setProcessStatus(
-            data.status === "uploading"
-              ? "📊 Enviando datos..."
-              : "⚙️ Procesando firma..."
-          );
-          console.log("📊 SIGN REQUEST PROGRESS:", data);
-          break;
-
-        case "sign-response":
-          if (data.success) {
-            setProcessStatus(`✅ Respuesta del servidor: ${data.message}`);
-            console.log("✅ SIGN RESPONSE SUCCESS:", data);
-          } else {
-            setProcessStatus(`❌ Error del servidor: ${data.message}`);
-            setAuthStatus("error");
-            setAuthMessage(
-              "Usuario no encontrado o problemas con la autenticación"
-            );
-            setFirmError(
-              "Usuario no encontrado o problemas con la autenticación"
-            );
-            console.log("❌ SIGN RESPONSE ERROR:", data);
-          }
-          break;
-
-        case "sign-success":
-          handleSignSuccess(data);
-          break;
-
-        case "sign-error":
-          handleSignError(data);
-          break;
-
-        case "sign-timeout-error":
-          setAuthStatus("timeout");
-          setAuthMessage(
-            "Tiempo de espera agotado - problemas con la autenticación"
-          );
-          setFirmError(
-            "Tiempo de espera agotado - problemas con la autenticación"
-          );
-          setIsLoading(false);
-          console.error("⏱️ SIGN TIMEOUT:", data);
-          break;
-
-        case "sign-network-error":
-          setAuthStatus("network-error");
-          setAuthMessage(
-            "Usuario no encontrado o problemas con la autenticación"
-          );
-          setFirmError(
-            "Usuario no encontrado o problemas con la autenticación"
-          );
-          setIsLoading(false);
-          console.error("🌐 SIGN NETWORK ERROR:", data);
-          break;
-
-        case "sign-validation-failed":
-          setAuthStatus("validation-failed");
-          setAuthMessage(
-            "Usuario no encontrado o problemas con la autenticación"
-          );
-          setFirmError(
-            "Usuario no encontrado o problemas con la autenticación"
-          );
-          setIsLoading(false);
-          console.error("🚫 SIGN VALIDATION INSUFFICIENT:", data);
-          break;
-
-        case "sign-start":
-          setProcessStatus("🚀 Iniciando autenticación biométrica...");
-          setAuthStatus("loading");
-          setAuthMessage("Iniciando proceso de autenticación...");
-          console.log("🚀 SIGN START:", data);
-          break;
-
-        default:
-          console.log(`🔍 EVENTO CAPTURADO: ${data.type}`, data);
-          break;
+      if (type === "script-loaded") {
+        setIsScriptLoaded(true);
+        setProcessStatus("Componente de firma listo");
+        return;
       }
-    } catch (error) {
-      console.error("❌ Error procesando mensaje de WebView:", error);
+
+      if (type === "script-error") {
+        setFirmError(payload.error || "Error cargando script");
+        setAuthStatus("error");
+        setProcessStatus("");
+        onFirmError?.(payload);
+        return;
+      }
+
+      if (type === "sign-start") {
+        setProcessStatus("Iniciando flujo de firma...");
+        setAuthStatus("loading");
+        return;
+      }
+
+      if (type === "sign-success" || type === "sign-response") {
+        handleSignSuccess(payload);
+        return;
+      }
+
+      if (type === "liveness-progress") {
+        setProcessStatus(`Liveness: ${payload.progress || ""}`);
+        return;
+      }
+
+      if (
+        type === "sign-error" ||
+        type === "sign-network-error" ||
+        type === "sign-timeout-error" ||
+        type === "sign-validation-failed"
+      ) {
+        setFirmError(payload || "Error en el proceso de firma");
+        setAuthStatus("error");
+        setProcessStatus("");
+        onFirmError?.(payload);
+        return;
+      }
+    } catch (e) {
+      console.warn("⚠️ handleWebViewMessage parse error:", e, event);
     }
   };
 
-  /**
-   * Manejar éxito de la firma
-   */
-  const handleSignSuccess = (data) => {
-    console.log("📥 Datos completos recibidos desde SFI Facial (firma):", data);
+  const handleSignSuccess = async (data = {}) => {
+    try {
+      console.log(
+        "📥 Datos completos recibidos desde SFI Facial (firma):",
+        data
+      );
 
-    setFirmData(data);
-    setFirmError(null);
-    setIsLoading(false);
-    setProcessStatus("🎉 Firma completada exitosamente");
-    setAuthStatus("success");
-    setAuthMessage("Autenticación y firma completadas exitosamente");
+      setFirmData(data);
+      setFirmError(null);
+      setIsLoading(false);
+      setProcessStatus("🎉 Firma completada exitosamente");
+      setAuthStatus("success");
+      setAuthMessage("Autenticación y firma completadas exitosamente");
 
-    const filteredFirmData = {
-      success: true,
-      person_id: data.person_id,
-      person_name: data.person_name,
-      qr_url: data.qr_url,
-    };
+      const filteredFirmData = {
+        success: true,
+        person_id: data.person_id || data.personId || data.person_id,
+        person_name: data.person_name || data.personName || data.name,
+        qr_url: data.qr_url || data.qrUrl || data.qr || null,
+        raw: data,
+      };
 
-    const completeFirmData = {
-      firmData: filteredFirmData,
-    };
+      const completeFirmData = { firmData: filteredFirmData };
 
-    console.log("📦 Datos filtrados que enviarás al padre:", completeFirmData);
+      console.log(
+        "📦 Datos filtrados que se pasarán al padre:",
+        completeFirmData
+      );
 
-    onFirmSuccess?.(completeFirmData);
-    onValueChange?.(completeFirmData);
+      try {
+        onFirmSuccess?.(completeFirmData);
+      } catch (e) {
+        console.warn("onFirmSuccess falló:", e);
+      }
+      try {
+        onValueChange?.(completeFirmData);
+      } catch (e) {
+        console.warn("onValueChange falló:", e);
+      }
 
-    if (autoCloseDelay > 0) {
-      setCountdown(Math.ceil(autoCloseDelay / 1000));
+      (async () => {
+        try {
+          const stored = await AsyncStorage.getItem(PENDING_SIGNATURES_KEY);
+          const arr = stored ? JSON.parse(stored) : [];
+          arr.push({
+            payload: completeFirmData,
+            person_id: filteredFirmData.person_id,
+            document_hash: documentHash || null,
+            savedAt: Date.now(),
+          });
+          await AsyncStorage.setItem(
+            PENDING_SIGNATURES_KEY,
+            JSON.stringify(arr)
+          );
+        } catch (e) {
+          console.warn("No se pudo encolar firma en AsyncStorage:", e);
+        }
+      })();
 
-      const countdownInterval = setInterval(() => {
-        setCountdown((prev) => {
-          if (prev <= 1) {
-            clearInterval(countdownInterval);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-
-      const timeoutId = setTimeout(() => {
-        clearInterval(countdownInterval);
+      setTimeout(() => {
         setShowModal(false);
-        setCountdown(0);
-      }, autoCloseDelay);
-
-      setAutoCloseTimeoutId(timeoutId);
+        resetStates();
+      }, 300);
+    } catch (e) {
+      console.error("Error procesando firma exitosa:", e);
+      onFirmError?.(e);
     }
   };
 
   /**
-   * Manejar error en la firma
+   * Guardar la firma: notifica al padre y encola para sincronización offline,
+   * luego cierra el modal (invocado por el botón "Guardar y cerrar").
    */
-  const handleSignError = (data) => {
-    const errorMessage = data.message || "Error desconocido en la firma";
+  const saveSignatureAndClose = async () => {
+    try {
+      if (!firmData) {
+        Alert.alert(
+          "Nada que guardar",
+          "No se encontró información de la firma."
+        );
+        return;
+      }
 
-    setAuthStatus("error");
-    setAuthMessage("Usuario no encontrado o problemas con la autenticación");
-    setFirmError("Usuario no encontrado o problemas con la autenticación");
-    setIsLoading(false);
-    setProcessStatus("💥 Error: Usuario no encontrado");
+      const filteredFirmData = {
+        success: true,
+        person_id: firmData.person_id,
+        person_name: firmData.person_name,
+        qr_url: firmData.qr_url,
+      };
+      const completeFirmData = { firmData: filteredFirmData };
 
-    console.error("💥 SIGN ERROR FINAL:", data);
-    onFirmError?.(data);
+      // 1) Notificar al padre para que lo incluya en el formulario
+      try {
+        onValueChange?.(completeFirmData);
+      } catch (e) {
+        console.warn("onValueChange falló:", e);
+      }
+
+      // 2) Encolar en AsyncStorage para sincronización offline
+      try {
+        const stored = await AsyncStorage.getItem(PENDING_SIGNATURES_KEY);
+        const arr = stored ? JSON.parse(stored) : [];
+        arr.push({
+          payload: completeFirmData,
+          person_id: filteredFirmData.person_id,
+          document_hash: documentHash || null,
+          savedAt: Date.now(),
+        });
+        await AsyncStorage.setItem(PENDING_SIGNATURES_KEY, JSON.stringify(arr));
+      } catch (e) {
+        console.warn("No se pudo encolar firma en AsyncStorage:", e);
+      }
+
+      // 3) Cerrar modal y limpiar estado
+      setShowModal(false);
+      // setShowSaveButton(false);
+      resetStates();
+    } catch (e) {
+      console.error("Error guardando firma:", e);
+      Alert.alert("Error", "No se pudo guardar la firma.");
+    }
   };
 
   /**
@@ -759,6 +718,15 @@ const FirmField = ({
                   </Text>
                 )}
               </View>
+              {/* {showSaveButton && (
+                <TouchableOpacity
+                  onPress={saveSignatureAndClose}
+                  style={styles.saveButton}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.saveButtonText}>Guardar y cerrar</Text>
+                </TouchableOpacity>
+              )} */}
               <TouchableOpacity
                 onPress={handleCloseModal}
                 style={styles.closeButton}
@@ -1000,6 +968,20 @@ const styles = StyleSheet.create({
   closeButtonText: {
     fontSize: 20,
     color: "#4A5568",
+  },
+  saveButton: {
+    marginRight: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: "#10B981",
+    borderRadius: 8,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  saveButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 13,
   },
   modalContent: {
     flex: 1,
