@@ -14,13 +14,20 @@
     },
     "ios": {
       "supportsTablet": true,
-      "icon": "./assets/icon-ios.png"
+      "icon": "./assets/icon-ios.png",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Se requiere la cámara para el reconocimiento facial",
+        "NSMicrophoneUsageDescription": "Se requiere el micrófono para el reconocimiento facial"
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
+      "permissions": [
+        "CAMERA"
+      ],
       "package": "com.mauro_morales.formssfi"
     },
     "web": {

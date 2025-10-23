@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   View,
   Text,
@@ -13,6 +13,9 @@ import {
 } from "react-native";
 import { Picker } from "@react-native-picker/picker";
 import { WebView } from "react-native-webview";
+import * as WebBrowser from "expo-web-browser";
+import * as Linking from "expo-linking";
+import { Asset } from "expo-asset";
 
 /**
  * Componente de Firma Digital para React Native
@@ -52,6 +55,9 @@ const FirmField = ({
   const [showModal, setShowModal] = useState(false);
   const [isScriptLoaded, setIsScriptLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSigning, setIsSigning] = useState(false);
+  const signingRef = useRef(false);
+  const processedDeepLinkRef = useRef(false);
   const [firmData, setFirmData] = useState(null);
   const [firmError, setFirmError] = useState(null);
   const [processStatus, setProcessStatus] = useState("");
@@ -59,6 +65,7 @@ const FirmField = ({
   const [countdown, setCountdown] = useState(0);
   const [authStatus, setAuthStatus] = useState("idle"); // 'idle' | 'loading' | 'success' | 'error' | 'network-error' | 'validation-failed' | 'timeout'
   const [authMessage, setAuthMessage] = useState("");
+  // (no usar file-asset temporal; el WebView usará getWebViewHTML())
 
   // Obtener datos del usuario seleccionado
   const selectedUser = options.find((user) => user.id === value);
@@ -109,12 +116,12 @@ const FirmField = ({
    * Iniciar proceso de firma
    */
   const handleFirmar = async () => {
+    if (signingRef.current) return;
     if (!selectedUser) {
       setFirmError("Debe seleccionar un usuario antes de firmar");
       Alert.alert("Error", "Debe seleccionar un usuario antes de firmar");
       return;
     }
-
     if (!documentHash) {
       setFirmError("No se ha proporcionado el hash del documento a firmar");
       Alert.alert(
@@ -124,35 +131,34 @@ const FirmField = ({
       return;
     }
 
-    // pedir permisos de cámara/micrófono (Android)
     const permsOk = await requestCameraPermissions();
     if (!permsOk) {
       Alert.alert(
         "Permisos necesarios",
-        "Se requieren permisos de cámara y micrófono para el reconocimiento facial."
+        "Se requiere permiso de cámara para el reconocimiento facial."
       );
       return;
     }
 
-    console.log("🖊️ Iniciando proceso de firma:", {
-      user: selectedUser,
-      documentHash,
-      apiUrl,
-    });
-
-    // Resetear estados
-    resetStates();
-    setProcessStatus("Iniciando proceso de firma...");
-    setAuthStatus("idle");
-    setAuthMessage("");
+    signingRef.current = true;
+    setIsSigning(true);
     setIsLoading(true);
-    setShowModal(true);
-    setIsScriptLoaded(false);
+    // setProcessStatus("Preparando página de firma...");
 
-    // Limpiar timeout anterior si existe
-    if (autoCloseTimeoutId) {
-      clearTimeout(autoCloseTimeoutId);
-      setAutoCloseTimeoutId(null);
+    // Abrir modal y renderizar el HTML generado por getWebViewHTML() dentro del WebView
+    try {
+      setProcessStatus("Abriendo componente de firma...");
+      setIsScriptLoaded(false);
+      setShowModal(true);
+    } catch (e) {
+      console.error("Error abriendo componente de firma:", e);
+      onFirmError?.(e);
+      Alert.alert("Error", "No se pudo abrir el componente de firma.");
+    } finally {
+      signingRef.current = false;
+      setIsSigning(false);
+      setIsLoading(false);
+      setProcessStatus("");
     }
   };
 
@@ -604,6 +610,59 @@ const FirmField = ({
     `;
   };
 
+  // Escuchar deep links (fallback cuando el navegador redirige a la app)
+  React.useEffect(() => {
+    const handleUrl = ({ url }) => {
+      if (!url || processedDeepLinkRef.current) return;
+      processedDeepLinkRef.current = true; // procesar solo una vez
+      try {
+        const u = new URL(url);
+        const params = Object.fromEntries(u.searchParams.entries());
+        const payload = params.payload
+          ? JSON.parse(decodeURIComponent(params.payload))
+          : params;
+        console.log("🔁 Deep link recibido:", payload);
+        setFirmData(payload.firmData || payload);
+        setAuthStatus("success");
+        onFirmSuccess?.(payload);
+        onValueChange?.(payload);
+      } catch (e) {
+        console.warn("No se pudo parsear deep link:", e);
+      }
+    };
+
+    // Suscribir y limpiar de forma compatible entre RN versiones
+    let subscription;
+    try {
+      subscription =
+        Linking.addEventListener?.("url", handleUrl) ||
+        Linking.addEventListener("url", handleUrl);
+    } catch (e) {
+      // fallback para versiones antiguas
+      Linking.addEventListener("url", handleUrl);
+    }
+
+    // Sólo comprobar initial URL una vez (no dispara re-render múltiples veces)
+    (async () => {
+      try {
+        const initial = await Linking.getInitialURL();
+        if (initial && !processedDeepLinkRef.current)
+          handleUrl({ url: initial });
+      } catch (e) {
+        /* ignore */
+      }
+    })();
+
+    return () => {
+      try {
+        if (subscription && subscription.remove) subscription.remove();
+        else
+          Linking.removeEventListener &&
+            Linking.removeEventListener("url", handleUrl);
+      } catch (e) {}
+    };
+  }, [onFirmSuccess, onValueChange]);
+
   return (
     <View style={styles.container}>
       {/* Label */}
@@ -644,9 +703,10 @@ const FirmField = ({
         <TouchableOpacity
           style={[
             styles.firmButton,
-            (!value || value === "" || disabled) && styles.firmButtonDisabled,
+            (!value || value === "" || disabled || isSigning) &&
+              styles.firmButtonDisabled,
           ]}
-          disabled={!value || value === "" || disabled}
+          disabled={!value || value === "" || disabled || isSigning}
           onPress={handleFirmar}
           activeOpacity={0.7}
         >
@@ -753,7 +813,7 @@ const FirmField = ({
                 </View>
               )}
 
-              {/* WebView con SFI Facial */}
+              {/* WebView con SFI Facial -> ahora NO se renderiza en la app, usamos navegador externo */}
               {showModal ? (
                 <View style={styles.webViewContainer}>
                   <WebView
@@ -762,21 +822,18 @@ const FirmField = ({
                       baseUrl:
                         "https://reconocimiento-facial-safe.service.saferut.com/index.js",
                     }}
-                    onMessage={handleWebViewMessage}
+                    originWhitelist={["*"]}
                     javaScriptEnabled={true}
                     domStorageEnabled={true}
                     mediaPlaybackRequiresUserAction={false}
                     allowsInlineMediaPlayback={true}
-                    originWhitelist={["*"]}
                     mixedContentMode="always"
                     allowUniversalAccessFromFileURLs={true}
                     startInLoadingState={true}
-                    onLoad={() => {
-                      console.log("WebView cargado (onLoad)");
-                    }}
-                    onError={(syntheticEvent) => {
-                      const { nativeEvent } = syntheticEvent;
-                      console.error("WebView error:", nativeEvent);
+                    onMessage={handleWebViewMessage}
+                    onError={(e) => {
+                      console.error("WebView error:", e.nativeEvent || e);
+                      setFirmError("Error cargando componente de firma");
                     }}
                     style={styles.webView}
                   />
@@ -1010,19 +1067,30 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#4A5568",
   },
-  countdownContainer: {
-    marginTop: 16,
-    padding: 12,
-    backgroundColor: "#FEF3C7",
+  externalNoticeContainer: {
+    height: 240,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+    backgroundColor: "#F7FAFC",
     borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#FDE68A",
+    marginBottom: 16,
   },
-  countdownText: {
-    fontSize: 13,
-    color: "#92400E",
+  externalNoticeText: {
     textAlign: "center",
-    fontWeight: "600",
+    color: "#2D3748",
+    marginBottom: 16,
+    fontSize: 14,
+  },
+  openBrowserButton: {
+    backgroundColor: "#0F8593",
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+  },
+  openBrowserButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
   },
 });
 
