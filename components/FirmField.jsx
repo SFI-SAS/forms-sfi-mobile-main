@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   View,
   Text,
@@ -8,14 +8,19 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  Platform,
+  PermissionsAndroid,
 } from "react-native";
 import { Picker } from "@react-native-picker/picker";
 import { WebView } from "react-native-webview";
+import * as WebBrowser from "expo-web-browser";
+import * as Linking from "expo-linking";
+import { Asset } from "expo-asset";
 
 /**
  * Componente de Firma Digital para React Native
  * Adaptado desde el componente TSX web con SFI Facial
- * 
+ *
  * @param {Object} props
  * @param {string} props.label - Etiqueta del campo
  * @param {Array} props.options - Array de usuarios: [{id, name, num_document}]
@@ -50,6 +55,9 @@ const FirmField = ({
   const [showModal, setShowModal] = useState(false);
   const [isScriptLoaded, setIsScriptLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSigning, setIsSigning] = useState(false);
+  const signingRef = useRef(false);
+  const processedDeepLinkRef = useRef(false);
   const [firmData, setFirmData] = useState(null);
   const [firmError, setFirmError] = useState(null);
   const [processStatus, setProcessStatus] = useState("");
@@ -57,6 +65,7 @@ const FirmField = ({
   const [countdown, setCountdown] = useState(0);
   const [authStatus, setAuthStatus] = useState("idle"); // 'idle' | 'loading' | 'success' | 'error' | 'network-error' | 'validation-failed' | 'timeout'
   const [authMessage, setAuthMessage] = useState("");
+  // (no usar file-asset temporal; el WebView usará getWebViewHTML())
 
   // Obtener datos del usuario seleccionado
   const selectedUser = options.find((user) => user.id === value);
@@ -75,40 +84,81 @@ const FirmField = ({
   };
 
   /**
+   * Solicitar permisos de cámara en Android (solo cámara)
+   */
+  const requestCameraPermissions = async () => {
+    if (Platform.OS === "android") {
+      try {
+        const result = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.CAMERA,
+          {
+            title: "Permiso de cámara",
+            message:
+              "Se requiere acceso a la cámara para el reconocimiento facial",
+            buttonNeutral: "Preguntar después",
+            buttonNegative: "Cancelar",
+            buttonPositive: "Aceptar",
+          }
+        );
+
+        return result === PermissionsAndroid.RESULTS.GRANTED;
+      } catch (e) {
+        console.error("Error pidiendo permiso de cámara:", e);
+        return false;
+      }
+    }
+
+    // iOS: permisos gestionados por Info.plist / WKWebView
+    return true;
+  };
+
+  /**
    * Iniciar proceso de firma
    */
-  const handleFirmar = () => {
+  const handleFirmar = async () => {
+    if (signingRef.current) return;
     if (!selectedUser) {
       setFirmError("Debe seleccionar un usuario antes de firmar");
       Alert.alert("Error", "Debe seleccionar un usuario antes de firmar");
       return;
     }
-
     if (!documentHash) {
       setFirmError("No se ha proporcionado el hash del documento a firmar");
-      Alert.alert("Error", "No se ha proporcionado el hash del documento a firmar");
+      Alert.alert(
+        "Error",
+        "No se ha proporcionado el hash del documento a firmar"
+      );
       return;
     }
 
-    console.log("🖊️ Iniciando proceso de firma:", {
-      user: selectedUser,
-      documentHash,
-      apiUrl,
-    });
+    const permsOk = await requestCameraPermissions();
+    if (!permsOk) {
+      Alert.alert(
+        "Permisos necesarios",
+        "Se requiere permiso de cámara para el reconocimiento facial."
+      );
+      return;
+    }
 
-    // Resetear estados
-    resetStates();
-    setProcessStatus("Iniciando proceso de firma...");
-    setAuthStatus("idle");
-    setAuthMessage("");
+    signingRef.current = true;
+    setIsSigning(true);
     setIsLoading(true);
-    setShowModal(true);
-    setIsScriptLoaded(false);
+    // setProcessStatus("Preparando página de firma...");
 
-    // Limpiar timeout anterior si existe
-    if (autoCloseTimeoutId) {
-      clearTimeout(autoCloseTimeoutId);
-      setAutoCloseTimeoutId(null);
+    // Abrir modal y renderizar el HTML generado por getWebViewHTML() dentro del WebView
+    try {
+      setProcessStatus("Abriendo componente de firma...");
+      setIsScriptLoaded(false);
+      setShowModal(true);
+    } catch (e) {
+      console.error("Error abriendo componente de firma:", e);
+      onFirmError?.(e);
+      Alert.alert("Error", "No se pudo abrir el componente de firma.");
+    } finally {
+      signingRef.current = false;
+      setIsSigning(false);
+      setIsLoading(false);
+      setProcessStatus("");
     }
   };
 
@@ -150,7 +200,9 @@ const FirmField = ({
           break;
 
         case "liveness-progress":
-          setProcessStatus(`👤 ${data.instruction} (${Math.round(data.progress * 100)}%)`);
+          setProcessStatus(
+            `👤 ${data.instruction} (${Math.round(data.progress * 100)}%)`
+          );
           setAuthStatus("loading");
           console.log("👤 LIVENESS PROGRESS:", data);
           break;
@@ -163,22 +215,32 @@ const FirmField = ({
           break;
 
         case "sign-validation-progress":
-          setProcessStatus(`🔄 Validando: intento ${data.attempt}/${data.max_attempts}`);
+          setProcessStatus(
+            `🔄 Validando: intento ${data.attempt}/${data.max_attempts}`
+          );
           setAuthStatus("loading");
           console.log("🔄 SIGN VALIDATION PROGRESS:", data);
           break;
 
         case "sign-validation-result":
           if (data.success) {
-            setProcessStatus(`✅ Autenticación exitosa: ${Math.round(data.confidence * 100)}% confianza`);
+            setProcessStatus(
+              `✅ Autenticación exitosa: ${Math.round(data.confidence * 100)}% confianza`
+            );
             setAuthStatus("success");
-            setAuthMessage(`Identidad verificada con ${Math.round(data.confidence * 100)}% de confianza`);
+            setAuthMessage(
+              `Identidad verificada con ${Math.round(data.confidence * 100)}% de confianza`
+            );
             console.log("✅ SIGN VALIDATION SUCCESS:", data);
           } else {
             setProcessStatus(`❌ Autenticación fallida: ${data.message}`);
             setAuthStatus("validation-failed");
-            setAuthMessage("Usuario no encontrado o problemas con la autenticación");
-            setFirmError("Usuario no encontrado o problemas con la autenticación");
+            setAuthMessage(
+              "Usuario no encontrado o problemas con la autenticación"
+            );
+            setFirmError(
+              "Usuario no encontrado o problemas con la autenticación"
+            );
             console.log("❌ SIGN VALIDATION FAILED:", data);
           }
           break;
@@ -189,7 +251,11 @@ const FirmField = ({
           break;
 
         case "sign-request-progress":
-          setProcessStatus(data.status === "uploading" ? "📊 Enviando datos..." : "⚙️ Procesando firma...");
+          setProcessStatus(
+            data.status === "uploading"
+              ? "📊 Enviando datos..."
+              : "⚙️ Procesando firma..."
+          );
           console.log("📊 SIGN REQUEST PROGRESS:", data);
           break;
 
@@ -200,8 +266,12 @@ const FirmField = ({
           } else {
             setProcessStatus(`❌ Error del servidor: ${data.message}`);
             setAuthStatus("error");
-            setAuthMessage("Usuario no encontrado o problemas con la autenticación");
-            setFirmError("Usuario no encontrado o problemas con la autenticación");
+            setAuthMessage(
+              "Usuario no encontrado o problemas con la autenticación"
+            );
+            setFirmError(
+              "Usuario no encontrado o problemas con la autenticación"
+            );
             console.log("❌ SIGN RESPONSE ERROR:", data);
           }
           break;
@@ -216,24 +286,36 @@ const FirmField = ({
 
         case "sign-timeout-error":
           setAuthStatus("timeout");
-          setAuthMessage("Tiempo de espera agotado - problemas con la autenticación");
-          setFirmError("Tiempo de espera agotado - problemas con la autenticación");
+          setAuthMessage(
+            "Tiempo de espera agotado - problemas con la autenticación"
+          );
+          setFirmError(
+            "Tiempo de espera agotado - problemas con la autenticación"
+          );
           setIsLoading(false);
           console.error("⏱️ SIGN TIMEOUT:", data);
           break;
 
         case "sign-network-error":
           setAuthStatus("network-error");
-          setAuthMessage("Usuario no encontrado o problemas con la autenticación");
-          setFirmError("Usuario no encontrado o problemas con la autenticación");
+          setAuthMessage(
+            "Usuario no encontrado o problemas con la autenticación"
+          );
+          setFirmError(
+            "Usuario no encontrado o problemas con la autenticación"
+          );
           setIsLoading(false);
           console.error("🌐 SIGN NETWORK ERROR:", data);
           break;
 
         case "sign-validation-failed":
           setAuthStatus("validation-failed");
-          setAuthMessage("Usuario no encontrado o problemas con la autenticación");
-          setFirmError("Usuario no encontrado o problemas con la autenticación");
+          setAuthMessage(
+            "Usuario no encontrado o problemas con la autenticación"
+          );
+          setFirmError(
+            "Usuario no encontrado o problemas con la autenticación"
+          );
           setIsLoading(false);
           console.error("🚫 SIGN VALIDATION INSUFFICIENT:", data);
           break;
@@ -342,7 +424,9 @@ const FirmField = ({
       case "timeout":
         return {
           message: "❌ Autenticación Fallida",
-          subMessage: authMessage || "Usuario no encontrado o problemas con la autenticación",
+          subMessage:
+            authMessage ||
+            "Usuario no encontrado o problemas con la autenticación",
           bgColor: "#FEE2E2",
           borderColor: "#FECACA",
           textColor: "#991B1B",
@@ -526,6 +610,59 @@ const FirmField = ({
     `;
   };
 
+  // Escuchar deep links (fallback cuando el navegador redirige a la app)
+  React.useEffect(() => {
+    const handleUrl = ({ url }) => {
+      if (!url || processedDeepLinkRef.current) return;
+      processedDeepLinkRef.current = true; // procesar solo una vez
+      try {
+        const u = new URL(url);
+        const params = Object.fromEntries(u.searchParams.entries());
+        const payload = params.payload
+          ? JSON.parse(decodeURIComponent(params.payload))
+          : params;
+        console.log("🔁 Deep link recibido:", payload);
+        setFirmData(payload.firmData || payload);
+        setAuthStatus("success");
+        onFirmSuccess?.(payload);
+        onValueChange?.(payload);
+      } catch (e) {
+        console.warn("No se pudo parsear deep link:", e);
+      }
+    };
+
+    // Suscribir y limpiar de forma compatible entre RN versiones
+    let subscription;
+    try {
+      subscription =
+        Linking.addEventListener?.("url", handleUrl) ||
+        Linking.addEventListener("url", handleUrl);
+    } catch (e) {
+      // fallback para versiones antiguas
+      Linking.addEventListener("url", handleUrl);
+    }
+
+    // Sólo comprobar initial URL una vez (no dispara re-render múltiples veces)
+    (async () => {
+      try {
+        const initial = await Linking.getInitialURL();
+        if (initial && !processedDeepLinkRef.current)
+          handleUrl({ url: initial });
+      } catch (e) {
+        /* ignore */
+      }
+    })();
+
+    return () => {
+      try {
+        if (subscription && subscription.remove) subscription.remove();
+        else
+          Linking.removeEventListener &&
+            Linking.removeEventListener("url", handleUrl);
+      } catch (e) {}
+    };
+  }, [onFirmSuccess, onValueChange]);
+
   return (
     <View style={styles.container}>
       {/* Label */}
@@ -540,7 +677,10 @@ const FirmField = ({
           <Picker
             selectedValue={value || ""}
             onValueChange={(itemValue) => {
-              console.log("🔄 Picker onChange - valor seleccionado:", itemValue);
+              console.log(
+                "🔄 Picker onChange - valor seleccionado:",
+                itemValue
+              );
               if (onChange) {
                 // Llamar onChange con el formato correcto
                 onChange({ target: { value: itemValue } });
@@ -563,9 +703,10 @@ const FirmField = ({
         <TouchableOpacity
           style={[
             styles.firmButton,
-            (!value || value === "" || disabled) && styles.firmButtonDisabled,
+            (!value || value === "" || disabled || isSigning) &&
+              styles.firmButtonDisabled,
           ]}
-          disabled={!value || value === "" || disabled}
+          disabled={!value || value === "" || disabled || isSigning}
           onPress={handleFirmar}
           activeOpacity={0.7}
         >
@@ -590,7 +731,9 @@ const FirmField = ({
       {/* Estado de firma exitosa */}
       {firmData && authStatus === "success" && (
         <View style={styles.successContainer}>
-          <Text style={styles.successTitle}>✅ Firma completada exitosamente</Text>
+          <Text style={styles.successTitle}>
+            ✅ Firma completada exitosamente
+          </Text>
           <Text style={styles.successText}>
             Usuario: {firmData.person_name} • ID: {firmData.person_id}
           </Text>
@@ -670,21 +813,29 @@ const FirmField = ({
                 </View>
               )}
 
-              {/* WebView con SFI Facial */}
-              {showModal && selectedUser && documentHash ? (
+              {/* WebView con SFI Facial -> ahora NO se renderiza en la app, usamos navegador externo */}
+              {showModal ? (
                 <View style={styles.webViewContainer}>
                   <WebView
-                    source={{ html: getWebViewHTML() }}
-                    onMessage={handleWebViewMessage}
+                    source={{
+                      html: getWebViewHTML(),
+                      baseUrl:
+                        "https://reconocimiento-facial-safe.service.saferut.com/index.js",
+                    }}
+                    originWhitelist={["*"]}
                     javaScriptEnabled={true}
                     domStorageEnabled={true}
                     mediaPlaybackRequiresUserAction={false}
                     allowsInlineMediaPlayback={true}
-                    style={styles.webView}
-                    onError={(syntheticEvent) => {
-                      const { nativeEvent } = syntheticEvent;
-                      console.error("WebView error:", nativeEvent);
+                    mixedContentMode="always"
+                    allowUniversalAccessFromFileURLs={true}
+                    startInLoadingState={true}
+                    onMessage={handleWebViewMessage}
+                    onError={(e) => {
+                      console.error("WebView error:", e.nativeEvent || e);
+                      setFirmError("Error cargando componente de firma");
                     }}
+                    style={styles.webView}
                   />
                 </View>
               ) : (
@@ -916,19 +1067,30 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#4A5568",
   },
-  countdownContainer: {
-    marginTop: 16,
-    padding: 12,
-    backgroundColor: "#FEF3C7",
+  externalNoticeContainer: {
+    height: 240,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+    backgroundColor: "#F7FAFC",
     borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#FDE68A",
+    marginBottom: 16,
   },
-  countdownText: {
-    fontSize: 13,
-    color: "#92400E",
+  externalNoticeText: {
     textAlign: "center",
-    fontWeight: "600",
+    color: "#2D3748",
+    marginBottom: 16,
+    fontSize: 14,
+  },
+  openBrowserButton: {
+    backgroundColor: "#0F8593",
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+  },
+  openBrowserButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
   },
 });
 
