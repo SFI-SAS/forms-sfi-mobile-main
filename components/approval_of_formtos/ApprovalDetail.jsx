@@ -312,121 +312,255 @@ export default function ApprovalDetail() {
             console.error("❌ Error saving offline action:", e);
         }
     };
+    const validateFiles = (files) => {
+        const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB por archivo
+        const MAX_TOTAL_SIZE = 50 * 1024 * 1024; // 50MB total
 
-    const handleSubmitApproval = async (status, message, files = []) => {
-        if (!form || isSubmitting) return;
+        if (files.length === 0) return { valid: true };
 
-        const approver = form.all_approvers.find((ap) => ap.status === "pendiente");
-        if (!approver) {
-            Alert.alert("Error", "No se encontró un aprobador pendiente.");
+        const totalSize = files.reduce((sum, file) => sum + (file.size || 0), 0);
+
+        // Validar archivos individuales
+        for (const file of files) {
+            if (file.size > MAX_FILE_SIZE) {
+                return {
+                    valid: false,
+                    message: `El archivo "${file.name}" es muy grande. Máximo 10MB por archivo.`
+                };
+            }
+        }
+
+        // Validar tamaño total
+        if (totalSize > MAX_TOTAL_SIZE) {
+            return {
+                valid: false,
+                message: `El tamaño total de los archivos (${formatFileSize(totalSize)}) excede el límite de 50MB.`
+            };
+        }
+
+        return { valid: true };
+    };
+const handleSubmitApproval = async (status, message, files = []) => {
+    if (!form || isSubmitting) return;
+
+    const approver = form.all_approvers.find((ap) => ap.status === "pendiente");
+    if (!approver) {
+        Alert.alert("Error", "No se encontró un aprobador pendiente.");
+        return;
+    }
+    
+    const validation = validateFiles(files);
+    if (!validation.valid) {
+        Alert.alert("Archivos muy grandes", validation.message);
+        return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+        const net = await NetInfo.fetch();
+
+        if (!net.isConnected) {
+            await saveOfflineApprovalAction(form.response_id, status, message, files);
+            Alert.alert(
+                "Guardado offline",
+                `La ${status === "aprobado" ? "aprobación" : "rechazo"} se guardó y se sincronizará cuando haya conexión.`
+            );
+            setShowApprovalModal(false);
+            router.back();
             return;
         }
 
-        setIsSubmitting(true);
+        console.log("🌐 Modo online - Verificando token...");
+        const token = await AsyncStorage.getItem("authToken");
 
-        try {
-            const net = await NetInfo.fetch();
+        if (!token) {
+            console.log("❌ No se encontró token");
+            await handleAuthError(new Error("No authentication token found"));
+            return;
+        }
 
-            if (!net.isConnected) {
-                // Modo offline
-                await saveOfflineApprovalAction(form.response_id, status, message, files);
-                Alert.alert(
-                    "Guardado offline",
-                    `La ${status === "aprobado" ? "aprobación" : "rechazo"} se guardó y se sincronizará cuando haya conexión.`
-                );
-                setShowApprovalModal(false);
-                router.back();
-                return;
-            }
+        console.log("✅ Token encontrado:", token.substring(0, 30) + "...");
+        const backendUrl = await getBackendUrl();
 
-            // Modo online
-            const token = await AsyncStorage.getItem("authToken");
+        console.log("📦 Preparando FormData...");
+        const formData = new FormData();
+        
+        const updateData = {
+            status,
+            message,
+            selectedSequence: approver.sequence_number,
+        };
 
-            // ✅ CAMBIO 1: Verificar token antes de continuar
-            if (!token) {
-                await handleAuthError(new Error("No authentication token found"));
-                return;
-            }
+        formData.append("update_data_json", JSON.stringify(updateData));
 
-            const backendUrl = await getBackendUrl();
+        if (files && files.length > 0) {
+            console.log("📎 Procesando", files.length, "archivo(s)...");
+            
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                
+                if (!file.uri) {
+                    console.warn(`⚠️ Archivo ${i} sin URI - saltando`);
+                    continue;
+                }
 
-            const formData = new FormData();
-            const updateData = {
-                status,
-                message,
-                selectedSequence: approver.sequence_number,
-            };
+                try {
+                    const fileInfo = await FileSystem.getInfoAsync(file.uri);
+                    
+                    if (!fileInfo.exists) {
+                        console.warn(`⚠️ Archivo ${file.name} no existe`);
+                        continue;
+                    }
+                    
+                    console.log(`✅ Archivo ${i + 1}/${files.length}: ${file.name} (${formatFileSize(fileInfo.size)})`);
+                } catch (fileCheckError) {
+                    console.warn(`⚠️ No se pudo verificar ${file.name}`);
+                }
 
-            formData.append("update_data_json", JSON.stringify(updateData));
-
-            // Agregar archivos
-            for (const file of files) {
                 formData.append("files", {
                     uri: file.uri,
-                    name: file.name,
+                    name: file.name || `archivo_${i + 1}`,
                     type: file.mimeType || file.type || "application/octet-stream",
                 });
             }
+            
+            console.log(`✅ ${files.length} archivo(s) listos para enviar`);
+        } else {
+            console.log("ℹ️ No hay archivos adjuntos");
+        }
 
-            const response = await fetch(
-                `${backendUrl}/approvers/update-response-approval/${form.response_id}`,
-                {
-                    method: "PUT",
-                    headers: {
-                        Authorization: `Bearer ${token}`,
-                    },
-                    body: formData,
-                }
-            );
+        const timeoutDuration = files.length > 0 ? 180000 : 60000;
+        console.log(`⏱️ Timeout: ${timeoutDuration / 1000} segundos`);
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => {
+            controller.abort();
+            console.log(`⏱️ ❌ Timeout alcanzado`);
+        }, timeoutDuration);
 
-            // ✅ CAMBIO 2: Verificar si la respuesta es 401 Unauthorized
+        const endpoint = `${backendUrl}/approvers/update-response-approval/${form.response_id}`;
+        console.log("🚀 Enviando a:", endpoint);
+
+        try {
+            const response = await fetch(endpoint, {
+                method: "PUT",
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                },
+                body: formData,
+                signal: controller.signal,
+            });
+
+            clearTimeout(timeoutId);
+
+            console.log("📥 Respuesta:", response.status, response.statusText);
+
             if (response.status === 401) {
-                await handleAuthError(new Error("Unauthorized - Token inválido"));
+                console.log("❌ Error 401 - Token inválido");
+                
+                let errorDetail = "";
+                try {
+                    const errorText = await response.text();
+                    const errorData = JSON.parse(errorText);
+                    errorDetail = errorData.detail || errorData.message || "";
+                } catch (e) {
+                    console.log("No se pudo parsear error 401");
+                }
+                
+                await handleAuthError(new Error(`Unauthorized: ${errorDetail}`));
                 return;
             }
 
-            const data = await response.json();
+            let responseData;
+            try {
+                const responseText = await response.text();
+                console.log("📄 Respuesta:", responseText.substring(0, 200));
+                responseData = responseText ? JSON.parse(responseText) : {};
+            } catch (parseError) {
+                console.error("❌ Error parseando respuesta:", parseError);
+                responseData = { detail: "Error al procesar respuesta" };
+            }
 
             if (response.ok) {
+                console.log("✅ ¡Aprobación exitosa!");
                 Alert.alert(
                     "Éxito",
-                    `Formulario ${status === "aprobado" ? "aprobado" : "rechazado"} exitosamente.`
+                    `Formulario ${status === "aprobado" ? "aprobado" : "rechazado"} correctamente.`
                 );
                 setShowApprovalModal(false);
                 router.back();
             } else {
-                throw new Error(data?.detail || "Error al actualizar la aprobación");
+                console.error("❌ Error del servidor:", response.status, responseData);
+                throw new Error(responseData?.detail || `Error ${response.status}`);
             }
-        } catch (error) {
-            console.error("Error al actualizar la aprobación:", error);
 
-            // ✅ CAMBIO 3: Verificar si es error de autenticación
-            const isAuthError = await handleAuthError(error);
-
-            // Si no es error de autenticación, mostrar alerta genérica
-            if (!isAuthError) {
+        } catch (fetchError) {
+            clearTimeout(timeoutId);
+            
+            if (fetchError.name === 'AbortError') {
+                console.log("⏱️ ❌ Timeout");
                 Alert.alert(
-                    "Error",
-                    "No se pudo enviar la aprobación. Se guardará para sincronizar offline."
+                    "Tiempo agotado",
+                    "La petición tardó demasiado. Intente con archivos más pequeños."
                 );
-                await saveOfflineApprovalAction(form.response_id, status, message, files);
+                return;
             }
-
-            setShowApprovalModal(false);
-            router.back();
-        } finally {
-            setIsSubmitting(false);
+            
+            console.error("❌ Error en fetch:", fetchError.message);
+            throw fetchError;
         }
-    };
+
+    } catch (error) {
+        console.error("❌ ERROR:", error.message);
+        
+        const isAuthError = await handleAuthError(error);
+
+        if (!isAuthError) {
+            if (files.length > 0) {
+                Alert.alert(
+                    "Error al enviar",
+                    `No se pudo enviar con archivos: ${error.message}\n\n¿Qué desea hacer?`,
+                    [
+                        {
+                            text: "Intentar de nuevo",
+                            style: "cancel"
+                        },
+                        {
+                            text: "Guardar sin archivos",
+                            onPress: async () => {
+                                await saveOfflineApprovalAction(form.response_id, status, message, []);
+                                Alert.alert("Guardado", "Se guardó sin archivos para sincronizar después.");
+                                setShowApprovalModal(false);
+                                router.back();
+                            }
+                        }
+                    ]
+                );
+            } else {
+                Alert.alert("Error", `No se pudo enviar: ${error.message}\n\nSe guardará offline.`);
+                await saveOfflineApprovalAction(form.response_id, status, message, files);
+                setShowApprovalModal(false);
+                router.back();
+            }
+        } else {
+            setShowApprovalModal(false);
+        }
+
+    } finally {
+        setIsSubmitting(false);
+        console.log("🏁 Finalizado");
+    }
+};
 
     useEffect(() => {
-    if (showSuccessNotification) {
-        const timer = setTimeout(() => {
-            setShowSuccessNotification(false);
-        }, 2000);
-        return () => clearTimeout(timer);
-    }
-}, [showSuccessNotification]);
+        if (showSuccessNotification) {
+            const timer = setTimeout(() => {
+                setShowSuccessNotification(false);
+            }, 2000);
+            return () => clearTimeout(timer);
+        }
+    }, [showSuccessNotification]);
     const handleFillForm = async (formId, formTitle, requirementId) => {
         try {
             const token = await AsyncStorage.getItem("authToken");
@@ -486,35 +620,35 @@ export default function ApprovalDetail() {
 
     };
 
-const pickFiles = async () => {
-    try {
-        const result = await DocumentPicker.getDocumentAsync({
-            type: "*/*",
-            multiple: true,
-            copyToCacheDirectory: true,
-        });
+    const pickFiles = async () => {
+        try {
+            const result = await DocumentPicker.getDocumentAsync({
+                type: "*/*",
+                multiple: true,
+                copyToCacheDirectory: true,
+            });
 
-        // ✅ CORRECCIÓN: Manejar correctamente archivos múltiples
-        if (!result.canceled && result.assets) {
-            // DocumentPicker ahora retorna result.assets como array
-            const newFiles = result.assets.map(asset => ({
-                uri: asset.uri,
-                name: asset.name,
-                type: asset.mimeType || 'application/octet-stream',
-                size: asset.size,
-                mimeType: asset.mimeType
-            }));
-            
-            setSelectedFiles((prev) => [...prev, ...newFiles]);
-            console.log(`✅ ${newFiles.length} archivo(s) seleccionado(s)`);
-        } else if (result.canceled) {
-            console.log('📌 Selección de archivos cancelada');
+            // ✅ CORRECCIÓN: Manejar correctamente archivos múltiples
+            if (!result.canceled && result.assets) {
+                // DocumentPicker ahora retorna result.assets como array
+                const newFiles = result.assets.map(asset => ({
+                    uri: asset.uri,
+                    name: asset.name,
+                    type: asset.mimeType || 'application/octet-stream',
+                    size: asset.size,
+                    mimeType: asset.mimeType
+                }));
+
+                setSelectedFiles((prev) => [...prev, ...newFiles]);
+                console.log(`✅ ${newFiles.length} archivo(s) seleccionado(s)`);
+            } else if (result.canceled) {
+                console.log('📌 Selección de archivos cancelada');
+            }
+        } catch (error) {
+            console.error("❌ Error picking files:", error);
+            Alert.alert("Error", "No se pudieron seleccionar los archivos");
         }
-    } catch (error) {
-        console.error("❌ Error picking files:", error);
-        Alert.alert("Error", "No se pudieron seleccionar los archivos");
-    }
-};
+    };
 
     const removeFile = (index) => {
         setSelectedFiles((prev) => prev.filter((_, i) => i !== index));

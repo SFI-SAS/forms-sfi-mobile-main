@@ -90,21 +90,7 @@ export function Main() {
     }, [])
   );
 
-  useEffect(() => {
-    const handleAppStateChange = async (nextAppState) => {
-      if (nextAppState === "background" || nextAppState === "inactive") {
-        await AsyncStorage.removeItem("authToken");
-        await AsyncStorage.setItem("isLoggedOut", "true");
-      }
-    };
-    const subscription = AppState.addEventListener(
-      "change",
-      handleAppStateChange
-    );
-    return () => {
-      subscription.remove();
-    };
-  }, []);
+
 
   useEffect(() => {
     const checkToken = async () => {

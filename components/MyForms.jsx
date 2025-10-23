@@ -11,6 +11,7 @@ import {
   Dimensions,
   ActivityIndicator,
   TextInput,
+  StatusBar,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
@@ -58,11 +59,9 @@ export default function MyForms() {
     }, [])
   );
 
-  // Función para manejar errores de autenticación
   const handleAuthError = async (error) => {
     const errorMessage = error?.message || error?.toString() || "";
     
-    // Detectar si es un error de autenticación
     if (
       errorMessage.includes("No authentication token") ||
       errorMessage.includes("authentication token") ||
@@ -71,41 +70,38 @@ export default function MyForms() {
     ) {
       console.log("🔒 Token inválido o ausente. Cerrando sesión...");
       
-      // Limpiar datos de sesión
       await AsyncStorage.setItem("isLoggedOut", "true");
       await AsyncStorage.removeItem("authToken");
       
-      // Mostrar alerta y redirigir al login
       Alert.alert(
-        "Sesión Expirada",
-        "Tu sesión ha expirado o no es válida. Por favor, inicia sesión nuevamente.",
+        "Session Expired",
+        "Your session has expired or is invalid. Please log in again.",
         [
           {
-            text: "Aceptar",
+            text: "Accept",
             onPress: () => router.replace("/"),
           },
         ],
         { cancelable: false }
       );
       
-      return true; // Indica que se manejó un error de autenticación
+      return true;
     }
     
-    return false; // No es un error de autenticación
+    return false;
   };
 
-  // Verificar token al cargar la pantalla
   useEffect(() => {
     const checkAuthToken = async () => {
       const token = await AsyncStorage.getItem("authToken");
       if (!token) {
         console.log("🔒 No hay token al cargar MyForms. Redirigiendo al login...");
         Alert.alert(
-          "Sesión no válida",
-          "No se encontró una sesión activa. Por favor, inicia sesión.",
+          "Invalid Session",
+          "No active session found. Please log in.",
           [
             {
-              text: "Aceptar",
+              text: "Accept",
               onPress: () => router.replace("/"),
             },
           ],
@@ -121,13 +117,11 @@ export default function MyForms() {
     handleViewForms();
   }, []);
 
-  // Cargar formularios enviados y sus respuestas (offline primero, si no online)
   const handleViewForms = async () => {
     setLoading(true);
     try {
       const accessToken = await AsyncStorage.getItem("authToken");
       
-      // Verificar token antes de cargar formularios
       if (!accessToken) {
         console.log("🔒 No hay token disponible en MyForms");
         setLoading(false);
@@ -137,7 +131,6 @@ export default function MyForms() {
       let formsList = [];
       let grouped = {};
 
-      // 1. Intentar cargar de AsyncStorage primero
       const offlineDataRaw = await AsyncStorage.getItem(MY_FORMS_OFFLINE_KEY);
       let offlineData = offlineDataRaw ? JSON.parse(offlineDataRaw) : null;
 
@@ -148,12 +141,10 @@ export default function MyForms() {
         return;
       }
 
-      // 2. Si hay token, intentar cargar online
       let onlineOk = false;
       if (accessToken) {
         try {
           const backendUrl = await getBackendUrl();
-          // 1. Obtener la lista de formularios asignados al usuario
           const formsRes = await fetch(
             `${backendUrl}/forms/users/form_by_user`,
             {
@@ -162,7 +153,6 @@ export default function MyForms() {
             }
           );
           
-          // Verificar si la respuesta es 401 Unauthorized
           if (formsRes.status === 401) {
             throw new Error("Unauthorized - Token inválido");
           }
@@ -184,7 +174,6 @@ export default function MyForms() {
                 }
               );
               
-              // Verificar si la respuesta es 401 Unauthorized
               if (res.status === 401) {
                 throw new Error("Unauthorized - Token inválido");
               }
@@ -207,7 +196,6 @@ export default function MyForms() {
           setResponsesByForm(grouped);
           setForms(formsList);
 
-          // Guardar en AsyncStorage para alta disponibilidad offline
           await AsyncStorage.setItem(
             MY_FORMS_OFFLINE_KEY,
             JSON.stringify({ formsList, grouped })
@@ -218,12 +206,10 @@ export default function MyForms() {
           );
           onlineOk = true;
         } catch (err) {
-          // Si falla online, intenta cargar offline
           onlineOk = false;
         }
       }
 
-      // 3. Si no se pudo cargar online, intenta cargar offline
       if (!onlineOk && offlineData) {
         setForms(offlineData.formsList || []);
         setResponsesByForm(offlineData.grouped || {});
@@ -231,21 +217,18 @@ export default function MyForms() {
     } catch (error) {
       console.error("❌ Error al cargar formularios enviados:", error);
       
-      // Verificar si es un error de autenticación
       const isAuthError = await handleAuthError(error);
       
-      // Si no es error de autenticación, mostrar alerta genérica
       if (!isAuthError) {
         setForms([]);
         setResponsesByForm({});
-        Alert.alert("Error", "No se pudieron cargar los formularios enviados.");
+        Alert.alert("Error", "Unable to load submitted forms.");
       }
     } finally {
       setLoading(false);
     }
   };
 
-  // Alternar visualización de respuestas por formulario
   const toggleExpand = (formId) => {
     setExpandedForms((prev) => ({
       ...prev,
@@ -253,7 +236,6 @@ export default function MyForms() {
     }));
   };
 
-  // --- Inactividad: logout automático ---
   const resetInactivityTimer = async () => {
     if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
     inactivityTimer.current = setTimeout(
@@ -283,7 +265,6 @@ export default function MyForms() {
     };
   }, []);
 
-  // --- Nueva función para solicitar reconsideración ---
   const handleReconsider = async (responseId) => {
     setReconsiderModal({
       visible: true,
@@ -303,7 +284,7 @@ export default function MyForms() {
         setReconsiderModal((prev) => ({
           ...prev,
           loading: false,
-          error: "Debes ingresar un mensaje de reconsideración.",
+          error: "You must enter a reconsideration message.",
         }));
         return;
       }
@@ -320,7 +301,6 @@ export default function MyForms() {
         },
       });
       
-      // Verificar si la respuesta es 401 Unauthorized
       if (res.status === 401) {
         throw new Error("Unauthorized - Token inválido");
       }
@@ -332,7 +312,7 @@ export default function MyForms() {
         data = {};
       }
       if (!res.ok) {
-        let msg = "No se pudo solicitar la reconsideración. Intenta de nuevo.";
+        let msg = "Unable to request reconsideration. Please try again.";
         if (data?.detail) {
           if (Array.isArray(data.detail)) {
             msg =
@@ -357,27 +337,24 @@ export default function MyForms() {
         message: "",
       });
       Alert.alert(
-        "Reconsideración enviada",
-        "Tu solicitud de reconsideración fue enviada correctamente."
+        "Reconsideration Submitted",
+        "Your reconsideration request was submitted successfully."
       );
       handleViewForms();
     } catch (error) {
       console.error("❌ Error en reconsideración:", error);
       
-      // Verificar si es un error de autenticación
       const isAuthError = await handleAuthError(error);
       
-      // Si no es error de autenticación, mostrar error en el modal
       if (!isAuthError) {
         setReconsiderModal((prev) => ({
           ...prev,
           loading: false,
           error:
             error.message ||
-            "No se pudo solicitar la reconsideración. Intenta de nuevo.",
+            "Unable to request reconsideration. Please try again.",
         }));
       } else {
-        // Si es error de autenticación, cerrar el modal
         setReconsiderModal({
           visible: false,
           responseId: null,
@@ -389,738 +366,900 @@ export default function MyForms() {
     }
   };
 
+  const getStatusColor = (status) => {
+    switch (status) {
+      case "aprobado":
+        return "#10B981";
+      case "rechazado":
+        return "#EF4444";
+      default:
+        return "#F59E0B";
+    }
+  };
+
+  const getStatusLabel = (status) => {
+    switch (status) {
+      case "aprobado":
+        return "Approved";
+      case "rechazado":
+        return "Rejected";
+      case "pendiente":
+        return "Pending";
+      default:
+        return status || "Unknown";
+    }
+  };
+
   return (
-    <LinearGradient colors={["#4B34C7", "#4B34C7"]} style={{ flex: 1 }}>
-      <View style={{ flex: 1 }}>
-        
-        <View style={styles.formsScrollWrapper}>
-          <Text style={styles.header}>Submitted Forms ✅</Text>
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#1E3A8A" />
+      
+      {/* Header corporativo */}
+      <LinearGradient
+        colors={["#4C34C7", "#4C34C7"]}
+        style={styles.header}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+      >
+        <View style={styles.headerContent}>
+          <Text style={styles.headerTitle}>Submitted Forms</Text>
+          <Text style={styles.headerSubtitle}>Review and Manage Submissions</Text>
+        </View>
+      </LinearGradient>
+
+      {/* Contenido principal */}
+      <View style={styles.mainContent}>
+        {loading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#108C9B" />
+            <Text style={styles.loadingText}>Loading forms...</Text>
+          </View>
+        ) : forms.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyIcon}>📋</Text>
+            <Text style={styles.emptyTitle}>No Forms Available</Text>
+            <Text style={styles.emptyText}>
+              You don't have any submitted forms at this moment.
+            </Text>
+          </View>
+        ) : (
           <ScrollView
-            style={{ flex: 1 }}
-            contentContainerStyle={{
-              paddingBottom: 24,
-              paddingHorizontal: 0,
-              minHeight: height * 0.7,
-            }}
-            showsVerticalScrollIndicator={true}
+            style={styles.scrollView}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
           >
-            
-            {loading ? (
-              <ActivityIndicator size="large" color="#12A0AF" />
-            ) : forms.length === 0 ? (
-              <Text style={styles.noFormsText}>
-                No submitted forms available.
-              </Text>
-            ) : (
-              forms.map((form, index) => (
-                <View key={form.id} style={styles.formCardWrapper}>
-                  <View style={styles.formCard}>
-                    <Text
-                      style={styles.formText}
-                      numberOfLines={1}
-                      ellipsizeMode="tail"
-                    >
-                      Form ID: {form.id}
+            {forms.map((form, index) => (
+              <View key={form.id} style={styles.formCard}>
+                {/* Header del formulario */}
+                <View style={styles.formHeader}>
+                  <View style={styles.formIdBadge}>
+                    <Text style={styles.formIdText}>ID: {form.id}</Text>
+                  </View>
+                </View>
+
+                {/* Contenido del formulario */}
+                <View style={styles.formContent}>
+                  <Text style={styles.formTitle} numberOfLines={2}>
+                    {form.form_title || "Untitled Form"}
+                  </Text>
+                  
+                  {form.form_description ? (
+                    <Text style={styles.formDescription} numberOfLines={3}>
+                      {form.form_description}
                     </Text>
-                    <Text
-                      style={styles.formTitle}
-                      numberOfLines={2}
-                      ellipsizeMode="tail"
-                    >
-                      {form.form_title || "Untitled"}
-                    </Text>
-                    <Text
-                      style={styles.formDescription}
-                      numberOfLines={2}
-                      ellipsizeMode="tail"
-                    >
-                      {form.form_description || ""}
-                    </Text>
-                    <Text style={styles.formMeta} numberOfLines={1}>
-                      Submitted by: {form.submitted_by?.name || "-"}
-                    </Text>
-                    <TouchableOpacity
-                      style={styles.viewResponsesButton}
-                      onPress={() => toggleExpand(form.id)}
-                    >
-                      <Text style={styles.viewResponsesButtonText}>
-                        {expandedForms[form.id]
-                          ? "Hide responses"
-                          : "Show responses"}
+                  ) : null}
+
+                  <View style={styles.formMeta}>
+                    <View style={styles.metaItem}>
+                      <Text style={styles.metaLabel}>Submitted by:</Text>
+                      <Text style={styles.metaValue}>
+                        {form.submitted_by?.name || "Unknown"}
                       </Text>
-                    </TouchableOpacity>
-                    {expandedForms[form.id] && (
-                      <View style={styles.responsesContainer}>
-                        <ScrollView
-                          style={{ maxHeight: height * 0.35 }}
-                          contentContainerStyle={{ paddingBottom: 8 }}
-                          nestedScrollEnabled
-                          showsVerticalScrollIndicator={true}
-                        >
-                          {Array.isArray(responsesByForm[form.id]) &&
-                          responsesByForm[form.id].length > 0 ? (
-                            responsesByForm[form.id].map((resp, idx) => (
+                    </View>
+                  </View>
+                </View>
+
+                {/* Botón para expandir respuestas */}
+                <TouchableOpacity
+                  style={styles.expandButton}
+                  onPress={() => toggleExpand(form.id)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.expandButtonText}>
+                    {expandedForms[form.id] ? "Hide Responses" : "View Responses"}
+                  </Text>
+                  <Text style={styles.expandButtonIcon}>
+                    {expandedForms[form.id] ? "▲" : "▼"}
+                  </Text>
+                </TouchableOpacity>
+
+                {/* Respuestas expandidas */}
+                {expandedForms[form.id] && (
+                  <View style={styles.responsesSection}>
+                    <View style={styles.responsesDivider} />
+                    <ScrollView
+                      style={styles.responsesScroll}
+                      nestedScrollEnabled
+                      showsVerticalScrollIndicator={false}
+                    >
+                      {Array.isArray(responsesByForm[form.id]) &&
+                      responsesByForm[form.id].length > 0 ? (
+                        responsesByForm[form.id].map((resp, idx) => (
+                          <View key={resp.response_id || idx} style={styles.responseCard}>
+                            {/* Header de respuesta */}
+                            <View style={styles.responseHeader}>
+                              <Text style={styles.responseNumber}>
+                                Submission #{idx + 1}
+                              </Text>
                               <View
-                                key={resp.response_id || idx}
                                 style={[
-                                  styles.diligCard,
+                                  styles.statusBadge,
                                   {
-                                    borderWidth: 1.5,
-                                    borderColor: "#12A0AF",
-                                    borderRadius: 10,
-                                    marginBottom: 14,
-                                    backgroundColor: "#fff",
-                                    shadowColor: "#12A0AF",
-                                    shadowOpacity: 0.08,
-                                    shadowRadius: 4,
-                                    shadowOffset: { width: 0, height: 2 },
-                                    elevation: 2,
-                                    padding: 14,
+                                    backgroundColor: getStatusColor(
+                                      resp.approval_status
+                                    ),
                                   },
                                 ]}
                               >
-                                {/* Submission content */}
-                                <Text
-                                  style={styles.diligHeader}
-                                  numberOfLines={1}
-                                  ellipsizeMode="tail"
-                                >
-                                  Submission #{idx + 1}
+                                <Text style={styles.statusBadgeText}>
+                                  {getStatusLabel(resp.approval_status)}
                                 </Text>
-                                <Text
-                                  style={styles.diligMeta}
-                                  numberOfLines={1}
-                                >
-                                  Date: {resp.submitted_at || "Unknown"}
+                              </View>
+                            </View>
+
+                            {/* Información de la respuesta */}
+                            <View style={styles.responseInfo}>
+                              <View style={styles.infoRow}>
+                                <Text style={styles.infoLabel}>Date:</Text>
+                                <Text style={styles.infoValue}>
+                                  {resp.submitted_at || "Unknown"}
                                 </Text>
-                                {/* NUEVO: Mostrar si fue offline u online */}
-                                <Text
+                              </View>
+
+                              <View style={styles.infoRow}>
+                                <Text style={styles.infoLabel}>Mode:</Text>
+                                <View
                                   style={[
-                                    styles.diligMeta,
+                                    styles.modeBadge,
                                     {
-                                      color:
+                                      backgroundColor:
                                         resp.mode === "offline"
-                                          ? "#ef4444"
-                                          : "#22c55e",
-                                      fontWeight: "bold",
+                                          ? "#FEE2E2"
+                                          : "#D1FAE5",
                                     },
                                   ]}
-                                  numberOfLines={1}
                                 >
-                                  {resp.mode === "offline"
-                                    ? "Submitted Offline"
-                                    : resp.mode === "online"
-                                      ? "Submitted Online"
-                                      : ""}
-                                </Text>
-                                <Text
-                                  style={styles.diligMeta}
-                                  numberOfLines={1}
+                                  <Text
+                                    style={[
+                                      styles.modeText,
+                                      {
+                                        color:
+                                          resp.mode === "offline"
+                                            ? "#DC2626"
+                                            : "#059669",
+                                      },
+                                    ]}
+                                  >
+                                    {resp.mode === "offline"
+                                      ? "● Offline"
+                                      : "● Online"}
+                                  </Text>
+                                </View>
+                              </View>
+
+                              {resp.message ? (
+                                <View style={styles.messageContainer}>
+                                  <Text style={styles.messageLabel}>Message:</Text>
+                                  <Text style={styles.messageText}>
+                                    {resp.message}
+                                  </Text>
+                                </View>
+                              ) : null}
+                            </View>
+
+                            {/* Respuestas del formulario */}
+                            {Array.isArray(resp.answers) && resp.answers.length > 0 ? (
+                              <View style={styles.answersSection}>
+                                <Text style={styles.sectionTitle}>Form Answers</Text>
+                                <ScrollView
+                                  style={styles.answersScroll}
+                                  nestedScrollEnabled
+                                  showsVerticalScrollIndicator={false}
                                 >
-                                  Approval status:{" "}
-                                  <Text
-                                    style={{
-                                      color:
-                                        resp.approval_status === "aprobado"
-                                          ? "#22c55e"
-                                          : resp.approval_status === "rechazado"
-                                            ? "#ef4444"
-                                            : "#fbbf24",
-                                      fontWeight: "bold",
-                                    }}
-                                  >
-                                    {resp.approval_status || "-"}
+                                  {resp.answers.map((ans, i) => (
+                                    <View key={i} style={styles.answerItem}>
+                                      <Text style={styles.questionText}>
+                                        {ans.question_text}
+                                      </Text>
+                                      <Text style={styles.answerText}>
+                                        {ans.answer_text || ans.file_path || "-"}
+                                      </Text>
+                                    </View>
+                                  ))}
+                                </ScrollView>
+                              </View>
+                            ) : null}
+
+                            {/* Detalles de aprobación */}
+                            {Array.isArray(resp.approvals) &&
+                              resp.approvals.length > 0 && (
+                                <View style={styles.approvalsSection}>
+                                  <Text style={styles.sectionTitle}>
+                                    Approval Details
                                   </Text>
-                                </Text>
-                                {resp.message ? (
-                                  <Text
-                                    style={styles.diligMeta}
-                                    numberOfLines={2}
-                                    ellipsizeMode="tail"
+                                  <ScrollView
+                                    style={styles.approvalsScroll}
+                                    nestedScrollEnabled
+                                    showsVerticalScrollIndicator={false}
                                   >
-                                    Message: {resp.message}
-                                  </Text>
-                                ) : null}
-                                <View style={{ marginTop: 6 }}>
-                                  {Array.isArray(resp.answers) &&
-                                  resp.answers.length > 0 ? (
-                                    <ScrollView
-                                      style={{ maxHeight: height * 0.15 }}
-                                      nestedScrollEnabled
-                                      showsVerticalScrollIndicator={true}
-                                    >
-                                      {resp.answers.map((ans, i) => (
-                                        <View
-                                          key={i}
-                                          style={{
-                                            flexDirection: "row",
-                                            marginBottom: 2,
-                                            flexWrap: "wrap",
-                                            alignItems: "flex-start",
-                                          }}
-                                        >
-                                          <Text
-                                            style={{
-                                              fontWeight: "bold",
-                                              color: "#4B34C7",
-                                              maxWidth: width * 0.4,
-                                            }}
-                                            numberOfLines={1}
-                                            ellipsizeMode="tail"
-                                          >
-                                            {ans.question_text}:
+                                    {resp.approvals.map((appr, i) => (
+                                      <View key={i} style={styles.approvalItem}>
+                                        <View style={styles.approvalRow}>
+                                          <Text style={styles.approvalLabel}>
+                                            Sequence:
                                           </Text>
-                                          <Text
-                                            style={{
-                                              marginLeft: 4,
-                                              color: "#222",
-                                              maxWidth: width * 0.45,
-                                            }}
-                                            numberOfLines={2}
-                                            ellipsizeMode="tail"
-                                          >
-                                            {ans.answer_text ||
-                                              ans.file_path ||
-                                              "-"}
+                                          <Text style={styles.approvalValue}>
+                                            {appr.sequence_number}
                                           </Text>
                                         </View>
-                                      ))}
-                                    </ScrollView>
-                                  ) : (
-                                    <Text style={styles.noAnswersText}>
-                                      No answers.
-                                    </Text>
-                                  )}
-                                </View>
-                                {Array.isArray(resp.approvals) &&
-                                  resp.approvals.length > 0 && (
-                                    <View style={{ marginTop: 8 }}>
-                                      <Text
-                                        style={{
-                                          fontWeight: "bold",
-                                          color: "#2563eb",
-                                        }}
-                                      >
-                                        Approval details:
-                                      </Text>
-                                      <ScrollView
-                                        style={{ maxHeight: height * 0.12 }}
-                                        nestedScrollEnabled
-                                        showsVerticalScrollIndicator={true}
-                                      >
-                                        {resp.approvals.map((appr, i) => (
-                                          <View
-                                            key={i}
-                                            style={{
-                                              marginBottom: 2,
-                                              flexWrap: "wrap",
-                                            }}
+                                        <View style={styles.approvalRow}>
+                                          <Text style={styles.approvalLabel}>
+                                            Status:
+                                          </Text>
+                                          <Text
+                                            style={[
+                                              styles.approvalValue,
+                                              { fontWeight: "600" },
+                                            ]}
                                           >
-                                            <Text style={{ color: "#222" }}>
-                                              <Text
-                                                style={{ fontWeight: "bold" }}
-                                              >
-                                                Sequence:
-                                              </Text>{" "}
-                                              {appr.sequence_number} |{" "}
-                                              <Text
-                                                style={{ fontWeight: "bold" }}
-                                              >
-                                                Status:
-                                              </Text>{" "}
-                                              {appr.status} |{" "}
-                                              <Text
-                                                style={{ fontWeight: "bold" }}
-                                              >
-                                                Mandatory:
-                                              </Text>{" "}
-                                              {appr.is_mandatory ? "Yes" : "No"}
+                                            {appr.status}
+                                          </Text>
+                                        </View>
+                                        <View style={styles.approvalRow}>
+                                          <Text style={styles.approvalLabel}>
+                                            User:
+                                          </Text>
+                                          <Text style={styles.approvalValue}>
+                                            {appr.user?.name || "-"}
+                                          </Text>
+                                        </View>
+                                        <View style={styles.approvalRow}>
+                                          <Text style={styles.approvalLabel}>
+                                            Mandatory:
+                                          </Text>
+                                          <Text style={styles.approvalValue}>
+                                            {appr.is_mandatory ? "Yes" : "No"}
+                                          </Text>
+                                        </View>
+                                        {appr.message && (
+                                          <View style={styles.approvalMessageBox}>
+                                            <Text style={styles.approvalMessage}>
+                                              {appr.message}
                                             </Text>
-                                            <Text style={{ color: "#222" }}>
-                                              <Text
-                                                style={{ fontWeight: "bold" }}
-                                              >
-                                                User:
-                                              </Text>{" "}
-                                              {appr.user?.name || "-"}
-                                            </Text>
-                                            {appr.message && (
-                                              <Text
-                                                style={{ color: "#ef4444" }}
-                                              >
-                                                Message: {appr.message}
-                                              </Text>
-                                            )}
                                           </View>
-                                        ))}
-                                      </ScrollView>
-                                    </View>
-                                  )}
-                                {resp.approval_status === "rechazado" && (
-                                  <TouchableOpacity
-                                    style={styles.reconsiderButton}
-                                    onPress={() =>
-                                      handleReconsider(resp.response_id)
-                                    }
-                                  >
-                                    <Text style={styles.reconsiderButtonText}>
-                                      Request reconsideration
-                                    </Text>
-                                  </TouchableOpacity>
-                                )}
-                              </View>
-                            ))
-                          ) : (
-                            <Text style={styles.noAnswersText}>
-                              No responses for this form.
-                            </Text>
-                          )}
-                        </ScrollView>
-                      </View>
-                    )}
+                                        )}
+                                      </View>
+                                    ))}
+                                  </ScrollView>
+                                </View>
+                              )}
+
+                            {/* Botón de reconsideración */}
+                            {resp.approval_status === "rechazado" && (
+                              <TouchableOpacity
+                                style={styles.reconsiderButton}
+                                onPress={() => handleReconsider(resp.response_id)}
+                                activeOpacity={0.8}
+                              >
+                                <Text style={styles.reconsiderButtonText}>
+                                  Request Reconsideration
+                                </Text>
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                        ))
+                      ) : (
+                        <View style={styles.noResponsesContainer}>
+                          <Text style={styles.noResponsesText}>
+                            No responses available for this form.
+                          </Text>
+                        </View>
+                      )}
+                    </ScrollView>
                   </View>
-                </View>
-              ))
-            )}
-          </ScrollView>
-        </View>
-        {/* Modal de reconsideración */}
-        <Modal
-          visible={reconsiderModal.visible}
-          transparent
-          animationType="fade"
-          onRequestClose={() =>
-            setReconsiderModal({
-              visible: false,
-              responseId: null,
-              loading: false,
-              error: null,
-              message: "",
-            })
-          }
-        >
-          <View
-            style={{
-              flex: 1,
-              backgroundColor: "rgba(0,0,0,0.4)",
-              justifyContent: "center",
-              alignItems: "center",
-            }}
-          >
-            <View
-              style={{
-                backgroundColor: "#fff",
-                borderRadius: 10,
-                padding: 24,
-                width: "85%",
-                alignItems: "center",
-                elevation: 5,
-              }}
-            >
-              <Text
-                style={{
-                  fontWeight: "bold",
-                  fontSize: 20,
-                  marginBottom: 8,
-                  color: "#222",
-                  textAlign: "center",
-                }}
-              >
-                Request reconsideration
-              </Text>
-              <Text
-                style={{
-                  fontSize: 15,
-                  color: "#444",
-                  marginBottom: 12,
-                  textAlign: "center",
-                }}
-              >
-                Write the reason for your reconsideration request for this
-                rejected form.
-              </Text>
-              <TextInput
-                style={{
-                  borderWidth: 1,
-                  borderColor: "#12A0AF",
-                  borderRadius: 8,
-                  padding: 10,
-                  width: "100%",
-                  minHeight: 60,
-                  marginBottom: 10,
-                  textAlignVertical: "top",
-                }}
-                multiline
-                placeholder="Reason for reconsideration"
-                value={reconsiderModal.message}
-                onChangeText={(text) =>
-                  setReconsiderModal((prev) => ({ ...prev, message: text }))
-                }
-                editable={!reconsiderModal.loading}
-              />
-              {reconsiderModal.error && (
-                <Text style={{ color: "#ef4444", marginBottom: 8 }}>
-                  {reconsiderModal.error}
-                </Text>
-              )}
-              <View
-                style={{
-                  flexDirection: "row",
-                  width: "100%",
-                  justifyContent: "space-between",
-                }}
-              >
-                <TouchableOpacity
-                  style={{
-                    backgroundColor: "#2563eb",
-                    borderRadius: 6,
-                    padding: 12,
-                    alignItems: "center",
-                    flex: 1,
-                    marginRight: 8,
-                    opacity: reconsiderModal.loading ? 0.6 : 1,
-                  }}
-                  onPress={submitReconsideration}
-                  disabled={reconsiderModal.loading}
-                >
-                  <Text
-                    style={{ color: "white", fontWeight: "bold", fontSize: 16 }}
-                  >
-                    {reconsiderModal.loading ? "Sending..." : "Send"}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={{
-                    backgroundColor: "#888",
-                    borderRadius: 6,
-                    padding: 12,
-                    alignItems: "center",
-                    flex: 1,
-                    marginLeft: 8,
-                  }}
-                  onPress={() =>
-                    setReconsiderModal({
-                      visible: false,
-                      responseId: null,
-                      loading: false,
-                      error: null,
-                      message: "",
-                    })
-                  }
-                  disabled={reconsiderModal.loading}
-                >
-                  <Text
-                    style={{ color: "white", fontWeight: "bold", fontSize: 16 }}
-                  >
-                    Cancel
-                  </Text>
-                </TouchableOpacity>
+                )}
               </View>
-            </View>
-          </View>
-        </Modal>
-        {/* Logout modal */}
-        <Modal
-          visible={showLogoutModal}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setShowLogoutModal(false)}
-        >
-          <View
-            style={{
-              flex: 1,
-              backgroundColor: "rgba(0,0,0,0.4)",
-              justifyContent: "center",
-              alignItems: "center",
-            }}
-          >
-            <View
-              style={{
-                backgroundColor: "#fff",
-                borderRadius: 10,
-                padding: 24,
-                width: "80%",
-                alignItems: "center",
-                elevation: 5,
-              }}
-            >
-              <Text
-                style={{
-                  fontWeight: "bold",
-                  fontSize: 20,
-                  marginBottom: 8,
-                  color: "#222",
-                }}
-              >
-                Session closed due to inactivity
-              </Text>
-              <Text
-                style={{
-                  fontSize: 16,
-                  color: "#444",
-                  marginBottom: 12,
-                  textAlign: "center",
-                }}
-              >
-                For security, your session was closed automatically after 2
-                minutes of inactivity.
-              </Text>
+            ))}
+          </ScrollView>
+        )}
+      </View>
+
+      {/* Modal de reconsideración */}
+      <Modal
+        visible={reconsiderModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() =>
+          setReconsiderModal({
+            visible: false,
+            responseId: null,
+            loading: false,
+            error: null,
+            message: "",
+          })
+        }
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <Text style={styles.modalTitle}>Request Reconsideration</Text>
+            <Text style={styles.modalDescription}>
+              Please provide a detailed reason for requesting reconsideration
+              of this rejected form.
+            </Text>
+
+            <TextInput
+              style={styles.modalInput}
+              multiline
+              placeholder="Enter your reason here..."
+              placeholderTextColor="#9CA3AF"
+              value={reconsiderModal.message}
+              onChangeText={(text) =>
+                setReconsiderModal((prev) => ({ ...prev, message: text }))
+              }
+              editable={!reconsiderModal.loading}
+              textAlignVertical="top"
+            />
+
+            {reconsiderModal.error && (
+              <Text style={styles.modalError}>{reconsiderModal.error}</Text>
+            )}
+
+            <View style={styles.modalButtons}>
               <TouchableOpacity
-                style={{
-                  backgroundColor: "#2563eb",
-                  borderRadius: 6,
-                  padding: 12,
-                  alignItems: "center",
-                  width: "100%",
-                }}
-                onPress={() => {
-                  setShowLogoutModal(false);
-                  router.replace("/");
-                }}
+                style={[styles.modalButton, styles.modalButtonCancel]}
+                onPress={() =>
+                  setReconsiderModal({
+                    visible: false,
+                    responseId: null,
+                    loading: false,
+                    error: null,
+                    message: "",
+                  })
+                }
+                disabled={reconsiderModal.loading}
+                activeOpacity={0.7}
               >
-                <Text
-                  style={{ color: "white", fontWeight: "bold", fontSize: 18 }}
-                >
-                  Go to login
-                </Text>
+                <Text style={styles.modalButtonTextCancel}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.modalButton,
+                  styles.modalButtonSubmit,
+                  reconsiderModal.loading && styles.modalButtonDisabled,
+                ]}
+                onPress={submitReconsideration}
+                disabled={reconsiderModal.loading}
+                activeOpacity={0.7}
+              >
+                {reconsiderModal.loading ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.modalButtonTextSubmit}>Submit</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
-        </Modal>
-      </View>
-    </LinearGradient>
+        </View>
+      </Modal>
+
+      {/* Modal de logout por inactividad */}
+      <Modal
+        visible={showLogoutModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowLogoutModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <Text style={styles.modalTitle}>Session Expired</Text>
+            <Text style={styles.modalDescription}>
+              Your session has been closed due to inactivity for security
+              reasons. Please log in again to continue.
+            </Text>
+
+            <TouchableOpacity
+              style={[styles.modalButton, styles.modalButtonSubmit, { width: "100%" }]}
+              onPress={() => {
+                setShowLogoutModal(false);
+                router.replace("/");
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.modalButtonTextSubmit}>Go to Login</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    </View>
   );
 }
-
 const styles = StyleSheet.create({
-  header: {
-    fontSize: 26,
-    fontWeight: "bold",
-    color: "#4B34C7",
-    marginBottom: 10,
-    textAlign: "center",
-    letterSpacing: 0.5,
-    textShadowColor: "#12A0AF22",
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
-  },
-  formsScrollWrapper: {
+  container: {
     flex: 1,
-    backgroundColor: "#f7fafc",
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    paddingTop: 20,
-    paddingBottom: 36,
-    marginHorizontal: width * 0.02,
-    marginTop: 10,
-    shadowColor: "#4B34C7",
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 8,
+    backgroundColor: "#F3F4F6",
   },
-  formCardWrapper: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    marginBottom: 18,
-    overflow: "hidden",
-    borderWidth: 1.5,
-    borderColor: "#12A0AF",
-    shadowColor: "#12A0AF",
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
+  header: {
+    paddingTop: 50,
+    paddingBottom: 30,
+    paddingHorizontal: 20,
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
     elevation: 8,
-    marginHorizontal: 8,
   },
-  formCard: {
-    padding: 18,
-    backgroundColor: "#f7fafc",
-    borderRadius: 16,
-    borderWidth: 1.5,
-    borderColor: "#4B34C7",
-  },
-  formText: {
-    fontSize: 15,
-    fontWeight: "bold",
-    color: "#12A0AF",
-    marginBottom: 2,
-    letterSpacing: 0.2,
-  },
-  formTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#4B34C7",
-    marginBottom: 2,
-    letterSpacing: 0.2,
-  },
-  formDescription: {
-    fontSize: 15,
-    color: "#12A0AF",
-    marginBottom: 6,
-    fontStyle: "italic",
-  },
-  formMeta: {
-    fontSize: 13,
-    color: "#999",
-    marginBottom: 12,
-  },
-  viewResponsesButton: {
-    backgroundColor: "#12A0AF",
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
+  headerContent: {
     alignItems: "center",
-    marginBottom: 8,
-    shadowColor: "#12A0AF",
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
   },
-  viewResponsesButtonText: {
-    color: "#fff",
-    fontWeight: "bold",
-    fontSize: 15,
-    letterSpacing: 0.2,
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: "700",
+    color: "#FFFFFF",
+    letterSpacing: 0.5,
+    marginBottom: 4,
   },
-  responsesContainer: {
-    backgroundColor: "#e6fafd",
-    borderRadius: 10,
-    padding: 16,
-    maxHeight: height * 0.4,
-    borderWidth: 1,
-    borderColor: "#12A0AF",
-    marginTop: 8,
+  headerSubtitle: {
+    fontSize: 14,
+    color: "#E0E7FF",
+    letterSpacing: 0.3,
+    fontWeight: "400",
   },
-  diligCard: {
-    // Styles are set inline in the component
+  mainContent: {
+    flex: 1,
+    marginTop: -15,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    backgroundColor: "#F3F4F6",
+    paddingTop: 20,
   },
-  diligHeader: {
-    fontSize: 17,
-    fontWeight: "bold",
-    color: "#4B34C7",
-    marginBottom: 8,
-  },
-  diligMeta: {
-    fontSize: 13,
-    color: "#12A0AF",
-    marginBottom: 8,
-  },
-  noFormsText: {
-    textAlign: "center",
-    color: "#999",
-    fontSize: 17,
-    marginTop: 36,
-    fontStyle: "italic",
-  },
-  noResponsesText: {
-    textAlign: "center",
-    color: "#999",
-    fontSize: 15,
-    marginTop: 16,
-    fontStyle: "italic",
-  },
-  noAnswersText: {
-    textAlign: "center",
-    color: "#999",
-    fontSize: 15,
-    marginTop: 8,
-    fontStyle: "italic",
-  },
-  reconsiderButton: {
-    backgroundColor: "#FFB46E",
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 18,
-    alignItems: "center",
-    marginTop: 10,
-    marginBottom: 2,
-    shadowColor: "#FFB46E",
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-  },
-  reconsiderButtonText: {
-    color: "#fff",
-    fontWeight: "bold",
-    fontSize: 15,
-    letterSpacing: 0.2,
-  },
-  modalBackground: {
+  loadingContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "rgba(18,160,175,0.13)",
+    paddingVertical: 40,
   },
-  modalContainer: {
-    width: width * 0.9,
-    maxWidth: 400,
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 28,
-    alignItems: "center",
-    elevation: 4,
-    borderWidth: 2,
-    borderColor: "#12A0AF",
-    shadowColor: "#4B34C7",
-    shadowOpacity: 0.13,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#4B34C7",
-    marginBottom: 16,
-    textAlign: "center",
-  },
-  modalMessage: {
-    fontSize: 15,
-    color: "#12A0AF",
-    marginBottom: 24,
-    textAlign: "center",
-  },
-  modalButton: {
-    backgroundColor: "#12A0AF",
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    alignItems: "center",
-    flex: 1,
-    marginHorizontal: 4,
-  },
-  modalButtonText: {
-    color: "#fff",
-    fontWeight: "bold",
+  loadingText: {
+    marginTop: 16,
     fontSize: 16,
+    color: "#6B7280",
+    fontWeight: "500",
   },
-  cancelButton: {
-    backgroundColor: "#ccc",
+  emptyContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 40,
+    paddingVertical: 60,
   },
-  reconsiderationInput: {
-    width: "100%",
-    maxHeight: 120,
-    borderColor: "#12A0AF",
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 15,
-    color: "#333",
-    marginBottom: 12,
-    textAlignVertical: "top",
-    backgroundColor: "#f7fafc",
+  emptyIcon: {
+    fontSize: 64,
+    marginBottom: 20,
   },
-  reconsiderationError: {
-    color: "#ef4444",
-    fontSize: 13,
+  emptyTitle: {
+    fontSize: 22,
+    fontWeight: "700",
+    color: "#374151",
     marginBottom: 12,
     textAlign: "center",
   },
-  modalButtonsContainer: {
+  emptyText: {
+    fontSize: 15,
+    color: "#6B7280",
+    textAlign: "center",
+    lineHeight: 22,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 24,
+  },
+  formCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    marginBottom: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 4,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+  formHeader: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 12,
     flexDirection: "row",
     justifyContent: "space-between",
+    alignItems: "center",
+  },
+  formIdBadge: {
+    backgroundColor: "#EEF2FF",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  formIdText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#4F46E5",
+    letterSpacing: 0.3,
+  },
+  formContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+  },
+  formTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#111827",
+    marginBottom: 8,
+    lineHeight: 28,
+  },
+  formDescription: {
+    fontSize: 14,
+    color: "#6B7280",
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  formMeta: {
+    borderTopWidth: 1,
+    borderTopColor: "#F3F4F6",
+    paddingTop: 12,
+  },
+  metaItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  metaLabel: {
+    fontSize: 13,
+    color: "#6B7280",
+    fontWeight: "500",
+    marginRight: 6,
+  },
+  metaValue: {
+    fontSize: 13,
+    color: "#374151",
+    fontWeight: "600",
+  },
+  expandButton: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#108C9B",
+    paddingVertical: 14,
+    marginHorizontal: 20,
+    marginBottom: 16,
+    borderRadius: 10,
+    shadowColor: "#108C9B",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  expandButtonText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#FFFFFF",
+    letterSpacing: 0.3,
+    marginRight: 8,
+  },
+  expandButtonIcon: {
+    fontSize: 12,
+    color: "#FFFFFF",
+    fontWeight: "700",
+  },
+  responsesSection: {
+    backgroundColor: "#F9FAFB",
+  },
+  responsesDivider: {
+    height: 1,
+    backgroundColor: "#E5E7EB",
+    marginHorizontal: 20,
+    marginBottom: 12,
+  },
+  responsesScroll: {
+    maxHeight: height * 0.6,
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+  },
+  responseCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  responseHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F3F4F6",
+  },
+  responseNumber: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#111827",
+  },
+  statusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  statusBadgeText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#FFFFFF",
+    letterSpacing: 0.3,
+  },
+  responseInfo: {
+    marginBottom: 12,
+  },
+  infoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  infoLabel: {
+    fontSize: 13,
+    color: "#6B7280",
+    fontWeight: "500",
+    marginRight: 8,
+    width: 60,
+  },
+  infoValue: {
+    fontSize: 13,
+    color: "#374151",
+    fontWeight: "600",
+    flex: 1,
+  },
+  modeBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  modeText: {
+    fontSize: 12,
+    fontWeight: "600",
+    letterSpacing: 0.2,
+  },
+  messageContainer: {
+    backgroundColor: "#FEF3C7",
+    borderLeftWidth: 3,
+    borderLeftColor: "#F59E0B",
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  messageLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#92400E",
+    marginBottom: 4,
+  },
+  messageText: {
+    fontSize: 13,
+    color: "#78350F",
+    lineHeight: 18,
+  },
+  answersSection: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#F3F4F6",
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#1F2937",
+    marginBottom: 10,
+  },
+  answersScroll: {
+    maxHeight: height * 0.2,
+  },
+  answerItem: {
+    backgroundColor: "#F9FAFB",
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: "#108C9B",
+  },
+  questionText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#374151",
+    marginBottom: 4,
+  },
+  answerText: {
+    fontSize: 13,
+    color: "#6B7280",
+    lineHeight: 18,
+  },
+  approvalsSection: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#F3F4F6",
+  },
+  approvalsScroll: {
+    maxHeight: height * 0.18,
+  },
+  approvalItem: {
+    backgroundColor: "#F0F9FF",
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: "#0EA5E9",
+  },
+  approvalRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  approvalLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#0C4A6E",
+  },
+  approvalValue: {
+    fontSize: 12,
+    color: "#075985",
+  },
+  approvalMessageBox: {
+    backgroundColor: "#FEE2E2",
+    padding: 8,
+    borderRadius: 6,
+    marginTop: 6,
+  },
+  approvalMessage: {
+    fontSize: 12,
+    color: "#991B1B",
+    fontStyle: "italic",
+  },
+  reconsiderButton: {
+    backgroundColor: "#F59E0B",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: "center",
+    marginTop: 12,
+    shadowColor: "#F59E0B",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  reconsiderButtonText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#FFFFFF",
+    letterSpacing: 0.3,
+  },
+  noResponsesContainer: {
+    paddingVertical: 32,
+    alignItems: "center",
+  },
+  noResponsesText: {
+    fontSize: 14,
+    color: "#9CA3AF",
+    fontStyle: "italic",
+    textAlign: "center",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  modalContainer: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 24,
     width: "100%",
+    maxWidth: 400,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: "700",
+    color: "#111827",
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  modalDescription: {
+    fontSize: 14,
+    color: "#6B7280",
+    lineHeight: 20,
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    borderRadius: 10,
+    padding: 14,
+    fontSize: 14,
+    color: "#374151",
+    minHeight: 100,
+    backgroundColor: "#F9FAFB",
+    marginBottom: 16,
+  },
+  modalError: {
+    fontSize: 13,
+    color: "#DC2626",
+    marginBottom: 16,
+    textAlign: "center",
+    fontWeight: "500",
+  },
+  modalButtons: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 48,
+  },
+  modalButtonCancel: {
+    backgroundColor: "#F3F4F6",
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+  },
+  modalButtonSubmit: {
+    backgroundColor: "#108C9B",
+    shadowColor: "#108C9B",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  modalButtonDisabled: {
+    opacity: 0.6,
+  },
+  modalButtonTextCancel: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#6B7280",
+  },
+  modalButtonTextSubmit: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#FFFFFF",
+    letterSpacing: 0.3,
   },
 });
