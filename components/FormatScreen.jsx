@@ -804,6 +804,31 @@ export default function FormatScreen(props) {
             answer_text: answers[questionId],
             file_path: "",
           });
+        } else if (question.question_type === "firm" && answers[questionId]) {
+          // Firma: answers[questionId] puede ser JSON string con el objeto filtrado.
+          // Parseamos si es necesario y nos aseguramos de enviar SOLO los campos permitidos.
+          let parsed = answers[questionId];
+          if (typeof parsed === "string") {
+            try {
+              parsed = JSON.parse(parsed);
+            } catch (e) {
+              parsed = parsed || {};
+            }
+          }
+          const fd = parsed?.firmData || parsed || {};
+          const filteredToSend = {
+            firmData: {
+              success: !!fd.success,
+              person_id: fd.person_id || fd.personId || "",
+              person_name: fd.person_name || fd.personName || fd.name || "",
+              qr_url: fd.qr_url || fd.qrUrl || fd.signature_url || "",
+            },
+          };
+          allAnswers.push({
+            question_id: questionId,
+            answer_text: JSON.stringify(filteredToSend),
+            file_path: "",
+          });
         }
       }
 
@@ -1077,6 +1102,12 @@ export default function FormatScreen(props) {
             answer_text: answers[questionId],
             file_path: "",
           });
+        } else if (question.question_type === "firm" && answers[questionId]) {
+          repeatedAnswers.push({
+            question_id: questionId,
+            answer_text: answers[questionId],
+            file_path: "",
+          });
         }
       }
 
@@ -1232,6 +1263,23 @@ export default function FormatScreen(props) {
                   ? answers[questionId][0]
                   : answers[questionId];
             if (value !== undefined && value !== null && value !== "") {
+              nonRepeatedAnswers.push({
+                question_id: questionId,
+                answer_text: value,
+                file_path: "",
+              });
+            }
+          } else if (
+            question.question_type === "firm" &&
+            (nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
+              ? firstNonRepeatedAnswers[questionId]
+              : answers[questionId])
+          ) {
+            const value =
+              nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
+                ? firstNonRepeatedAnswers[questionId]
+                : answers[questionId];
+            if (value) {
               nonRepeatedAnswers.push({
                 question_id: questionId,
                 answer_text: value,
@@ -1445,25 +1493,55 @@ export default function FormatScreen(props) {
                           }}
                           onValueChange={(firmCompleteData) => {
                             console.log(
-                              "💾 Guardando datos de firma:",
+                              "💾 Guardando datos de firma (raw):",
                               firmCompleteData
                             );
-                            // guarda el objeto completo como string en answers
-                            handleAnswerChange(
-                              question.id,
-                              JSON.stringify(firmCompleteData)
-                            );
-                            // si firmCompleteData contiene una URL para preview, guárala
-                            const preview =
-                              firmCompleteData?.firmData?.qr_url ||
-                              firmCompleteData?.firmData?.signature_url ||
-                              firmCompleteData?.signatureUri;
+
+                            // Extraer solo los campos que se deben almacenar/enviar
+                            const fd =
+                              firmCompleteData?.firmData ||
+                              firmCompleteData?.firm ||
+                              {};
+                            const filtered = {
+                              firmData: {
+                                success: !!fd.success,
+                                person_id: fd.person_id || fd.personId || "",
+                                person_name:
+                                  fd.person_name ||
+                                  fd.personName ||
+                                  fd.name ||
+                                  "",
+                                qr_url:
+                                  fd.qr_url ||
+                                  fd.qrUrl ||
+                                  fd.signature_url ||
+                                  "",
+                              },
+                            };
+                            const serialized = JSON.stringify(filtered);
+                            // 1) Guardar la respuesta filtrada en el state + offline
+                            handleAnswerChange(question.id, serialized);
+                            setAnswers((prev) => ({
+                              ...prev,
+                              [question.id]: serialized,
+                            }));
+
+                            // 2) actualizar preview (ui) con la qr_url filtrada
+                            const preview = filtered.firmData.qr_url || null;
                             if (preview) {
                               setSignatureUris((prev) => ({
                                 ...prev,
                                 [question.id]: preview,
                               }));
                             }
+
+                            // DEBUG: verificar estados inmediatamente
+                            console.log(
+                              "DEBUG Guardado firma filtrada:",
+                              filtered,
+                              "signatureUris:",
+                              preview
+                            );
                           }}
                         />
                       ) : (
