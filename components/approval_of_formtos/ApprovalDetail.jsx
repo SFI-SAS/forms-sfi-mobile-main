@@ -486,21 +486,35 @@ export default function ApprovalDetail() {
 
     };
 
-    const pickFiles = async () => {
-        try {
-            const result = await DocumentPicker.getDocumentAsync({
-                type: "*/*",
-                multiple: true,
-                copyToCacheDirectory: true,
-            });
+const pickFiles = async () => {
+    try {
+        const result = await DocumentPicker.getDocumentAsync({
+            type: "*/*",
+            multiple: true,
+            copyToCacheDirectory: true,
+        });
 
-            if (result.type === "success") {
-                setSelectedFiles((prev) => [...prev, result]);
-            }
-        } catch (error) {
-            console.error("Error picking files:", error);
+        // ✅ CORRECCIÓN: Manejar correctamente archivos múltiples
+        if (!result.canceled && result.assets) {
+            // DocumentPicker ahora retorna result.assets como array
+            const newFiles = result.assets.map(asset => ({
+                uri: asset.uri,
+                name: asset.name,
+                type: asset.mimeType || 'application/octet-stream',
+                size: asset.size,
+                mimeType: asset.mimeType
+            }));
+            
+            setSelectedFiles((prev) => [...prev, ...newFiles]);
+            console.log(`✅ ${newFiles.length} archivo(s) seleccionado(s)`);
+        } else if (result.canceled) {
+            console.log('📌 Selección de archivos cancelada');
         }
-    };
+    } catch (error) {
+        console.error("❌ Error picking files:", error);
+        Alert.alert("Error", "No se pudieron seleccionar los archivos");
+    }
+};
 
     const removeFile = (index) => {
         setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
