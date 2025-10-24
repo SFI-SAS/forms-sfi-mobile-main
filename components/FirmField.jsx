@@ -67,6 +67,7 @@ const FirmField = ({
   const [countdown, setCountdown] = useState(0);
   const [authStatus, setAuthStatus] = useState("idle"); // 'idle' | 'loading' | 'success' | 'error' | 'network-error' | 'validation-failed' | 'timeout'
   const [authMessage, setAuthMessage] = useState("");
+  const [firmCompleted, setFirmCompleted] = useState(false);
   // (no mostramos botón de guardar — cerramos modal automáticamente al completar firma)
   // (no usar file-asset temporal; el WebView usará getWebViewHTML())
   const PENDING_SIGNATURES_KEY = "pending_signatures";
@@ -74,6 +75,13 @@ const FirmField = ({
   // Obtener datos del usuario seleccionado
   const selectedUser = options.find((user) => user.id === value);
 
+// 🆕 AGREGAR ESTE useEffect:
+useEffect(() => {
+  // Resetear el estado de firma cuando cambie el usuario seleccionado
+  setFirmCompleted(false);
+  setFirmData(null);
+  setFirmError(null);
+}, [value]);
   /**
    * Resetear todos los estados
    */
@@ -240,27 +248,27 @@ const FirmField = ({
     }
   };
 
-  const handleSignSuccess = async (data = {}) => {
-    try {
-      console.log(
-        "📥 Datos completos recibidos desde SFI Facial (firma):",
-        data
-      );
+const handleSignSuccess = async (data = {}) => {
+  try {
+    console.log('📥 Datos completos recibidos desde SFI Facial (firma):', data);
 
-      setFirmData(data);
-      setFirmError(null);
-      setIsLoading(false);
-      setProcessStatus("🎉 Firma completada exitosamente");
-      setAuthStatus("success");
-      setAuthMessage("Autenticación y firma completadas exitosamente");
+    setFirmData(data);
+    setFirmError(null);
+    setIsLoading(false);
+    setProcessStatus("🎉 Firma completada exitosamente");
+    setAuthStatus("success");
+    setAuthMessage("Autenticación y firma completadas exitosamente");
+    
+    // 🆕 AGREGAR ESTA LÍNEA:
+    setFirmCompleted(true);
 
-      const filteredFirmData = {
-        success: true,
-        person_id: data.person_id || data.personId || data.person_id,
-        person_name: data.person_name || data.personName || data.name,
-        qr_url: data.qr_url || data.qrUrl || data.qr || null,
-        raw: data,
-      };
+    const filteredFirmData = {
+      success: true,
+      person_id: data.person_id || data.personId || data.person_id,
+      person_name: data.person_name || data.personName || data.name,
+      qr_url: data.qr_url || data.qrUrl || data.qr || null,
+      raw: data,
+    };
 
       const completeFirmData = { firmData: filteredFirmData };
 
@@ -622,7 +630,7 @@ const FirmField = ({
     };
   }, [onFirmSuccess, onValueChange]);
 
-  return (
+return (
     <View style={styles.container}>
       {/* Label */}
       <Text style={styles.label}>
@@ -636,12 +644,8 @@ const FirmField = ({
           <Picker
             selectedValue={value || ""}
             onValueChange={(itemValue) => {
-              console.log(
-                "🔄 Picker onChange - valor seleccionado:",
-                itemValue
-              );
+              console.log("🔄 Picker onChange - valor seleccionado:", itemValue);
               if (onChange) {
-                // Llamar onChange con el formato correcto
                 onChange({ target: { value: itemValue } });
               }
             }}
@@ -664,12 +668,17 @@ const FirmField = ({
             styles.firmButton,
             (!value || value === "" || disabled || isSigning) &&
               styles.firmButtonDisabled,
+            // 🆕 AGREGAR ESTA LÍNEA:
+            firmCompleted && styles.firmButtonSuccess,
           ]}
           disabled={!value || value === "" || disabled || isSigning}
           onPress={handleFirmar}
           activeOpacity={0.7}
         >
-          <Text style={styles.firmButtonText}>🖊️ Firmar</Text>
+          <Text style={styles.firmButtonText}>
+            {/* 🆕 CAMBIAR ESTO: */}
+            {firmCompleted ? "✅ Firmado" : "🖊️ Firmar"}
+          </Text>
         </TouchableOpacity>
       </View>
 
@@ -687,18 +696,25 @@ const FirmField = ({
         </View>
       )}
 
-      {/* Estado de firma exitosa */}
-      {firmData && authStatus === "success" && (
+      {/* 🆕 REEMPLAZAR TODO EL BLOQUE "Estado de firma exitosa" CON ESTO: */}
+      {firmCompleted && firmData && (
         <View style={styles.successContainer}>
-          <Text style={styles.successTitle}>
-            ✅ Firma completada exitosamente
-          </Text>
-          <Text style={styles.successText}>
-            Usuario: {firmData.person_name} • ID: {firmData.person_id}
-          </Text>
+          <View style={styles.successHeader}>
+            <Text style={styles.successIcon}>✅</Text>
+            <View style={styles.successTextContainer}>
+              <Text style={styles.successTitle}>
+                Firma completada exitosamente
+              </Text>
+              <Text style={styles.successSubtitle}>
+                Usuario: {firmData.person_name || 'Sin nombre'}
+              </Text>
+              <Text style={styles.successDetails}>
+                ID: {firmData.person_id || 'Sin ID'}
+              </Text>
+            </View>
+          </View>
         </View>
       )}
-
       {/* Modal de Firma */}
       <Modal
         visible={showModal}
