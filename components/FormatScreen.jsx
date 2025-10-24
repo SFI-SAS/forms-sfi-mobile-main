@@ -110,6 +110,28 @@ export default function FormatScreen(props) {
   useEffect(() => {
     const fetchFacialUsers = async () => {
       try {
+        // 🆕 Verificar conexión primero
+        const netInfo = await NetInfo.fetch();
+        if (!netInfo.isConnected) {
+          console.log("📵 Sin conexión - Cargando usuarios faciales desde caché offline");
+
+          // Intentar cargar desde caché offline
+          try {
+            const cached = await AsyncStorage.getItem("cached_facial_users");
+            if (cached) {
+              const cachedUsers = JSON.parse(cached);
+              setFacialUsers(cachedUsers);
+              console.log("✅ Usuarios faciales cargados desde caché:", cachedUsers.length);
+              return;
+            }
+          } catch (e) {
+            console.warn("No hay usuarios faciales en caché");
+          }
+
+          setFacialUsers([]);
+          return;
+        }
+
         const token = await AsyncStorage.getItem("authToken");
         if (!token) {
           console.error("No se encontró el token de autenticación");
@@ -124,43 +146,75 @@ export default function FormatScreen(props) {
           return;
         }
 
+        console.log("🔄 Cargando usuarios faciales desde servidor...");
+
         const res = await axios.get(
           `${backendUrl}/responses/answers/regisfacial`,
           {
             headers: { Authorization: `Bearer ${token}` },
+            timeout: 10000, // 🆕 Timeout de 10 segundos
           }
         );
+
         const mapped = Array.isArray(res.data)
           ? res.data
-              .map((item) => {
-                try {
-                  const parsed = JSON.parse(item.answer_text || "{}");
-                  const faceData = parsed.faceData || parsed;
-                  if (!faceData) return null;
-                  return {
-                    id:
-                      faceData.person_id ||
-                      faceData.personId ||
-                      String(Math.random()),
-                    name:
-                      faceData.personName ||
-                      faceData.person_name ||
-                      faceData.name ||
-                      "Sin nombre",
-                    person_id: faceData.person_id || faceData.personId || "",
-                    hash: item.encrypted_hash || item.hash || "",
-                  };
-                } catch (err) {
-                  console.error("Error parseando datos faciales:", err);
-                  return null;
-                }
-              })
-              .filter(Boolean)
+            .map((item) => {
+              try {
+                const parsed = JSON.parse(item.answer_text || "{}");
+                const faceData = parsed.faceData || parsed;
+                if (!faceData) return null;
+                return {
+                  id:
+                    faceData.person_id ||
+                    faceData.personId ||
+                    String(Math.random()),
+                  name:
+                    faceData.personName ||
+                    faceData.person_name ||
+                    faceData.name ||
+                    "Sin nombre",
+                  person_id: faceData.person_id || faceData.personId || "",
+                  num_document: faceData.person_id || faceData.personId || "", // 🆕 Agregado
+                  hash: item.encrypted_hash || item.hash || "",
+                };
+              } catch (err) {
+                console.error("Error parseando datos faciales:", err);
+                return null;
+              }
+            })
+            .filter(Boolean)
           : [];
 
         setFacialUsers(mapped);
+
+        // 🆕 Guardar en caché para uso offline
+        if (mapped.length > 0) {
+          try {
+            await AsyncStorage.setItem("cached_facial_users", JSON.stringify(mapped));
+            console.log("💾 Usuarios faciales guardados en caché");
+          } catch (e) {
+            console.warn("No se pudo guardar caché de usuarios faciales");
+          }
+        }
+
+        console.log("✅ Usuarios faciales cargados:", mapped.length);
+
       } catch (error) {
-        console.error("Error cargando datos faciales:", error);
+        console.error("❌ Error cargando datos faciales:", error.message);
+
+        // 🆕 Intentar cargar desde caché como fallback
+        try {
+          const cached = await AsyncStorage.getItem("cached_facial_users");
+          if (cached) {
+            const cachedUsers = JSON.parse(cached);
+            setFacialUsers(cachedUsers);
+            console.log("✅ Usando caché de usuarios faciales como fallback");
+            return;
+          }
+        } catch (e) {
+          console.warn("No se pudo cargar caché de fallback");
+        }
+
         setFacialUsers([]);
       }
     };
@@ -1460,13 +1514,12 @@ export default function FormatScreen(props) {
                         <FirmField
                           key={question.id}
                           label={question.question_text || "Firma Digital"}
-                          options={facialUsers.map((u) => ({
+                          options={facialUsers.length > 0 ? facialUsers.map((u) => ({
                             id: u.id,
                             name: u.name,
-                            num_document: u.person_id,
-                          }))}
+                            num_document: u.person_id || u.num_document || "Sin documento",
+                          })) : []} // 🆕 Array vacío si no hay usuarios
                           required={question.required ?? false}
-                          // onChange puede recibir un evento o el valor directamente
                           onChange={(ev) => {
                             const val = ev?.target?.value ?? ev ?? "";
                             console.log("📝 Usuario seleccionado:", val);
@@ -1483,10 +1536,7 @@ export default function FormatScreen(props) {
                           apiUrl="https://api-signfacial-safe.service.saferut.com"
                           autoCloseDelay={10000}
                           onFirmSuccess={(data) => {
-                            console.log(
-                              "✅ Firma completada exitosamente:",
-                              data
-                            );
+                            console.log("✅ Firma completada exitosamente:", data);
                           }}
                           onFirmError={(error) => {
                             console.error("❌ Error en la firma:", error);
@@ -1683,26 +1733,26 @@ export default function FormatScreen(props) {
                           <View style={styles.submittedValueContainer}>
                             {Array.isArray(group[q.id])
                               ? group[q.id]
-                                  .filter((ans) => ans && ans !== "")
-                                  .map((ans, i) => (
-                                    <Text
-                                      key={i}
-                                      style={styles.submittedValue}
-                                      numberOfLines={2}
-                                      ellipsizeMode="tail"
-                                    >
-                                      {ans}
-                                    </Text>
-                                  ))
-                              : group[q.id] && (
+                                .filter((ans) => ans && ans !== "")
+                                .map((ans, i) => (
                                   <Text
+                                    key={i}
                                     style={styles.submittedValue}
                                     numberOfLines={2}
                                     ellipsizeMode="tail"
                                   >
-                                    {group[q.id]}
+                                    {ans}
                                   </Text>
-                                )}
+                                ))
+                              : group[q.id] && (
+                                <Text
+                                  style={styles.submittedValue}
+                                  numberOfLines={2}
+                                  ellipsizeMode="tail"
+                                >
+                                  {group[q.id]}
+                                </Text>
+                              )}
                           </View>
                         </View>
                       ))}

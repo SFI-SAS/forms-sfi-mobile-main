@@ -15,28 +15,13 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 import { Picker } from "@react-native-picker/picker";
 import { WebView } from "react-native-webview";
-import * as WebBrowser from "expo-web-browser";
-import * as Linking from "expo-linking";
-import { Asset } from "expo-asset";
+
+// 🆕 NUEVA KEY para guardar firmas offline
+const OFFLINE_SIGNATURES_KEY = "offline_signatures_cache";
 
 /**
  * Componente de Firma Digital para React Native
- * Adaptado desde el componente TSX web con SFI Facial
- *
- * @param {Object} props
- * @param {string} props.label - Etiqueta del campo
- * @param {Array} props.options - Array de usuarios: [{id, name, num_document}]
- * @param {boolean} props.required - Si el campo es obligatorio
- * @param {Function} props.onChange - Callback cuando cambia el usuario seleccionado
- * @param {string} props.value - ID del usuario seleccionado
- * @param {boolean} props.disabled - Si está deshabilitado
- * @param {boolean} props.error - Si hay error de validación
- * @param {string} props.documentHash - Hash del documento a firmar
- * @param {Function} props.onFirmSuccess - Callback cuando la firma es exitosa
- * @param {Function} props.onFirmError - Callback cuando hay error en la firma
- * @param {Function} props.onValueChange - Callback con los datos completos de la firma
- * @param {string} props.apiUrl - URL de la API de firma
- * @param {number} props.autoCloseDelay - Delay para auto-cerrar modal (ms)
+ * Con soporte de firma offline automática
  */
 const FirmField = ({
   label = "Firma Digital",
@@ -59,29 +44,107 @@ const FirmField = ({
   const [isLoading, setIsLoading] = useState(false);
   const [isSigning, setIsSigning] = useState(false);
   const signingRef = useRef(false);
-  const processedDeepLinkRef = useRef(false);
   const [firmData, setFirmData] = useState(null);
   const [firmError, setFirmError] = useState(null);
   const [processStatus, setProcessStatus] = useState("");
   const [autoCloseTimeoutId, setAutoCloseTimeoutId] = useState(null);
   const [countdown, setCountdown] = useState(0);
-  const [authStatus, setAuthStatus] = useState("idle"); // 'idle' | 'loading' | 'success' | 'error' | 'network-error' | 'validation-failed' | 'timeout'
+  const [authStatus, setAuthStatus] = useState("idle");
   const [authMessage, setAuthMessage] = useState("");
   const [firmCompleted, setFirmCompleted] = useState(false);
-  // (no mostramos botón de guardar — cerramos modal automáticamente al completar firma)
-  // (no usar file-asset temporal; el WebView usará getWebViewHTML())
+  
+  // 🆕 Nuevo estado para saber si estamos offline
+  const [isOffline, setIsOffline] = useState(false);
+
   const PENDING_SIGNATURES_KEY = "pending_signatures";
 
   // Obtener datos del usuario seleccionado
   const selectedUser = options.find((user) => user.id === value);
 
-// 🆕 AGREGAR ESTE useEffect:
-useEffect(() => {
-  // Resetear el estado de firma cuando cambie el usuario seleccionado
-  setFirmCompleted(false);
-  setFirmData(null);
-  setFirmError(null);
-}, [value]);
+  // 🆕 Detectar estado de conexión
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener(state => {
+      const offline = !state.isConnected;
+      setIsOffline(offline);
+      console.log("📶 Estado de conexión:", offline ? "OFFLINE" : "ONLINE");
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // 🆕 Cargar firma offline al seleccionar usuario (SOLO SI ESTÁ OFFLINE)
+  useEffect(() => {
+    const loadOfflineSignature = async () => {
+      if (!value || !isOffline) {
+        // Si no hay usuario seleccionado O estamos online, no cargar firma offline
+        return;
+      }
+
+      try {
+        const stored = await AsyncStorage.getItem(OFFLINE_SIGNATURES_KEY);
+        if (!stored) return;
+
+        const offlineSignatures = JSON.parse(stored);
+        const userSignature = offlineSignatures[value];
+
+        if (userSignature) {
+          console.log("✅ Cargando firma offline para usuario:", value);
+          
+          setFirmData(userSignature);
+          setFirmCompleted(true);
+          setAuthStatus("success");
+          setAuthMessage("Firma cargada desde caché offline");
+          
+          // Notificar al padre
+          const completeFirmData = { firmData: userSignature };
+          try {
+            onFirmSuccess?.(completeFirmData);
+            onValueChange?.(completeFirmData);
+          } catch (e) {
+            console.warn("Error notificando firma offline:", e);
+          }
+        }
+      } catch (e) {
+        console.error("❌ Error cargando firma offline:", e);
+      }
+    };
+
+    loadOfflineSignature();
+  }, [value, isOffline]);
+
+  // Resetear estado al cambiar usuario
+  useEffect(() => {
+    // Solo resetear si estamos ONLINE
+    // Si estamos offline, dejamos que se cargue la firma guardada
+    if (!isOffline) {
+      setFirmCompleted(false);
+      setFirmData(null);
+      setFirmError(null);
+      setAuthStatus("idle");
+    }
+  }, [value, isOffline]);
+
+  /**
+   * 🆕 Guardar firma en caché offline
+   */
+  const saveSignatureOffline = async (userId, signatureData) => {
+    try {
+      const stored = await AsyncStorage.getItem(OFFLINE_SIGNATURES_KEY);
+      const offlineSignatures = stored ? JSON.parse(stored) : {};
+      
+      offlineSignatures[userId] = signatureData;
+      
+      await AsyncStorage.setItem(
+        OFFLINE_SIGNATURES_KEY,
+        JSON.stringify(offlineSignatures)
+      );
+      
+      console.log("💾 Firma guardada offline para usuario:", userId);
+    } catch (e) {
+      console.error("❌ Error guardando firma offline:", e);
+    }
+  };
+
   /**
    * Resetear todos los estados
    */
@@ -96,7 +159,7 @@ useEffect(() => {
   };
 
   /**
-   * Solicitar permisos de cámara en Android (solo cámara)
+   * Solicitar permisos de cámara en Android
    */
   const requestCameraPermissions = async () => {
     if (Platform.OS === "android") {
@@ -105,22 +168,18 @@ useEffect(() => {
           PermissionsAndroid.PERMISSIONS.CAMERA,
           {
             title: "Permiso de cámara",
-            message:
-              "Se requiere acceso a la cámara para el reconocimiento facial",
+            message: "Se requiere acceso a la cámara para el reconocimiento facial",
             buttonNeutral: "Preguntar después",
             buttonNegative: "Cancelar",
             buttonPositive: "Aceptar",
           }
         );
-
         return result === PermissionsAndroid.RESULTS.GRANTED;
       } catch (e) {
         console.error("Error pidiendo permiso de cámara:", e);
         return false;
       }
     }
-
-    // iOS: permisos gestionados por Info.plist / WKWebView
     return true;
   };
 
@@ -129,16 +188,25 @@ useEffect(() => {
    */
   const handleFirmar = async () => {
     if (signingRef.current) return;
+    
     if (!selectedUser) {
       setFirmError("Debe seleccionar un usuario antes de firmar");
       Alert.alert("Error", "Debe seleccionar un usuario antes de firmar");
       return;
     }
+    
     if (!documentHash) {
       setFirmError("No se ha proporcionado el hash del documento a firmar");
+      Alert.alert("Error", "No se ha proporcionado el hash del documento a firmar");
+      return;
+    }
+
+    // 🆕 Si estamos OFFLINE y ya hay firma guardada, usarla automáticamente
+    if (isOffline && firmCompleted && firmData) {
       Alert.alert(
-        "Error",
-        "No se ha proporcionado el hash del documento a firmar"
+        "Modo Offline",
+        "Se usará la firma guardada previamente para este usuario.",
+        [{ text: "OK" }]
       );
       return;
     }
@@ -155,9 +223,7 @@ useEffect(() => {
     signingRef.current = true;
     setIsSigning(true);
     setIsLoading(true);
-    // setProcessStatus("Preparando página de firma...");
 
-    // Abrir modal y renderizar el HTML generado por getWebViewHTML() dentro del WebView
     try {
       setProcessStatus("Abriendo componente de firma...");
       setIsScriptLoaded(false);
@@ -178,19 +244,17 @@ useEffect(() => {
    * Cerrar modal
    */
   const handleCloseModal = () => {
-    // Limpiar timeout de auto-close
     if (autoCloseTimeoutId) {
       clearTimeout(autoCloseTimeoutId);
       setAutoCloseTimeoutId(null);
     }
-
     setShowModal(false);
     resetStates();
     console.log("🔒 Modal cerrado");
   };
 
   /**
-   * Manejar mensajes desde el WebView (comunicación SFI Facial)
+   * Manejar mensajes desde el WebView
    */
   const handleWebViewMessage = async (event) => {
     try {
@@ -248,46 +312,48 @@ useEffect(() => {
     }
   };
 
-const handleSignSuccess = async (data = {}) => {
-  try {
-    console.log('📥 Datos completos recibidos desde SFI Facial (firma):', data);
+  const handleSignSuccess = async (data = {}) => {
+    try {
+      console.log('📥 Datos completos recibidos desde SFI Facial (firma):', data);
 
-    setFirmData(data);
-    setFirmError(null);
-    setIsLoading(false);
-    setProcessStatus("🎉 Firma completada exitosamente");
-    setAuthStatus("success");
-    setAuthMessage("Autenticación y firma completadas exitosamente");
-    
-    // 🆕 AGREGAR ESTA LÍNEA:
-    setFirmCompleted(true);
+      setFirmData(data);
+      setFirmError(null);
+      setIsLoading(false);
+      setProcessStatus("🎉 Firma completada exitosamente");
+      setAuthStatus("success");
+      setAuthMessage("Autenticación y firma completadas exitosamente");
+      setFirmCompleted(true);
 
-    const filteredFirmData = {
-      success: true,
-      person_id: data.person_id || data.personId || data.person_id,
-      person_name: data.person_name || data.personName || data.name,
-      qr_url: data.qr_url || data.qrUrl || data.qr || null,
-      raw: data,
-    };
+      const filteredFirmData = {
+        success: true,
+        person_id: data.person_id || data.personId || data.person_id,
+        person_name: data.person_name || data.personName || data.name,
+        qr_url: data.qr_url || data.qrUrl || data.qr || null,
+        raw: data,
+      };
 
       const completeFirmData = { firmData: filteredFirmData };
 
-      console.log(
-        "📦 Datos filtrados que se pasarán al padre:",
-        completeFirmData
-      );
+      console.log("📦 Datos filtrados que se pasarán al padre:", completeFirmData);
+
+      // 🆕 Guardar firma offline para uso futuro
+      if (value) {
+        await saveSignatureOffline(value, filteredFirmData);
+      }
 
       try {
         onFirmSuccess?.(completeFirmData);
       } catch (e) {
         console.warn("onFirmSuccess falló:", e);
       }
+      
       try {
         onValueChange?.(completeFirmData);
       } catch (e) {
         console.warn("onValueChange falló:", e);
       }
 
+      // Encolar para sincronización
       (async () => {
         try {
           const stored = await AsyncStorage.getItem(PENDING_SIGNATURES_KEY);
@@ -298,10 +364,7 @@ const handleSignSuccess = async (data = {}) => {
             document_hash: documentHash || null,
             savedAt: Date.now(),
           });
-          await AsyncStorage.setItem(
-            PENDING_SIGNATURES_KEY,
-            JSON.stringify(arr)
-          );
+          await AsyncStorage.setItem(PENDING_SIGNATURES_KEY, JSON.stringify(arr));
         } catch (e) {
           console.warn("No se pudo encolar firma en AsyncStorage:", e);
         }
@@ -314,60 +377,6 @@ const handleSignSuccess = async (data = {}) => {
     } catch (e) {
       console.error("Error procesando firma exitosa:", e);
       onFirmError?.(e);
-    }
-  };
-
-  /**
-   * Guardar la firma: notifica al padre y encola para sincronización offline,
-   * luego cierra el modal (invocado por el botón "Guardar y cerrar").
-   */
-  const saveSignatureAndClose = async () => {
-    try {
-      if (!firmData) {
-        Alert.alert(
-          "Nada que guardar",
-          "No se encontró información de la firma."
-        );
-        return;
-      }
-
-      const filteredFirmData = {
-        success: true,
-        person_id: firmData.person_id,
-        person_name: firmData.person_name,
-        qr_url: firmData.qr_url,
-      };
-      const completeFirmData = { firmData: filteredFirmData };
-
-      // 1) Notificar al padre para que lo incluya en el formulario
-      try {
-        onValueChange?.(completeFirmData);
-      } catch (e) {
-        console.warn("onValueChange falló:", e);
-      }
-
-      // 2) Encolar en AsyncStorage para sincronización offline
-      try {
-        const stored = await AsyncStorage.getItem(PENDING_SIGNATURES_KEY);
-        const arr = stored ? JSON.parse(stored) : [];
-        arr.push({
-          payload: completeFirmData,
-          person_id: filteredFirmData.person_id,
-          document_hash: documentHash || null,
-          savedAt: Date.now(),
-        });
-        await AsyncStorage.setItem(PENDING_SIGNATURES_KEY, JSON.stringify(arr));
-      } catch (e) {
-        console.warn("No se pudo encolar firma en AsyncStorage:", e);
-      }
-
-      // 3) Cerrar modal y limpiar estado
-      setShowModal(false);
-      // setShowSaveButton(false);
-      resetStates();
-    } catch (e) {
-      console.error("Error guardando firma:", e);
-      Alert.alert("Error", "No se pudo guardar la firma.");
     }
   };
 
@@ -391,9 +400,7 @@ const handleSignSuccess = async (data = {}) => {
       case "timeout":
         return {
           message: "❌ Autenticación Fallida",
-          subMessage:
-            authMessage ||
-            "Usuario no encontrado o problemas con la autenticación",
+          subMessage: authMessage || "Usuario no encontrado o problemas con la autenticación",
           bgColor: "#FEE2E2",
           borderColor: "#FECACA",
           textColor: "#991B1B",
@@ -480,7 +487,6 @@ const handleSignSuccess = async (data = {}) => {
     </div>
 
     <script>
-        // Función para enviar mensajes a React Native
         function sendMessage(type, data = {}) {
             const message = JSON.stringify({ type, ...data });
             if (window.ReactNativeWebView) {
@@ -489,7 +495,6 @@ const handleSignSuccess = async (data = {}) => {
             console.log('📤 Enviando mensaje a RN:', message);
         }
 
-        // Cargar script de SFI Facial
         const script = document.createElement('script');
         script.src = 'https://reconocimiento-facial-safe.service.saferut.com/index.js';
         script.async = true;
@@ -507,7 +512,6 @@ const handleSignSuccess = async (data = {}) => {
 
         document.head.appendChild(script);
 
-        // Inicializar componente SFI Facial
         function initSFIFacial() {
             const container = document.getElementById('container');
             container.innerHTML = '';
@@ -521,7 +525,6 @@ const handleSignSuccess = async (data = {}) => {
             sfiFacialElement.setAttribute('person-name', '${selectedUser?.name || ""}');
             sfiFacialElement.setAttribute('document-hash', '${documentHash}');
 
-            // Estilos del botón
             sfiFacialElement.setAttribute('button-bg-color', 'linear-gradient(135deg, #0F8593 0%, #0A6370 100%)');
             sfiFacialElement.setAttribute('button-text-color', '#ffffff');
             sfiFacialElement.setAttribute('button-border-radius', '12px');
@@ -533,7 +536,6 @@ const handleSignSuccess = async (data = {}) => {
 
             container.appendChild(sfiFacialElement);
 
-            // Registrar eventos
             const events = [
                 'liveness-progress', 'sign-start', 'sign-validation-start',
                 'sign-validation-progress', 'sign-request-start', 'sign-request-progress',
@@ -550,7 +552,6 @@ const handleSignSuccess = async (data = {}) => {
                 });
             });
 
-            // Estrategias de inicio automático
             setTimeout(() => {
                 if (typeof sfiFacialElement.start === 'function') {
                     sfiFacialElement.start();
@@ -577,60 +578,7 @@ const handleSignSuccess = async (data = {}) => {
     `;
   };
 
-  // Escuchar deep links (fallback cuando el navegador redirige a la app)
-  React.useEffect(() => {
-    const handleUrl = ({ url }) => {
-      if (!url || processedDeepLinkRef.current) return;
-      processedDeepLinkRef.current = true; // procesar solo una vez
-      try {
-        const u = new URL(url);
-        const params = Object.fromEntries(u.searchParams.entries());
-        const payload = params.payload
-          ? JSON.parse(decodeURIComponent(params.payload))
-          : params;
-        console.log("🔁 Deep link recibido:", payload);
-        setFirmData(payload.firmData || payload);
-        setAuthStatus("success");
-        onFirmSuccess?.(payload);
-        onValueChange?.(payload);
-      } catch (e) {
-        console.warn("No se pudo parsear deep link:", e);
-      }
-    };
-
-    // Suscribir y limpiar de forma compatible entre RN versiones
-    let subscription;
-    try {
-      subscription =
-        Linking.addEventListener?.("url", handleUrl) ||
-        Linking.addEventListener("url", handleUrl);
-    } catch (e) {
-      // fallback para versiones antiguas
-      Linking.addEventListener("url", handleUrl);
-    }
-
-    // Sólo comprobar initial URL una vez (no dispara re-render múltiples veces)
-    (async () => {
-      try {
-        const initial = await Linking.getInitialURL();
-        if (initial && !processedDeepLinkRef.current)
-          handleUrl({ url: initial });
-      } catch (e) {
-        /* ignore */
-      }
-    })();
-
-    return () => {
-      try {
-        if (subscription && subscription.remove) subscription.remove();
-        else
-          Linking.removeEventListener &&
-            Linking.removeEventListener("url", handleUrl);
-      } catch (e) {}
-    };
-  }, [onFirmSuccess, onValueChange]);
-
-return (
+  return (
     <View style={styles.container}>
       {/* Label */}
       <Text style={styles.label}>
@@ -638,37 +586,47 @@ return (
         {required && <Text style={styles.required}> *</Text>}
       </Text>
 
+      {/* 🆕 Indicador de modo offline */}
+      {isOffline && (
+        <View style={styles.offlineBadge}>
+          <Text style={styles.offlineBadgeText}>📵 Modo Offline</Text>
+        </View>
+      )}
+
       {/* Selector de Usuario + Botón Firmar */}
       <View style={styles.inputRow}>
         <View style={[styles.pickerContainer, error && styles.pickerError]}>
-          <Picker
-            selectedValue={value || ""}
-            onValueChange={(itemValue) => {
-              console.log("🔄 Picker onChange - valor seleccionado:", itemValue);
-              if (onChange) {
-                onChange({ target: { value: itemValue } });
-              }
-            }}
-            enabled={!disabled}
-            style={styles.picker}
-          >
-            <Picker.Item label="Seleccionar usuario para firmar..." value="" />
-            {options.map((user) => (
-              <Picker.Item
-                key={user.id}
-                label={`${user.name} - ${user.num_document}`}
-                value={user.id}
-              />
-            ))}
-          </Picker>
+<Picker
+  selectedValue={value || ""}
+  onValueChange={(itemValue) => {
+    console.log("🔄 Picker onChange - valor seleccionado:", itemValue);
+    if (onChange) {
+      onChange({ target: { value: itemValue } });
+    }
+  }}
+  enabled={!disabled && options.length > 0} // 🆕 Deshabilitar si no hay opciones
+  style={styles.picker}
+>
+  <Picker.Item 
+    label={options.length === 0 
+      ? "No hay usuarios disponibles - Verifica tu conexión" 
+      : "Seleccionar usuario para firmar..."} 
+    value="" 
+  />
+  {options.map((user) => (
+    <Picker.Item
+      key={user.id}
+      label={`${user.name} - ${user.num_document}`}
+      value={user.id}
+    />
+  ))}
+</Picker>
         </View>
 
         <TouchableOpacity
           style={[
             styles.firmButton,
-            (!value || value === "" || disabled || isSigning) &&
-              styles.firmButtonDisabled,
-            // 🆕 AGREGAR ESTA LÍNEA:
+            (!value || value === "" || disabled || isSigning) && styles.firmButtonDisabled,
             firmCompleted && styles.firmButtonSuccess,
           ]}
           disabled={!value || value === "" || disabled || isSigning}
@@ -676,8 +634,7 @@ return (
           activeOpacity={0.7}
         >
           <Text style={styles.firmButtonText}>
-            {/* 🆕 CAMBIAR ESTO: */}
-            {firmCompleted ? "✅ Firmado" : "🖊️ Firmar"}
+            {firmCompleted ? (isOffline ? "✅ Firma Offline" : "✅ Firmado") : "🖊️ Firmar"}
           </Text>
         </TouchableOpacity>
       </View>
@@ -696,14 +653,14 @@ return (
         </View>
       )}
 
-      {/* 🆕 REEMPLAZAR TODO EL BLOQUE "Estado de firma exitosa" CON ESTO: */}
+      {/* Estado de firma exitosa */}
       {firmCompleted && firmData && (
         <View style={styles.successContainer}>
           <View style={styles.successHeader}>
             <Text style={styles.successIcon}>✅</Text>
             <View style={styles.successTextContainer}>
               <Text style={styles.successTitle}>
-                Firma completada exitosamente
+                {isOffline ? "Firma cargada (offline)" : "Firma completada exitosamente"}
               </Text>
               <Text style={styles.successSubtitle}>
                 Usuario: {firmData.person_name || 'Sin nombre'}
@@ -715,6 +672,7 @@ return (
           </View>
         </View>
       )}
+
       {/* Modal de Firma */}
       <Modal
         visible={showModal}
@@ -724,7 +682,6 @@ return (
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
-            {/* Header */}
             <View style={styles.modalHeader}>
               <View>
                 <Text style={styles.modalTitle}>🖊️ Firma Digital</Text>
@@ -734,15 +691,6 @@ return (
                   </Text>
                 )}
               </View>
-              {/* {showSaveButton && (
-                <TouchableOpacity
-                  onPress={saveSignatureAndClose}
-                  style={styles.saveButton}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.saveButtonText}>Guardar y cerrar</Text>
-                </TouchableOpacity>
-              )} */}
               <TouchableOpacity
                 onPress={handleCloseModal}
                 style={styles.closeButton}
@@ -753,7 +701,6 @@ return (
             </View>
 
             <ScrollView style={styles.modalContent}>
-              {/* Estado de Autenticación */}
               {authDisplay && (
                 <View
                   style={[
@@ -767,20 +714,10 @@ return (
                   <View style={styles.authStatusContent}>
                     <Text style={styles.authIcon}>{authDisplay.icon}</Text>
                     <View style={styles.authTextContainer}>
-                      <Text
-                        style={[
-                          styles.authMessage,
-                          { color: authDisplay.textColor },
-                        ]}
-                      >
+                      <Text style={[styles.authMessage, { color: authDisplay.textColor }]}>
                         {authDisplay.message}
                       </Text>
-                      <Text
-                        style={[
-                          styles.authSubMessage,
-                          { color: authDisplay.textColor },
-                        ]}
-                      >
+                      <Text style={[styles.authSubMessage, { color: authDisplay.textColor }]}>
                         {authDisplay.subMessage}
                       </Text>
                     </View>
@@ -788,23 +725,18 @@ return (
                 </View>
               )}
 
-              {/* Estado del Proceso */}
               {processStatus && (
                 <View style={styles.processStatusContainer}>
-                  <Text style={styles.processStatusText}>
-                    Estado: {processStatus}
-                  </Text>
+                  <Text style={styles.processStatusText}>Estado: {processStatus}</Text>
                 </View>
               )}
 
-              {/* WebView con SFI Facial -> ahora NO se renderiza en la app, usamos navegador externo */}
               {showModal ? (
                 <View style={styles.webViewContainer}>
                   <WebView
                     source={{
                       html: getWebViewHTML(),
-                      baseUrl:
-                        "https://reconocimiento-facial-safe.service.saferut.com/index.js",
+                      baseUrl: "https://reconocimiento-facial-safe.service.saferut.com/index.js",
                     }}
                     originWhitelist={["*"]}
                     javaScriptEnabled={true}
@@ -831,7 +763,6 @@ return (
                 </View>
               )}
 
-              {/* Countdown de auto-cierre */}
               {countdown > 0 && (
                 <View style={styles.countdownContainer}>
                   <Text style={styles.countdownText}>
@@ -859,6 +790,19 @@ const styles = StyleSheet.create({
   },
   required: {
     color: "#F56565",
+  },
+  offlineBadge: {
+    backgroundColor: "#FEF3C7",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    marginBottom: 8,
+    alignSelf: "flex-start",
+  },
+  offlineBadgeText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#92400E",
   },
   inputRow: {
     flexDirection: "row",
@@ -889,6 +833,9 @@ const styles = StyleSheet.create({
   },
   firmButtonDisabled: {
     backgroundColor: "#CBD5E1",
+  },
+  firmButtonSuccess: {
+    backgroundColor: "#10B981",
   },
   firmButtonText: {
     color: "#FFFFFF",
@@ -927,18 +874,32 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#A7F3D0",
   },
+  successHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  successIcon: {
+    fontSize: 24,
+    marginRight: 12,
+  },
+  successTextContainer: {
+    flex: 1,
+  },
   successTitle: {
     fontSize: 13,
     fontWeight: "600",
     color: "#065F46",
     marginBottom: 4,
   },
-  successText: {
+  successSubtitle: {
     fontSize: 12,
     color: "#047857",
+    marginBottom: 2,
   },
-
-  // Modal
+  successDetails: {
+    fontSize: 11,
+    color: "#059669",
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0, 0, 0, 0.5)",
@@ -984,20 +945,6 @@ const styles = StyleSheet.create({
   closeButtonText: {
     fontSize: 20,
     color: "#4A5568",
-  },
-  saveButton: {
-    marginRight: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: "#10B981",
-    borderRadius: 8,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  saveButtonText: {
-    color: "#FFFFFF",
-    fontWeight: "700",
-    fontSize: 13,
   },
   modalContent: {
     flex: 1,
@@ -1065,30 +1012,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#4A5568",
   },
-  externalNoticeContainer: {
-    height: 240,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
-    backgroundColor: "#F7FAFC",
+  countdownContainer: {
+    backgroundColor: "#FEF3C7",
+    padding: 10,
     borderRadius: 8,
-    marginBottom: 16,
+    marginTop: 16,
   },
-  externalNoticeText: {
+  countdownText: {
+    fontSize: 13,
+    color: "#92400E",
     textAlign: "center",
-    color: "#2D3748",
-    marginBottom: 16,
-    fontSize: 14,
-  },
-  openBrowserButton: {
-    backgroundColor: "#0F8593",
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-  },
-  openBrowserButtonText: {
-    color: "#FFFFFF",
-    fontWeight: "700",
+    fontWeight: "600",
   },
 });
 

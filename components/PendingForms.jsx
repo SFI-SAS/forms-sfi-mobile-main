@@ -9,15 +9,14 @@ import {
   BackHandler,
   Dimensions,
   Modal,
-  TextInput,
   Keyboard,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
-import { HomeIcon } from "./Icons";
-import { LinearGradient } from "expo-linear-gradient";
+// import { HomeIcon } from "./Icons"; // Se asume que este ícono ya no es necesario en esta pantalla.
+// import { LinearGradient } from "expo-linear-gradient"; // Se elimina, usando un fondo plano.
 
 const { width, height } = Dimensions.get("window");
 const INACTIVITY_TIMEOUT = 10 * 60 * 1000; // 10 minutos
@@ -398,330 +397,388 @@ export default function PendingForms() {
   };
 
   return (
-    <LinearGradient colors={["#4B34C7", "#4B34C7"]} style={{ flex: 1 }}>
-      <View style={{ flex: 1 }}>
-        <View style={styles.formsScrollWrapper}>
-          <ScrollView
-            style={{ flex: 1 }}
-            contentContainerStyle={{
-              paddingBottom: 24,
-              paddingHorizontal: 0,
-            }}
-            showsVerticalScrollIndicator={false}
-          >
-            <Text style={styles.header}>Offline Submitted Forms</Text>
-            {pendingForms.length === 0 ? (
-              <Text style={styles.noPendingText}>
-                No offline forms pending.
-              </Text>
-            ) : (
-              pendingForms.map((form, index) => (
-                <View key={index} style={styles.formCardWrapper}>
-                  <View style={styles.formCard}>
-                    <Text style={styles.formText}>Form ID: {form.id}</Text>
-                    {form.title ? (
-                      <Text style={styles.formTitle}>Title: {form.title}</Text>
-                    ) : null}
-                    {form.description ? (
-                      <Text style={styles.formDescription}>
-                        Description: {form.description}
-                      </Text>
-                    ) : null}
-                    {/* Botón para mostrar/ocultar respuestas */}
-                    <TouchableOpacity
-                      style={{
-                        marginTop: 8,
-                        marginBottom: 4,
-                        alignSelf: "flex-start",
-                        backgroundColor: "#4B34C7",
-                        borderRadius: 6,
-                        paddingVertical: 6,
-                        paddingHorizontal: 14,
-                      }}
-                      onPress={() =>
-                        setShowAnswers((prev) => ({
-                          ...prev,
-                          [form.id]: !prev[form.id],
-                        }))
-                      }
-                    >
-                      <Text style={{ color: "#fff", fontWeight: "bold" }}>
-                        {showAnswers[form.id]
-                          ? "Ocultar respuestas"
-                          : "Ver respuestas"}
-                      </Text>
-                    </TouchableOpacity>
-                    {/* Mostrar respuestas si está expandido */}
-                    {showAnswers[form.id] && (
-                      <View
-                        style={{
-                          backgroundColor: "#f3f4f6",
-                          borderRadius: 8,
-                          padding: 10,
-                          marginBottom: 8,
-                          marginTop: 2,
-                        }}
-                      >
-                        {Array.isArray(answersByForm[form.id]) &&
-                        answersByForm[form.id].length > 0 ? (
-                          answersByForm[form.id].map((ans, i) => (
-                            <View
-                              key={i}
-                              style={{
-                                marginBottom: 6,
-                                borderBottomWidth: 1,
-                                borderBottomColor: "#e5e7eb",
-                                paddingBottom: 4,
-                              }}
-                            >
-                              <Text
-                                style={{ color: "#4B34C7", fontWeight: "bold" }}
-                              >
-                                Pregunta:{" "}
-                                {questionsByForm[form.id]?.[ans.question_id] ||
-                                  ans.question_text ||
-                                  ans.question_id}
-                              </Text>
-                              <Text style={{ color: "#222" }}>
-                                Respuesta:{" "}
-                                {ans.answer_text ||
-                                  ans.response ||
-                                  ans.file_path ||
-                                  ""}
-                              </Text>
-                            </View>
-                          ))
-                        ) : (
-                          <Text style={{ color: "#888" }}>
-                            No hay respuestas guardadas.
-                          </Text>
-                        )}
-                      </View>
-                    )}
-                    <TouchableOpacity
-                      style={
-                        isOnline ? styles.submitButton : styles.Offlinebutton
-                      }
-                      onPress={async () => {
-                        try {
-                          await handleSubmitPendingForm(form);
-                        } catch (error) {
-                          console.error("❌ Error al presionar botón enviar:", error);
-                          await handleAuthError(error);
-                        }
-                      }}
-                      disabled={!isOnline || loading}
-                    >
-                      <Text style={styles.submitButtonText}>
-                        {loading
-                          ? "Enviando..."
-                          : isOnline
-                            ? "Send"
-                            : "No connection"}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))
-            )}
-          </ScrollView>
+    // Se elimina LinearGradient y se usa un fondo corporativo (blanco/gris claro)
+    <View style={styles.baseContainer}>
+      <View style={styles.contentWrapper}>
+        <View style={styles.headerBar}>
+          {/* Se usa el color primario para el encabezado */}
+          <Text style={styles.header}>Sincronización Pendiente</Text>
         </View>
-        <Modal
-          visible={showLogoutModal}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setShowLogoutModal(false)}
+
+        <ScrollView
+          style={styles.formsScrollView}
+          contentContainerStyle={styles.formsContentContainer}
+          showsVerticalScrollIndicator={false}
         >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>
-                Session closed due to inactivity
+          {pendingForms.length === 0 ? (
+            <View style={styles.noPendingBox}>
+              <Text style={styles.noPendingText}>
+                No hay formularios pendientes de sincronización. ✨
               </Text>
-              <Text style={styles.modalText}>
-                For security, your session was closed automatically after 10
-                minutes of inactivity.
-              </Text>
-              <TouchableOpacity
-                style={[styles.modalButton, { backgroundColor: "#2563eb" }]}
-                onPress={() => {
-                  setShowLogoutModal(false);
-                  router.replace("/");
-                }}
-              >
-                <Text style={styles.modalButtonText}>Go to login</Text>
-              </TouchableOpacity>
             </View>
-          </View>
-        </Modal>
+          ) : (
+            pendingForms.map((form, index) => (
+              <View key={index} style={styles.formCardWrapper}>
+                <View style={styles.formCard}>
+                  <View style={styles.formHeader}>
+                    {/* Título más destacado con color primario */}
+                    <Text style={styles.formTitle}>
+                      {form.title || `Formulario sin título`}
+                    </Text>
+                    {/* ID como texto secundario */}
+                    <Text style={styles.formIdText}>ID: {form.id}</Text>
+                  </View>
+
+                  {form.description ? (
+                    <Text style={styles.formDescription}>
+                      **Descripción:** {form.description}
+                    </Text>
+                  ) : null}
+
+                  {/* Botón para mostrar/ocultar respuestas: estilo secundario */}
+                  <TouchableOpacity
+                    style={styles.toggleButton}
+                    onPress={() =>
+                      setShowAnswers((prev) => ({
+                        ...prev,
+                        [form.id]: !prev[form.id],
+                      }))
+                    }
+                  >
+                    <Text style={styles.toggleButtonText}>
+                      {showAnswers[form.id]
+                        ? "Ocultar Respuestas (▲)"
+                        : "Ver Respuestas (▼)"}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {/* Mostrar respuestas si está expandido */}
+                  {showAnswers[form.id] && (
+                    <View style={styles.answersContainer}>
+                      {Array.isArray(answersByForm[form.id]) &&
+                      answersByForm[form.id].length > 0 ? (
+                        answersByForm[form.id].map((ans, i) => (
+                          <View key={i} style={styles.answerItem}>
+                            <Text style={styles.answerQuestion}>
+                              **Pregunta:**{" "}
+                              {questionsByForm[form.id]?.[ans.question_id] ||
+                                ans.question_text ||
+                                `ID ${ans.question_id}`}
+                            </Text>
+                            <Text style={styles.answerText}>
+                              **Respuesta:**{" "}
+                              {ans.answer_text ||
+                                ans.response ||
+                                ans.file_path ||
+                                "Sin respuesta registrada."}
+                            </Text>
+                          </View>
+                        ))
+                      ) : (
+                        <Text style={styles.noAnswersText}>
+                          No hay respuestas detalladas guardadas.
+                        </Text>
+                      )}
+                    </View>
+                  )}
+
+                  {/* Botón de Sincronización: estilo primario */}
+                  <TouchableOpacity
+                    style={[
+                      styles.syncButton,
+                      !isOnline && styles.offlineSyncButton,
+                      loading && { opacity: 0.7 }, // Opacidad al cargar
+                    ]}
+                    onPress={async () => {
+                      try {
+                        await handleSubmitPendingForm(form);
+                      } catch (error) {
+                        console.error(
+                          "❌ Error al presionar botón enviar:",
+                          error
+                        );
+                        await handleAuthError(error);
+                      }
+                    }}
+                    disabled={!isOnline || loading}
+                  >
+                    <Text style={styles.syncButtonText}>
+                      {loading
+                        ? "ENVIANDO..."
+                        : isOnline
+                        ? "SINCRONIZAR AHORA"
+                        : "SIN CONEXIÓN"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))
+          )}
+        </ScrollView>
       </View>
-    </LinearGradient>
+
+      {/* Modal de Cierre de Sesión (ajustando colores a la paleta) */}
+      <Modal
+        visible={showLogoutModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowLogoutModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Sesión Cerrada por Inactividad</Text>
+            <Text style={styles.modalText}>
+              Por seguridad, tu sesión se cerró automáticamente después de 10
+              minutos.
+            </Text>
+            <TouchableOpacity
+              style={[styles.modalButton, { backgroundColor: "#4B34C7" }]}
+              onPress={() => {
+                setShowLogoutModal(false);
+                router.replace("/");
+              }}
+            >
+              <Text style={styles.modalButtonText}>Ir a Iniciar Sesión</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    </View>
   );
 }
 
+// ---
+// Estilos Empresariales y Optimizados
+// ---
+
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: width * 0.05, backgroundColor: "#f7fafc" },
+  // Colores Base
+  COLOR_PRIMARY: "#4B34C7", // Morado/Azul Oscuro
+  COLOR_SECONDARY: "#12A0AF", // Cian/Azul Verdoso
+  COLOR_BACKGROUND: "#F5F7FA", // Gris muy claro
+  COLOR_TEXT_DARK: "#2C3E50", // Gris Oscuro para mejor lectura
+  COLOR_DANGER: "#E74C3C", // Rojo (para "sin conexión")
+
+  // Contenedor principal
+  baseContainer: {
+    flex: 1,
+    backgroundColor: "#F5F7FA", // Fondo gris muy claro para un look profesional
+  },
+  contentWrapper: {
+    flex: 1,
+    backgroundColor: "#FFFFFF", // Caja principal blanca
+    marginHorizontal: 16,
+    marginTop: 24,
+    marginBottom: 16,
+    borderRadius: 12,
+    // Sombra sutil para un efecto elevado
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+
+  // Encabezado
+  headerBar: {
+    paddingVertical: 18,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EAECEF", // Separador sutil
+    paddingHorizontal: 20,
+  },
   header: {
-    fontSize: width * 0.06,
-    fontWeight: "bold",
-    marginBottom: height * 0.02,
-    color: "#4B34C7",
-    textAlign: "center",
+    fontSize: 22,
+    fontWeight: "700",
+    color: "#4B34C7", // Color primario para el título
+    textAlign: "left",
     letterSpacing: 0.5,
-    textShadowColor: "#12A0AF22",
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
+  },
+
+  // ScrollView y Listado
+  formsScrollView: {
+    flex: 1,
+  },
+  formsContentContainer: {
+    padding: 16,
+  },
+  noPendingBox: {
+    backgroundColor: "#E6F7F7", // Fondo sutil con color secundario
+    padding: 20,
+    borderRadius: 8,
+    marginTop: 10,
+    borderLeftWidth: 4,
+    borderLeftColor: "#12A0AF",
   },
   noPendingText: {
-    fontSize: width * 0.045,
+    fontSize: 16,
     color: "#12A0AF",
     textAlign: "center",
     fontStyle: "italic",
-    marginVertical: 16,
   },
-  formsScrollWrapper: {
-    flex: 1,
-    marginHorizontal: width * 0.03,
-    marginTop: 12,
-    marginBottom: 0,
-    borderRadius: width * 0.035,
-    overflow: "hidden",
-    maxHeight: height - (height * 0.07 + height * 0.1),
-    backgroundColor: "#fff",
-    borderWidth: 1.5,
-    borderColor: "#12A0AF",
-    shadowColor: "#4B34C7",
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 8,
-  },
+
+  // Tarjeta de Formulario
   formCardWrapper: {
-    marginBottom: height * 0.018,
-    borderRadius: width * 0.035,
-    overflow: "visible",
-    shadowColor: "#12A0AF",
-    shadowOpacity: 0.13,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 8,
-    backgroundColor: "transparent",
-    marginTop: 10,
-    marginLeft: 10,
-    marginRight: 10,
+    marginBottom: 16,
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    // Sombra más pequeña para cada tarjeta
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: "#EAECEF",
   },
   formCard: {
-    backgroundColor: "#f7fafc",
-    borderRadius: width * 0.035,
-    padding: width * 0.04,
-    borderWidth: 1.5,
-    borderColor: "#4B34C7",
+    padding: 16,
+    borderRadius: 10,
   },
-  formText: {
-    fontSize: width * 0.05,
-    fontWeight: "bold",
-    color: "#12A0AF",
-    marginBottom: 2,
-    letterSpacing: 0.2,
+  formHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F3F4F6", // Separador
+    paddingBottom: 8,
   },
   formTitle: {
-    fontSize: width * 0.045,
+    flex: 1,
+    fontSize: 18,
     fontWeight: "bold",
-    color: "#4B34C7",
-    marginBottom: 2,
-    letterSpacing: 0.2,
+    color: "#4B34C7", // Color primario
+    marginRight: 10,
+  },
+  formIdText: {
+    fontSize: 14,
+    color: "#607D8B", // Gris neutro para información secundaria
+    fontWeight: "500",
   },
   formDescription: {
-    fontSize: width * 0.04,
-    color: "#12A0AF",
-    marginBottom: 4,
+    fontSize: 14,
+    color: "#4B34C7",
+    marginBottom: 10,
+    lineHeight: 20,
+  },
+
+  // Botón Ver/Ocultar
+  toggleButton: {
+    marginTop: 10,
+    marginBottom: 10,
+    alignSelf: "flex-start",
+    backgroundColor: "#E6F7F7", // Fondo muy claro de color secundario
+    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: "#12A0AF",
+  },
+  toggleButtonText: {
+    color: "#12A0AF", // Texto con color secundario
+    fontWeight: "600",
+    fontSize: 13,
+  },
+
+  // Contenedor de Respuestas
+  answersContainer: {
+    backgroundColor: "#F9FAFB", // Fondo muy claro para diferenciar el área de respuestas
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#EAECEF",
+  },
+  answerItem: {
+    marginBottom: 8,
+    paddingBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EAECEF",
+  },
+  answerQuestion: {
+    color: "#4B34C7", // Pregunta con color primario
+    fontWeight: "600",
+    fontSize: 14,
+  },
+  answerText: {
+    color: "#2C3E50", // Respuesta con color de texto oscuro
+    fontSize: 14,
+    marginTop: 2,
+  },
+  noAnswersText: {
+    color: "#888",
     fontStyle: "italic",
+    textAlign: "center",
   },
-  submitButton: {
-    marginTop: height * 0.01,
-    padding: height * 0.02,
-    backgroundColor: "#12A0AF",
-    borderRadius: width * 0.02,
+
+  // Botones de Sincronización
+  syncButton: {
+    marginTop: 10,
+    paddingVertical: 14,
+    backgroundColor: "#12A0AF", // Color Secundario para acción positiva
+    borderRadius: 8,
     alignItems: "center",
-    borderWidth: 1.5,
-    borderColor: "#4B34C7",
+    // Sombra que resalta la acción
     shadowColor: "#12A0AF",
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
   },
-  Offlinebutton: {
-    marginTop: height * 0.01,
-    padding: height * 0.02,
-    backgroundColor: "#EB2525FF",
-    borderRadius: width * 0.02,
-    alignItems: "center",
-    borderWidth: 1.5,
-    borderColor: "#4B34C7",
-    shadowColor: "#EB2525FF",
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+  offlineSyncButton: {
+    backgroundColor: "#E74C3C", // Rojo para indicar falta de conexión/alerta
+    shadowColor: "#E74C3C",
+    shadowOpacity: 0.2,
   },
-  submitButtonText: {
+  syncButtonText: {
     color: "white",
     fontWeight: "bold",
-    fontSize: width * 0.045,
-    letterSpacing: 0.2,
+    fontSize: 16,
+    letterSpacing: 0.5,
   },
+
+  // Estilos del Modal (Ajustados ligeramente)
   modalOverlay: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "rgba(18,160,175,0.13)",
+    backgroundColor: "rgba(0, 0, 0, 0.4)", // Fondo oscuro y semi-transparente
   },
   modalContent: {
-    width: "80%",
+    width: "85%",
     backgroundColor: "#fff",
-    borderRadius: 14,
+    borderRadius: 12,
     padding: 24,
     alignItems: "center",
-    borderWidth: 2,
-    borderColor: "#12A0AF",
-    shadowColor: "#4B34C7",
-    shadowOpacity: 0.13,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 8,
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 10,
   },
   modalTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: "bold",
-    marginBottom: 10,
+    marginBottom: 12,
     color: "#4B34C7",
     textAlign: "center",
   },
   modalText: {
-    fontSize: 16,
+    fontSize: 15,
     textAlign: "center",
     marginBottom: 20,
-    color: "#12A0AF",
-  },
-  modalInput: {
-    width: "100%",
-    padding: 10,
-    borderWidth: 1,
-    borderColor: "#12A0AF",
-    borderRadius: 5,
-    marginBottom: 20,
-    backgroundColor: "#e6fafd",
+    color: "#607D8B",
   },
   modalButton: {
-    flex: 1,
-    padding: 10,
-    borderRadius: 5,
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    borderRadius: 8,
     alignItems: "center",
-    marginHorizontal: 5,
-    backgroundColor: "#12A0AF",
+    backgroundColor: "#4B34C7", // Usando el color Primario
+    marginTop: 10,
   },
   modalButtonText: {
     color: "white",
     fontWeight: "bold",
+    fontSize: 16,
   },
 });
