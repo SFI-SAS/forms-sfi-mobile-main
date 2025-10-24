@@ -8,129 +8,150 @@ import {
   Platform,
   Dimensions,
 } from "react-native";
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { HomeIcon } from "./Icons";
 import { MaterialIcons } from "@expo/vector-icons";
 
 const { width, height } = Dimensions.get("window");
 
+// Detecta si es tablet o teléfono
+const isTablet = width >= 768;
+const isSmallDevice = width < 375;
+
 export default function BottomTabBar({ activeTab, onTabPress }) {
-  // Much more aggressive spacing from bottom
-  const getBottomOffset = () => {
-    if (Platform.OS === 'ios') {
-      return height > 800 ? 50 : 35; // iPhone X+ gets even more space
-    } else {
-      return height > 700 ? 45 : 30; // Android with gesture navigation
-    }
-  };
+  const insets = useSafeAreaInsets();
+  
+  // Usa el inset bottom real del dispositivo + un pequeño margen
+  const bottomOffset = Math.max(insets.bottom, 8) + 8;
   
   return (
-    <View style={[styles.tabBarWrapper, { bottom: getBottomOffset() }]}>
+    <View style={[styles.tabBarWrapper, { paddingBottom: bottomOffset }]}>
+      {/* Sombra superior sutil para efecto flotante */}
+      <View style={styles.shadowLayer} />
+      
       <View style={styles.tabBarContainer}>
-        <TabBarButton
-          icon={<HomeIcon color={activeTab === "home" ? "#12A0AF" : "#4B34C7"} />}
-          label="Home"
-          active={activeTab === "home"}
-          onPress={() => onTabPress("home")}
-        />
-        <TabBarButton
-          icon={
-            <Image
-              source={require("../assets/fact_check_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24.png")}
-              style={[
-                styles.tabBarIcon,
-                activeTab === "my-forms" && { tintColor: "#12A0AF" },
-              ]}
-            />
-          }
-          label="Submitted"
-          active={activeTab === "my-forms"}
-          onPress={() => onTabPress("my-forms")}
-        />
-        <TabBarButton
-          icon={
-            <Image
-              source={require("../assets/sync_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24.png")}
-              style={[
-                styles.tabBarIcon,
-                activeTab === "pending-forms" && { tintColor: "#12A0AF" },
-              ]}
-            />
-          }
-          label="Pending"
-          active={activeTab === "pending-forms"}
-          onPress={() => onTabPress("pending-forms")}
-        />
-        <TabBarButton
-          icon={
-            <MaterialIcons
-              name="check-circle"
-              size={width * 0.06}
-              color={activeTab === "approvals" ? "#12A0AF" : "#4B34C7"}
-            />
-          }
-          label="Approvals"
-          active={activeTab === "approvals"}
-          onPress={() => onTabPress("approvals")}
-        />
-        <TabBarButton
-          icon={
-            <MaterialIcons
-              name="settings"
-              size={width * 0.06}
-              color={activeTab === "settings" ? "#12A0AF" : "#4B34C7"}
-            />
-          }
-          label="Settings"
-          active={activeTab === "settings"}
-          onPress={() => onTabPress("settings")}
-        />
-        <TabBarButton
-          icon={
-            <Image
-              source={require("../assets/logout_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24 (1).png")}
-              style={[
-                styles.tabBarIcon,
-                activeTab === "logout" && { tintColor: "#ef4444" },
-              ]}
-            />
-          }
-          label="Logout"
-          active={activeTab === "logout"}
-          onPress={() => onTabPress("logout")}
-          danger
-          last
-        />
+        {/* Indicador visual superior (línea decorativa) */}
+        <View style={styles.topIndicator} />
+        
+        <View style={styles.tabBarInner}>
+          <TabBarButton
+            icon={<HomeIcon color={activeTab === "home" ? "#12A0AF" : "#64748b"} />}
+            label="Home"
+            active={activeTab === "home"}
+            onPress={() => onTabPress("home")}
+          />
+          <TabBarButton
+            icon={
+              <Image
+                source={require("../assets/fact_check_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24.png")}
+                style={[
+                  styles.tabBarIcon,
+                  { tintColor: activeTab === "my-forms" ? "#12A0AF" : "#64748b" },
+                ]}
+              />
+            }
+            label="Submitted"
+            active={activeTab === "my-forms"}
+            onPress={() => onTabPress("my-forms")}
+          />
+          <TabBarButton
+            icon={
+              <Image
+                source={require("../assets/sync_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24.png")}
+                style={[
+                  styles.tabBarIcon,
+                  { tintColor: activeTab === "pending-forms" ? "#12A0AF" : "#64748b" },
+                ]}
+              />
+            }
+            label="Pending"
+            active={activeTab === "pending-forms"}
+            onPress={() => onTabPress("pending-forms")}
+          />
+          <TabBarButton
+            icon={
+              <MaterialIcons
+                name="check-circle"
+                size={isTablet ? 28 : isSmallDevice ? 20 : 24}
+                color={activeTab === "approvals" ? "#12A0AF" : "#64748b"}
+              />
+            }
+            label="Approvals"
+            active={activeTab === "approvals"}
+            onPress={() => onTabPress("approvals")}
+          />
+          <TabBarButton
+            icon={
+              <MaterialIcons
+                name="settings"
+                size={isTablet ? 28 : isSmallDevice ? 20 : 24}
+                color={activeTab === "settings" ? "#12A0AF" : "#64748b"}
+              />
+            }
+            label="Settings"
+            active={activeTab === "settings"}
+            onPress={() => onTabPress("settings")}
+          />
+          <TabBarButton
+            icon={
+              <Image
+                source={require("../assets/logout_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24 (1).png")}
+                style={[
+                  styles.tabBarIcon,
+                  { tintColor: activeTab === "logout" ? "#ef4444" : "#64748b" },
+                ]}
+              />
+            }
+            label="Logout"
+            active={activeTab === "logout"}
+            onPress={() => onTabPress("logout")}
+            danger
+          />
+        </View>
       </View>
     </View>
   );
 }
 
-function TabBarButton({ icon, label, active, onPress, danger, last }) {
+function TabBarButton({ icon, label, active, onPress, danger }) {
   return (
     <TouchableOpacity
       style={[
         styles.tabBarButton,
         active && styles.tabBarButtonActive,
-        danger && styles.tabBarButtonDanger,
-        last && styles.tabBarButtonLast,
       ]}
       onPress={onPress}
-      activeOpacity={0.8}
+      activeOpacity={0.7}
     >
-      {icon}
+      {/* Contenedor del ícono con efecto de escala */}
+      <View style={[
+        styles.iconContainer,
+        active && styles.iconContainerActive,
+        danger && active && styles.iconContainerDanger,
+      ]}>
+        {icon}
+      </View>
+      
+      {/* Label con mejor tipografía */}
       <Text
         style={[
           styles.tabBarLabel,
-          active && styles.tabBarLabelActive,
-          danger && styles.tabBarLabelDanger,
+          active && (danger ? styles.tabBarLabelDanger : styles.tabBarLabelActive),
         ]}
         numberOfLines={1}
         adjustsFontSizeToFit={true}
-        minimumFontScale={0.7}
-        ellipsizeMode="clip"
+        minimumFontScale={0.65}
       >
         {label}
       </Text>
+      
+      {/* Indicador de tab activa - punto inferior */}
+      {active && (
+        <View style={[
+          styles.activeIndicator,
+          danger && styles.activeIndicatorDanger,
+        ]} />
+      )}
     </TouchableOpacity>
   );
 }
@@ -138,64 +159,106 @@ function TabBarButton({ icon, label, active, onPress, danger, last }) {
 const styles = StyleSheet.create({
   tabBarWrapper: {
     position: 'absolute',
-    left: 15,
-    right: 15,
+    left: width * 0.03,
+    right: width * 0.03,
+    bottom: 0,
     zIndex: 1000,
+    paddingHorizontal: isTablet ? 20 : 0,
+  },
+  shadowLayer: {
+    position: 'absolute',
+    top: -8,
+    left: 0,
+    right: 0,
+    height: 8,
+    backgroundColor: 'transparent',
+    shadowColor: "#4B34C7",
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: -4 },
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
   },
   tabBarContainer: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    backgroundColor: "#fff",
-    borderRadius: 20, // Fully rounded floating bar
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    elevation: 20, // Higher elevation for floating effect
+    position: 'relative',
+    backgroundColor: "#ffffff",
+    borderRadius: isTablet ? 28 : 24,
+    paddingTop: 2,
+    paddingBottom: Platform.OS === "ios" ? 4 : 2,
+    paddingHorizontal: isTablet ? 16 : width * 0.015,
+    elevation: 24,
     shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: -6 },
     borderWidth: 1,
-    borderColor: "#f0f0f0",
+    borderColor: "#f1f5f9",
+    overflow: 'hidden',
+  },
+  topIndicator: {
+    position: 'absolute',
+    top: 0,
+    left: '20%',
+    right: '20%',
+    height: 3,
+    backgroundColor: '#12A0AF',
+    borderBottomLeftRadius: 3,
+    borderBottomRightRadius: 3,
+    opacity: 0.6,
+  },
+  tabBarInner: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "center",
+    paddingVertical: isTablet ? 8 : 4,
+    backgroundColor: "transparent",
+    borderRadius: isTablet ? 24 : 20,
+    paddingHorizontal: isTablet ? 12 : 4,
   },
   tabBarButton: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 6,
-    paddingHorizontal: 2,
-    borderRadius: 12,
-    flexDirection: "column",
-    marginHorizontal: 1,
-    minWidth: width * 0.12,
-    maxWidth: width * 0.15,
-    minHeight: 50,
+    paddingVertical: isTablet ? 8 : 6,
+    paddingHorizontal: isSmallDevice ? 2 : 4,
+    borderRadius: 16,
+    position: 'relative',
+    minHeight: isTablet ? 65 : isSmallDevice ? 50 : 56,
+    maxWidth: isTablet ? width * 0.12 : width * 0.14,
   },
   tabBarButtonActive: {
-    backgroundColor: "#4B34C720",
+    backgroundColor: "rgba(18, 160, 175, 0.10)",
+    transform: [{ scale: 1.02 }],
   },
-  tabBarButtonDanger: {
-    backgroundColor: "#ef444415",
+  iconContainer: {
+    marginBottom: isTablet ? 4 : 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: isTablet ? 36 : isSmallDevice ? 26 : 30,
+    height: isTablet ? 36 : isSmallDevice ? 26 : 30,
+    borderRadius: isTablet ? 18 : 15,
+    backgroundColor: 'transparent',
+    transition: 'all 0.2s ease',
   },
-  tabBarButtonLast: {
-    marginLeft: 4,
-    minWidth: width * 0.13,
-    maxWidth: width * 0.15,
+  iconContainerActive: {
+    backgroundColor: "transparent",
+    transform: [{ scale: 1.08 }],
+  },
+  iconContainerDanger: {
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
   },
   tabBarIcon: {
-    width: width * 0.055,
-    height: width * 0.055,
-    marginBottom: 2,
-    tintColor: "#4B34C7",
+    width: isTablet ? 26 : isSmallDevice ? 18 : 22,
+    height: isTablet ? 26 : isSmallDevice ? 18 : 22,
     resizeMode: "contain",
   },
   tabBarLabel: {
-    fontSize: width * 0.026,
-    color: "#4B34C7",
+    fontSize: isTablet ? width * 0.018 : isSmallDevice ? width * 0.025 : width * 0.027,
+    color: "#64748b",
     fontWeight: "600",
-    width: "100%",
     textAlign: "center",
-    marginTop: 1,
+    marginTop: 2,
+    letterSpacing: 0.2,
   },
   tabBarLabelActive: {
     color: "#12A0AF",
@@ -203,5 +266,18 @@ const styles = StyleSheet.create({
   },
   tabBarLabelDanger: {
     color: "#ef4444",
+    fontWeight: "700",
+  },
+  activeIndicator: {
+    position: 'absolute',
+    bottom: isTablet ? 4 : 3,
+    width: isTablet ? 36 : 28,
+    height: isTablet ? 4 : 3,
+    backgroundColor: "#12A0AF",
+    borderRadius: 2,
+    opacity: 0.9,
+  },
+  activeIndicatorDanger: {
+    backgroundColor: "#ef4444",
   },
 });

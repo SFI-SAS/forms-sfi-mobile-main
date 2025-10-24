@@ -202,97 +202,102 @@ const CategoryCard = ({ category, onToggle, isExpanded, onFormPress }) => (
 // Barra de tabs inferior fija, ahora incluye Home y maneja navegación global
 const BottomTabBar = ({ activeTab, onTabPress }) => (
   <View style={styles.tabBarContainer}>
-    <TabBarButton
-      icon={
-        <View>
-          <HomeIcon color={activeTab === "home" ? "#12A0AF" : "#4B34C7"} />
-        </View>
-      }
-      label="Home"
-      active={activeTab === "home"}
-      onPress={() => onTabPress("home")}
-    />
-    <TabBarButton
-      icon={
-        <View>
-          <Image
-            source={require("../assets/fact_check_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24.png")}
-            style={[
-              styles.tabBarIcon,
-              activeTab === "my-forms" && { tintColor: "#12A0AF" },
-            ]}
-          />
-        </View>
-      }
-      label="Submitted"
-      active={activeTab === "my-forms"}
-      onPress={() => onTabPress("my-forms")}
-    />
-    <TabBarButton
-      icon={
-        <View>
-          <Image
-            source={require("../assets/sync_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24.png")}
-            style={[
-              styles.tabBarIcon,
-              activeTab === "pending-forms" && { tintColor: "#12A0AF" },
-            ]}
-          />
-        </View>
-      }
-      label="Pending"
-      active={activeTab === "pending-forms"}
-      onPress={() => onTabPress("pending-forms")}
-    />
-    <TabBarButton
-      icon={
-        <View>
-          <Image
-            source={require("../assets/logout_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24 (1).png")}
-            style={[
-              styles.tabBarIcon,
-              activeTab === "logout" && { tintColor: "#ef4444" },
-            ]}
-          />
-        </View>
-      }
-      label="Logout"
-      active={activeTab === "logout"}
-      onPress={() => onTabPress("logout")}
-      danger
-    />
+    <View style={styles.tabBarInner}>
+      <TabBarButton
+        icon={
+          <View style={styles.iconWrapper}>
+            <HomeIcon color={activeTab === "home" ? "#12A0AF" : "#64748b"} />
+          </View>
+        }
+        label="Home"
+        active={activeTab === "home"}
+        onPress={() => onTabPress("home")}
+      />
+      <TabBarButton
+        icon={
+          <View style={styles.iconWrapper}>
+            <Image
+              source={require("../assets/fact_check_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24.png")}
+              style={[
+                styles.tabBarIcon,
+                { tintColor: activeTab === "my-forms" ? "#12A0AF" : "#64748b" },
+              ]}
+            />
+          </View>
+        }
+        label="Submitted"
+        active={activeTab === "my-forms"}
+        onPress={() => onTabPress("my-forms")}
+      />
+      <TabBarButton
+        icon={
+          <View style={styles.iconWrapper}>
+            <Image
+              source={require("../assets/sync_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24.png")}
+              style={[
+                styles.tabBarIcon,
+                { tintColor: activeTab === "pending-forms" ? "#12A0AF" : "#64748b" },
+              ]}
+            />
+          </View>
+        }
+        label="Pending"
+        active={activeTab === "pending-forms"}
+        onPress={() => onTabPress("pending-forms")}
+      />
+      <TabBarButton
+        icon={
+          <View style={styles.iconWrapper}>
+            <Image
+              source={require("../assets/logout_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24 (1).png")}
+              style={[
+                styles.tabBarIcon,
+                { tintColor: activeTab === "logout" ? "#ef4444" : "#64748b" },
+              ]}
+            />
+          </View>
+        }
+        label="Logout"
+        active={activeTab === "logout"}
+        onPress={() => onTabPress("logout")}
+        danger
+      />
+    </View>
   </View>
 );
-
 const TabBarButton = ({ icon, label, active, onPress, danger }) => (
   <TouchableOpacity
     style={[
       styles.tabBarButton,
       active && styles.tabBarButtonActive,
-      danger && styles.tabBarButtonDanger,
     ]}
     onPress={onPress}
-    activeOpacity={0.8}
+    activeOpacity={0.7}
   >
-    <View style={{ alignItems: 'center' }}>
-      {typeof icon === "string" ? (
-        <Image source={icon} style={styles.tabBarIcon} />
-      ) : (
-        <View>{icon}</View>
-      )}
-      <Text
-        style={[
-          styles.tabBarLabel,
-          active && styles.tabBarLabelActive,
-          danger && styles.tabBarLabelDanger,
-        ]}
-      >
-        {label}
-      </Text>
+    <View style={[
+      styles.tabBarIconContainer,
+      active && styles.tabBarIconContainerActive,
+      danger && active && styles.tabBarIconContainerDanger,
+    ]}>
+      {icon}
     </View>
+    <Text
+      style={[
+        styles.tabBarLabel,
+        active && (danger ? styles.tabBarLabelDanger : styles.tabBarLabelActive),
+      ]}
+      numberOfLines={1}
+    >
+      {label}
+    </Text>
+    {active && (
+      <View style={[
+        styles.activeIndicator,
+        danger && styles.activeIndicatorDanger,
+      ]} />
+    )}
   </TouchableOpacity>
 );
-
 // --- FIN COMPONENTES REUTILIZABLES ---
 
 // NUEVO: Componente padre que renderiza la tab-bar SIEMPRE y maneja navegación global
@@ -1300,36 +1305,89 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
   },
   tabBarContainer: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    alignItems: "center",
-    backgroundColor: "#fff",
-    borderTopWidth: 1,
-    borderColor: "#e5e7eb",
-    paddingVertical: 6,
-    paddingBottom: Platform.OS === "ios" ? 18 : 8,
-    elevation: 12,
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: -2 },
-    zIndex: 10,
-  },
-  tabBarButton: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 6,
-    borderRadius: 12,
-    flexDirection: "column",
-    marginHorizontal: 4,
-  },
-  tabBarButtonActive: {
-    backgroundColor: "#4B34C722",
-  },
-  tabBarButtonDanger: {
-    backgroundColor: "#ef444422",
-  },
+  backgroundColor: '#ffffff',
+  borderTopWidth: 0,
+  paddingVertical: 8,
+  paddingBottom: Platform.OS === "ios" ? 20 : 10,
+  paddingHorizontal: 8,
+  elevation: 20,
+  shadowColor: "#000",
+  shadowOpacity: 0.15,
+  shadowRadius: 12,
+  shadowOffset: { width: 0, height: -4 },
+},
+tabBarInner: {
+  flexDirection: "row",
+  justifyContent: "space-around",
+  alignItems: "center",
+  backgroundColor: "#f8fafc",
+  borderRadius: 20,
+  paddingVertical: 6,
+  paddingHorizontal: 4,
+  borderWidth: 1,
+  borderColor: "#e2e8f0",
+},
+tabBarButton: {
+  flex: 1,
+  alignItems: "center",
+  justifyContent: "center",
+  paddingVertical: 8,
+  paddingHorizontal: 4,
+  borderRadius: 16,
+  position: 'relative',
+  minHeight: 60,
+},
+tabBarButtonActive: {
+  backgroundColor: "rgba(18, 160, 175, 0.08)",
+},
+iconWrapper: {
+  width: width * 0.08,
+  height: width * 0.08,
+  alignItems: 'center',
+  justifyContent: 'center',
+},
+tabBarIconContainer: {
+  marginBottom: 4,
+  transform: [{ scale: 1 }],
+},
+tabBarIconContainerActive: {
+  transform: [{ scale: 1.1 }],
+},
+tabBarIconContainerDanger: {
+  backgroundColor: 'rgba(239, 68, 68, 0.08)',
+  borderRadius: 12,
+  padding: 6,
+},
+tabBarIcon: {
+  width: width * 0.065,
+  height: width * 0.065,
+},
+tabBarLabel: {
+  fontSize: width * 0.028,
+  color: "#64748b",
+  fontWeight: "600",
+  marginTop: 2,
+  textAlign: 'center',
+},
+tabBarLabelActive: {
+  color: "#12A0AF",
+  fontWeight: "700",
+},
+tabBarLabelDanger: {
+  color: "#ef4444",
+  fontWeight: "700",
+},
+activeIndicator: {
+  position: 'absolute',
+  bottom: 2,
+  width: 32,
+  height: 3,
+  backgroundColor: "#12A0AF",
+  borderRadius: 2,
+},
+activeIndicatorDanger: {
+  backgroundColor: "#ef4444",
+},
   tabBarIcon: {
     width: width * 0.07,
     height: width * 0.07,
