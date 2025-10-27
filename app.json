@@ -26,6 +26,7 @@
         "backgroundColor": "#ffffff"
       },
       "permissions": [
+        "CAMERA",
         "CAMERA"
       ],
       "package": "com.mauro_morales.formssfi"
@@ -44,6 +45,12 @@
         "projectId": "7658a23a-0b9f-41ae-8b1c-eac3c748de11"
       }
     },
-    "newArchEnabled": true
+    "newArchEnabled": true,
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/7658a23a-0b9f-41ae-8b1c-eac3c748de11"
+    }
   }
 }
