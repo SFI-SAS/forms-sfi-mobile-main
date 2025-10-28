@@ -28,7 +28,6 @@ import axios from "axios";
 import { Picker } from "@react-native-picker/picker";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { parseFormDesignToQuestions } from "../utils/formDesignParser";
-import FormPreviewRenderer from "./FormRenderer/FormPreviewRenderer";
 const { width, height } = Dimensions.get("window");
 
 const QUESTIONS_KEY = "offline_questions";
@@ -111,241 +110,6 @@ export default function FormatScreen(props) {
   const [selectedSigner, setSelectedSigner] = useState({});
   const [selectedUserId, setSelectedUserId] = useState("");
   const [facialUsers, setFacialUsers] = useState([]);
-  // form_design rendering state
-  const [formItems, setFormItems] = useState([]);
-  const [formValues, setFormValues] = useState({});
-  const [formErrors, setFormErrors] = useState({});
-
-  // --- Formatting helpers ---
-  const pad2 = (n) => (n < 10 ? `0${n}` : String(n));
-  const formatDateDDMMYYYY = (value) => {
-    if (!value && value !== 0) return "";
-    try {
-      // If already in YYYY-MM-DD
-      if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
-        const [Y, M, D] = value.split("-");
-        return `${D}-${M}-${Y}`;
-      }
-      // If already in DD-MM-YYYY
-      if (typeof value === "string" && /^\d{2}-\d{2}-\d{4}$/.test(value)) {
-        return value;
-      }
-      const d = value instanceof Date ? value : new Date(value);
-      if (!isNaN(d.getTime()))
-        return `${pad2(d.getDate())}-${pad2(d.getMonth() + 1)}-${d.getFullYear()}`;
-    } catch {}
-    return String(value);
-  };
-
-  const formatTimeHHmmHyphen = (value) => {
-    if (value === undefined || value === null) return "";
-    // Accept already formatted HH-MM
-    if (typeof value === "string" && /^\d{1,2}-\d{2}$/.test(value)) {
-      const [h, m] = value.split("-");
-      return `${pad2(Number(h))}-${pad2(Number(m))}`;
-    }
-    // Accept HH:MM and convert to hyphen
-    if (typeof value === "string" && /^\d{1,2}:\d{2}$/.test(value)) {
-      const [h, m] = value.split(":");
-      return `${pad2(Number(h))}-${pad2(Number(m))}`;
-    }
-    try {
-      const d = value instanceof Date ? value : new Date(value);
-      if (!isNaN(d.getTime()))
-        return `${pad2(d.getHours())}-${pad2(d.getMinutes())}`;
-    } catch {}
-    return String(value);
-  };
-
-  // --- Batch Id helper ---
-  const createBatchId = () => {
-    const rnd = Math.random().toString(36).slice(2, 8).toUpperCase();
-    return `BATCH-${Date.now()}-${rnd}`;
-  };
-
-  // --- Helpers to map form_design item ids to backend question ids ---
-  const getExternalQuestionIdFromItem = (it) => {
-    if (!it) return null;
-    const p = it.props || {};
-    return (
-      p.question ||
-      p.question_id ||
-      p.questionId ||
-      p.linkExternalId ||
-      it.linkExternalId ||
-      p.id ||
-      it.id ||
-      null
-    );
-  };
-
-  const findItemById = (items, targetId) => {
-    for (const it of items || []) {
-      if (!it) continue;
-      if (it.id === targetId) return it;
-      const t = (it.type || "").toLowerCase();
-      if (
-        t === "verticallayout" ||
-        t === "horizontallayout" ||
-        t === "repeater"
-      ) {
-        const found = findItemById(it.children || [], targetId);
-        if (found) return found;
-      }
-    }
-    return null;
-  };
-
-  const isRenderableAnswerType = (t) => {
-    const s = (t || "").toLowerCase();
-    return [
-      "input",
-      "textarea",
-      "number",
-      "date",
-      "datetime",
-      "time",
-      "file",
-      "select",
-      "checkbox",
-      "radio",
-      "location",
-      "firm",
-    ].includes(s);
-  };
-
-  // --- Helpers: serialize answers from form_design renderer ---
-  const isEmptyVal = (v) =>
-    v === undefined || v === null || String(v).trim() === "";
-  const pushAnswer = (buf, questionId, value, type, repeatedId = "") => {
-    if (isEmptyVal(value)) return;
-    if (type === "file") {
-      buf.push({
-        question_id: questionId,
-        question_type: "file",
-        answer_text: "",
-        file_path: String(value),
-        repeated_id: repeatedId,
-      });
-    } else if (type === "date") {
-      const formatted = formatDateDDMMYYYY(value);
-      if (!isEmptyVal(formatted)) {
-        buf.push({
-          question_id: questionId,
-          answer_text: formatted,
-          file_path: "",
-          repeated_id: repeatedId,
-        });
-      }
-    } else if (type === "firm") {
-      // Ensure we send filtered signature payload
-      let parsed = value;
-      if (typeof parsed === "string") {
-        try {
-          parsed = JSON.parse(parsed);
-        } catch {}
-      }
-      const fd = parsed?.firmData || parsed || {};
-      const filtered = {
-        firmData: {
-          success: !!fd.success,
-          person_id: fd.person_id || fd.personId || "",
-          person_name: fd.person_name || fd.personName || fd.name || "",
-          qr_url: fd.qr_url || fd.qrUrl || fd.signature_url || "",
-        },
-      };
-      buf.push({
-        question_id: questionId,
-        answer_text: JSON.stringify(filtered),
-        file_path: "",
-        repeated_id: repeatedId,
-      });
-    } else if (type === "time") {
-      // Only send HH-MM (hyphen)
-      const hhmm = formatTimeHHmmHyphen(value);
-      if (!isEmptyVal(hhmm))
-        buf.push({ question_id: questionId, answer_text: hhmm, file_path: "", repeated_id: repeatedId });
-    } else if (type === "checkbox") {
-      buf.push({
-        question_id: questionId,
-        answer_text: value ? "true" : "false",
-        file_path: "",
-        repeated_id: repeatedId,
-      });
-    } else {
-      buf.push({
-        question_id: questionId,
-        answer_text: String(value),
-        file_path: "",
-        repeated_id: repeatedId,
-      });
-    }
-  };
-
-  const serializeFormItemsAnswers = (items, values, batchId) => {
-    const out = [];
-    const walk = (it) => {
-      if (!it) return;
-      const t = (it.type || "").toLowerCase();
-      if (t === "verticallayout" || t === "horizontallayout") {
-        (it.children || []).forEach(walk);
-        return;
-      }
-      if (t === "repeater") {
-        const rows = values[it.id] || [];
-        if (Array.isArray(rows)) {
-          rows.forEach((row) => {
-            (it.children || []).forEach((child) => {
-              const ct = (child.type || "").toLowerCase();
-              const val = row[child.id];
-              const qid = getExternalQuestionIdFromItem(child);
-              if (isRenderableAnswerType(ct)) {
-                // Usar batchId global para repeated_id
-                pushAnswer(out, qid, val, ct, batchId);
-              }
-            });
-          });
-        }
-        return;
-      }
-      // leaf
-      const qid = getExternalQuestionIdFromItem(it);
-      if (isRenderableAnswerType(t)) {
-        pushAnswer(out, qid, values[it.id], t, batchId);
-      }
-    };
-    (items || []).forEach(walk);
-    return out;
-  };
-
-  // Transform a generic form_design tree (web) into mobile renderer items
-  const transformFormDesignToItems = (nodeOrArray) => {
-    const normalizeType = (t) => (typeof t === "string" ? t : "").trim();
-    const mapNode = (node) => {
-      if (!node) return null;
-      const id =
-        node.id ??
-        node.itemId ??
-        node.key ??
-        `${node.type}-${Math.random().toString(36).slice(2, 8)}`;
-      const type = normalizeType(node.type);
-      const props = node.props || node;
-      const childrenRaw = node.children || node.items || node.elements || [];
-      const children = Array.isArray(childrenRaw)
-        ? childrenRaw.map(mapNode).filter(Boolean)
-        : [];
-      return {
-        id,
-        type,
-        props: props && typeof props === "object" ? { ...props } : {},
-        children,
-      };
-    };
-    if (Array.isArray(nodeOrArray))
-      return nodeOrArray.map(mapNode).filter(Boolean);
-    const mapped = mapNode(nodeOrArray);
-    return mapped ? [mapped] : [];
-  };
 
   useEffect(() => {
     const fetchFacialUsers = async () => {
@@ -541,6 +305,16 @@ export default function FormatScreen(props) {
               rawEntry.form_design,
               rawEntry.questions || []
             );
+            console.log(
+              "DEBUG parsed from form_design:",
+              questionsArray.map((q) => ({
+                id: q.id,
+                question_text: q.question_text,
+                parentId: q.parentId,
+                is_repeated: q.is_repeated,
+                question_type: q.question_type,
+              }))
+            );
           } catch (e) {
             console.warn("Error parsing form_design to questions:", e);
             questionsArray = Array.isArray(rawEntry.questions)
@@ -552,55 +326,6 @@ export default function FormatScreen(props) {
             ? rawEntry.questions
             : [];
         }
-      }
-
-      // If form_design exists, prepare renderer items and initial values
-      try {
-        if (rawEntry && rawEntry.form_design) {
-          const items = transformFormDesignToItems(rawEntry.form_design);
-          setFormItems(items);
-          // Initialize values only once for fields with default values
-          const initial = {};
-          const walk = (arr) => {
-            arr.forEach((it) => {
-              if (it.type === "repeater") {
-                initial[it.id] = Array.isArray(initial[it.id])
-                  ? initial[it.id]
-                  : [];
-                if (it.children?.length) {
-                  // optional: seed one empty row if required
-                }
-                walk(it.children || []);
-              } else if (it.children && it.children.length) {
-                walk(it.children);
-              } else {
-                if (
-                  it.props &&
-                  Object.prototype.hasOwnProperty.call(it.props, "value")
-                ) {
-                  initial[it.id] = it.props.value;
-                } else if (typeof it.props?.defaultValue !== "undefined") {
-                  initial[it.id] = it.props.defaultValue;
-                } else if (it.type === "checkbox") {
-                  initial[it.id] = false;
-                } else {
-                  initial[it.id] = "";
-                }
-              }
-            });
-          };
-          walk(items);
-          setFormValues(initial);
-        } else {
-          setFormItems([]);
-          setFormValues({});
-        }
-      } catch (e) {
-        console.warn(
-          "No se pudo transformar form_design para mobile renderer:",
-          e
-        );
-        setFormItems([]);
       }
 
       // Normalize incoming question_type values to canonical set used by the app
@@ -623,6 +348,16 @@ export default function FormatScreen(props) {
           const copy = { ...(q || {}) };
           if (copy.question_type)
             copy.question_type = normalizeType(copy.question_type);
+          // ensure we have a display label and placeholder when possible
+          copy.question_text =
+            copy.question_text ||
+            copy.label ||
+            (copy.props &&
+              (copy.props.label || copy.props.title || copy.props.content)) ||
+            copy.title ||
+            "";
+          copy.placeholder =
+            copy.placeholder || (copy.props && copy.props.placeholder) || null;
           // normalize options shape to simple strings when possible
           if (Array.isArray(copy.options)) {
             copy.options = copy.options.map((opt) => {
@@ -741,45 +476,12 @@ export default function FormatScreen(props) {
     if (id) loadFormMeta();
   }, [id, logoUrlParam]);
 
-  const handleFDChange = (fieldId, value) => {
-    // Unificar la captura para que siempre pase por handleAnswerChange
-    // (incluye logs ✏️ y guardado offline)
-    handleAnswerChange(fieldId, value);
-  };
-
-  const handleFDFileSelect = async (fieldId) => {
-    try {
-      // Map fieldId (form_design item id) to backend question_id
-      const it = findItemById(formItems, fieldId);
-      const mappedQuestionId = getExternalQuestionIdFromItem(it) || fieldId;
-      // Generate serial for the backend question id
-      await generateSerial(mappedQuestionId);
-      const result = await DocumentPicker.getDocumentAsync({
-        type: "*/*",
-        copyToCacheDirectory: true,
-      });
-      if (result && !result.canceled && result.assets?.[0]?.uri) {
-        const uri = result.assets[0].uri;
-        setFileUris((prev) => ({ ...prev, [fieldId]: uri }));
-        // update both form_design values and legacy answers map
-        setFormValues((prev) => ({ ...prev, [fieldId]: uri }));
-        handleAnswerChange(fieldId, uri);
-        Alert.alert("Archivo seleccionado", `Ruta: ${uri}`);
-      }
-    } catch (e) {
-      console.error("File select error", e);
-      Alert.alert("Error", "No se pudo seleccionar el archivo.");
-    }
-  };
-
   const handleAnswerChange = (questionId, value) => {
     console.log(
       `✏️ Capturando respuesta para pregunta ID ${questionId}:`,
       value
     );
     setAnswers((prev) => ({ ...prev, [questionId]: value }));
-    // Mantener sincronizado el renderer de form_design
-    setFormValues((prev) => ({ ...prev, [questionId]: value }));
 
     AsyncStorage.getItem("offline_answers")
       .then((storedAnswers) => {
@@ -1213,14 +915,11 @@ export default function FormatScreen(props) {
         await new Promise((resolve) => setTimeout(resolve, 50));
 
         const backendUrl = await getBackendUrl();
-        const res = await fetch(
-          `${backendUrl}/responses/save-answers/?action=send_and_close`,
-          {
-            method: "POST",
-            headers: requestOptions.headers,
-            body: JSON.stringify(responseData),
-          }
-        );
+        const res = await fetch(`${backendUrl}/responses/save-answers/`, {
+          method: "POST",
+          headers: requestOptions.headers,
+          body: JSON.stringify(responseData),
+        });
 
         const responseJson = await res.json();
         console.log("🟢 Respuesta de save-answers:", responseJson);
@@ -1264,41 +963,6 @@ export default function FormatScreen(props) {
 
   const handleSubmitForm = async () => {
     console.log("📤 Iniciando envío de formulario ID:", id);
-    const batchId = createBatchId();
-    console.log("🧷 Batch ID:", batchId);
-    // Snapshot debug of current state before processing
-    try {
-      console.log("🧪 Estado actual (resumen):", {
-        path: formItems && formItems.length > 0 ? "form_design" : "legacy",
-        formValues_keys: Object.keys(formValues || {}),
-        answers_keys: Object.keys(answers || {}),
-        textAnswers: textAnswers,
-        tableAnswersState: tableAnswersState,
-      });
-      if (formItems && formItems.length > 0) {
-        const flatten = [];
-        const walk = (it) => {
-          if (!it) return;
-          const t = (it.type || "").toLowerCase();
-          if (t === "verticallayout" || t === "horizontallayout")
-            return (it.children || []).forEach(walk);
-          if (t === "repeater") return (it.children || []).forEach(walk);
-          const extId = getExternalQuestionIdFromItem(it);
-          flatten.push({ id: it.id, extId, type: t, value: formValues[it.id] });
-        };
-        (formItems || []).forEach(walk);
-        console.log(
-          "🧾 Campos (id:type -> preview)",
-          flatten.map((f) => ({
-            k: `${f.id}→${f.extId}:${f.type}`,
-            v:
-              f.type === "file" ? "[file]" : String(f.value ?? "").slice(0, 60),
-          }))
-        );
-      }
-    } catch (e) {
-      console.warn("No se pudo imprimir snapshot de estado:", e);
-    }
     setSubmitting(true);
     // Validate: all table (Select/Table) questions must have at least one selected option
     try {
@@ -1325,182 +989,126 @@ export default function FormatScreen(props) {
       const token = await AsyncStorage.getItem("authToken");
       if (!token) throw new Error("No authentication token found");
       const backendUrl = await getBackendUrl();
-      let allAnswers = [];
+      const allAnswers = [];
       console.log("📋 Preparando respuestas para cada pregunta...");
 
-      if (formItems && formItems.length > 0) {
-        // New path: serialize from form_design items/values
-        allAnswers = serializeFormItemsAnswers(formItems, formValues, batchId);
-        if (allAnswers.length === 0) {
-          // Fallback defensivo: intentar desde `answers` (no cubre repeaters, pero evita quedar en cero)
-          const fb = (() => {
-            const out = [];
-            const keys = Object.keys(answers || {});
-            keys.forEach((fieldId) => {
-              const it = findItemById(formItems, fieldId);
-              if (!it) return;
-              const t = (it.type || "").toLowerCase();
-              if (!isRenderableAnswerType(t)) return;
-              const qid = getExternalQuestionIdFromItem(it);
-              const v = answers[fieldId];
-              if (Array.isArray(v)) {
-                v.forEach((vv) => pushAnswer(out, qid, vv, t, batchId));
-              } else {
-                pushAnswer(out, qid, v, t, batchId);
-              }
-            });
-            return out;
-          })();
-          if (fb.length > 0) {
-            console.log(
-              "🛟 Fallback aplicado: respuestas reconstruidas desde answers:",
-              fb.map((a) => ({ q: a.question_id, v: String(a.answer_text).slice(0, 40) }))
-            );
-            allAnswers = fb;
-          }
-        }
-      } else {
-        // Legacy path: derive from questions/textAnswers/tableAnswersState/answers
-        for (const question of questions) {
-          const questionId = question.id;
-          if (
-            question.question_type === "text" &&
-            textAnswers[questionId]?.length > 0
-          ) {
-            const validAnswers = textAnswers[questionId].filter(
-              (answer) => answer.trim() !== ""
-            );
-            validAnswers.forEach((answer) => {
-              allAnswers.push({
-                question_id: questionId,
-                answer_text: answer,
-                file_path: "",
-                repeated_id: batchId,
-              });
-            });
-          } else if (
-            question.question_type === "table" &&
-            tableAnswersState[questionId]?.length > 0
-          ) {
-            const validAnswers = tableAnswersState[questionId].filter(
-              (answer) => answer.trim() !== ""
-            );
-            validAnswers.forEach((answer) => {
-              allAnswers.push({
-                question_id: questionId,
-                answer_text: answer,
-                file_path: "",
-                repeated_id: batchId,
-              });
-            });
-          } else if (
-            question.question_type === "multiple_choice" &&
-            Array.isArray(answers[questionId]) &&
-            answers[questionId].length > 0
-          ) {
-            answers[questionId].forEach((option) => {
-              allAnswers.push({
-                question_id: questionId,
-                answer_text: option,
-                file_path: "",
-                repeated_id: batchId,
-              });
-            });
-          } else if (
-            question.question_type === "one_choice" &&
-            answers[questionId]
-          ) {
+      for (const question of questions) {
+        const questionId = question.id;
+
+        if (
+          question.question_type === "text" &&
+          textAnswers[questionId]?.length > 0
+        ) {
+          const validAnswers = textAnswers[questionId].filter(
+            (answer) => answer.trim() !== ""
+          );
+          validAnswers.forEach((answer) => {
             allAnswers.push({
               question_id: questionId,
-              answer_text: answers[questionId],
+              answer_text: answer,
               file_path: "",
-              repeated_id: batchId,
             });
-          } else if (question.question_type === "file" && answers[questionId]) {
+          });
+        } else if (
+          question.question_type === "table" &&
+          tableAnswersState[questionId]?.length > 0
+        ) {
+          const validAnswers = tableAnswersState[questionId].filter(
+            (answer) => answer.trim() !== ""
+          );
+          validAnswers.forEach((answer) => {
             allAnswers.push({
               question_id: questionId,
-              question_type: "file",
-              answer_text: "",
-              file_path: answers[questionId],
-              repeated_id: batchId,
-            });
-          } else if (question.question_type === "date" && answers[questionId]) {
-            const formatted = formatDateDDMMYYYY(answers[questionId]);
-            allAnswers.push({
-              question_id: questionId,
-              answer_text: formatted,
+              answer_text: answer,
               file_path: "",
-              repeated_id: batchId,
             });
-          } else if (question.question_type === "time" && answers[questionId]) {
-            // Ensure only HH-MM (hyphen)
-            const v = formatTimeHHmmHyphen(answers[questionId]);
+          });
+        } else if (
+          question.question_type === "multiple_choice" &&
+          Array.isArray(answers[questionId]) &&
+          answers[questionId].length > 0
+        ) {
+          answers[questionId].forEach((option) => {
             allAnswers.push({
               question_id: questionId,
-              answer_text: v,
+              answer_text: option,
               file_path: "",
-              repeated_id: batchId,
             });
-          } else if (
-            question.question_type === "number" &&
-            (Array.isArray(answers[questionId])
-              ? answers[questionId]?.[0]
-              : answers[questionId])
-          ) {
-            const value = Array.isArray(answers[questionId])
-              ? answers[questionId][0]
-              : answers[questionId];
-            allAnswers.push({
-              question_id: questionId,
-              answer_text: value,
-              file_path: "",
-              repeated_id: batchId,
-            });
-          } else if (
-            question.question_type === "location" &&
-            answers[questionId]
-          ) {
-            allAnswers.push({
-              question_id: questionId,
-              answer_text: answers[questionId],
-              file_path: "",
-              repeated_id: batchId,
-            });
-          } else if (question.question_type === "firm" && answers[questionId]) {
-            let parsed = answers[questionId];
-            if (typeof parsed === "string") {
-              try {
-                parsed = JSON.parse(parsed);
-              } catch (e) {
-                parsed = parsed || {};
-              }
+          });
+        } else if (
+          question.question_type === "one_choice" &&
+          answers[questionId]
+        ) {
+          allAnswers.push({
+            question_id: questionId,
+            answer_text: answers[questionId],
+            file_path: "",
+          });
+        } else if (question.question_type === "file" && answers[questionId]) {
+          allAnswers.push({
+            question_id: questionId,
+            question_type: "file",
+            answer_text: "",
+            file_path: answers[questionId],
+          });
+        } else if (question.question_type === "date" && answers[questionId]) {
+          allAnswers.push({
+            question_id: questionId,
+            answer_text: answers[questionId],
+            file_path: "",
+          });
+        } else if (
+          question.question_type === "number" &&
+          (Array.isArray(answers[questionId])
+            ? answers[questionId]?.[0]
+            : answers[questionId])
+        ) {
+          const value = Array.isArray(answers[questionId])
+            ? answers[questionId][0]
+            : answers[questionId];
+          allAnswers.push({
+            question_id: questionId,
+            answer_text: value,
+            file_path: "",
+          });
+        } else if (
+          question.question_type === "location" &&
+          answers[questionId]
+        ) {
+          allAnswers.push({
+            question_id: questionId,
+            answer_text: answers[questionId],
+            file_path: "",
+          });
+        } else if (question.question_type === "firm" && answers[questionId]) {
+          // Firma: answers[questionId] puede ser JSON string con el objeto filtrado.
+          // Parseamos si es necesario y nos aseguramos de enviar SOLO los campos permitidos.
+          let parsed = answers[questionId];
+          if (typeof parsed === "string") {
+            try {
+              parsed = JSON.parse(parsed);
+            } catch (e) {
+              parsed = parsed || {};
             }
-            const fd = parsed?.firmData || parsed || {};
-            const filteredToSend = {
-              firmData: {
-                success: !!fd.success,
-                person_id: fd.person_id || fd.personId || "",
-                person_name: fd.person_name || fd.personName || fd.name || "",
-                qr_url: fd.qr_url || fd.qrUrl || fd.signature_url || "",
-              },
-            };
-            allAnswers.push({
-              question_id: questionId,
-              answer_text: JSON.stringify(filteredToSend),
-              file_path: "",
-              repeated_id: batchId,
-            });
           }
+          const fd = parsed?.firmData || parsed || {};
+          const filteredToSend = {
+            firmData: {
+              success: !!fd.success,
+              person_id: fd.person_id || fd.personId || "",
+              person_name: fd.person_name || fd.personName || fd.name || "",
+              qr_url: fd.qr_url || fd.qrUrl || fd.signature_url || "",
+            },
+          };
+          allAnswers.push({
+            question_id: questionId,
+            answer_text: JSON.stringify(filteredToSend),
+            file_path: "",
+          });
         }
       }
 
       if (allAnswers.length === 0) {
-        console.warn("⚠️ No se encontraron respuestas para enviar. State:", {
-          answers,
-          formValues,
-          textAnswers,
-          tableAnswersState,
-        });
         Alert.alert("Error", "No hay respuestas para enviar");
         return;
       }
@@ -1516,7 +1124,7 @@ export default function FormatScreen(props) {
             question_id: a.question_id,
             response: "",
             file_path: a.file_path || "",
-            repeated_id: a.repeated_id || batchId || "",
+            repeated_id: "",
           })),
           mode: "offline",
           timestamp: Date.now(),
@@ -1570,25 +1178,13 @@ export default function FormatScreen(props) {
         return;
       }
 
-      // Debug resumido: question_id -> preview valor
-      try {
-        console.log(
-          "📝 Respuestas a enviar (resumen):",
-          allAnswers.map((a) => ({
-            q: a.question_id,
-            v:
-              (a.file_path && "[file]") ||
-              String(a.answer_text).slice(0, 60) +
-                (String(a.answer_text).length > 60 ? "…" : ""),
-          }))
-        );
-      } catch {}
+      console.log("📝 Respuestas a enviar:", allAnswers);
 
       const allAnswersForApi = allAnswers.map((a) => ({
         question_id: a.question_id,
         response: "",
         file_path: a.file_path || "",
-        repeated_id: a.repeated_id || batchId || "",
+        repeated_id: "",
       }));
 
       const requestOptions = {
@@ -1687,8 +1283,6 @@ export default function FormatScreen(props) {
   const handleProgressiveSubmit = async () => {
     setSubmitting(true);
     try {
-      const batchId = createBatchId();
-      console.log("🧷 Batch ID (progressive):", batchId);
       const token = await AsyncStorage.getItem("authToken");
       if (!token) throw new Error("No authentication token found");
       const backendUrl = await getBackendUrl();
@@ -1711,7 +1305,6 @@ export default function FormatScreen(props) {
               question_id: questionId,
               answer_text: answer,
               file_path: "",
-              repeated_id: batchId,
             });
           });
         } else if (
@@ -1726,7 +1319,6 @@ export default function FormatScreen(props) {
               question_id: questionId,
               answer_text: answer,
               file_path: "",
-              repeated_id: batchId,
             });
           });
         } else if (
@@ -1739,7 +1331,6 @@ export default function FormatScreen(props) {
               question_id: questionId,
               answer_text: option,
               file_path: "",
-              repeated_id: batchId,
             });
           });
         } else if (
@@ -1750,7 +1341,6 @@ export default function FormatScreen(props) {
             question_id: questionId,
             answer_text: answers[questionId],
             file_path: "",
-            repeated_id: batchId,
           });
         } else if (question.question_type === "file" && answers[questionId]) {
           repeatedAnswers.push({
@@ -1758,31 +1348,12 @@ export default function FormatScreen(props) {
             question_type: "file",
             answer_text: "",
             file_path: "",
-            repeated_id: batchId,
           });
         } else if (question.question_type === "date" && answers[questionId]) {
-          const formatted = formatDateDDMMYYYY(
-            Array.isArray(answers[questionId])
-              ? answers[questionId][0]
-              : answers[questionId]
-          );
           repeatedAnswers.push({
             question_id: questionId,
-            answer_text: formatted,
+            answer_text: answers[questionId],
             file_path: "",
-            repeated_id: batchId,
-          });
-        } else if (question.question_type === "time" && answers[questionId]) {
-          const formatted = formatTimeHHmmHyphen(
-            Array.isArray(answers[questionId])
-              ? answers[questionId][0]
-              : answers[questionId]
-          );
-          repeatedAnswers.push({
-            question_id: questionId,
-            answer_text: formatted,
-            file_path: "",
-            repeated_id: batchId,
           });
         } else if (
           question.question_type === "number" &&
@@ -1797,7 +1368,6 @@ export default function FormatScreen(props) {
             question_id: questionId,
             answer_text: value,
             file_path: "",
-            repeated_id: batchId,
           });
         } else if (
           question.question_type === "location" &&
@@ -1807,14 +1377,12 @@ export default function FormatScreen(props) {
             question_id: questionId,
             answer_text: answers[questionId],
             file_path: "",
-            repeated_id: batchId,
           });
         } else if (question.question_type === "firm" && answers[questionId]) {
           repeatedAnswers.push({
             question_id: questionId,
             answer_text: answers[questionId],
             file_path: "",
-            repeated_id: batchId,
           });
         }
       }
@@ -1840,7 +1408,6 @@ export default function FormatScreen(props) {
                 question_id: questionId,
                 answer_text: answer,
                 file_path: "",
-                repeated_id: batchId,
               });
             });
           } else if (
@@ -1860,7 +1427,6 @@ export default function FormatScreen(props) {
                 question_id: questionId,
                 answer_text: answer,
                 file_path: "",
-                repeated_id: batchId,
               });
             });
           } else if (
@@ -1884,7 +1450,6 @@ export default function FormatScreen(props) {
                 question_id: questionId,
                 answer_text: option,
                 file_path: "",
-                repeated_id: batchId,
               });
             });
           } else if (
@@ -1902,7 +1467,6 @@ export default function FormatScreen(props) {
                 question_id: questionId,
                 answer_text: value,
                 file_path: "",
-                repeated_id: batchId,
               });
             }
           } else if (
@@ -1920,7 +1484,6 @@ export default function FormatScreen(props) {
                 question_id: questionId,
                 answer_text: "",
                 file_path: value,
-                repeated_id: batchId,
               });
             }
           } else if (
@@ -1933,36 +1496,11 @@ export default function FormatScreen(props) {
               nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
                 ? firstNonRepeatedAnswers[questionId]
                 : answers[questionId];
-            const formatted = Array.isArray(value)
-              ? formatDateDDMMYYYY(value[0])
-              : formatDateDDMMYYYY(value);
-            if (formatted) {
+            if (value) {
               nonRepeatedAnswers.push({
                 question_id: questionId,
-                answer_text: formatted,
+                answer_text: value,
                 file_path: "",
-                repeated_id: batchId,
-              });
-            }
-          } else if (
-            question.question_type === "time" &&
-            (nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
-              ? firstNonRepeatedAnswers[questionId]
-              : answers[questionId])
-          ) {
-            const value =
-              nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
-                ? firstNonRepeatedAnswers[questionId]
-                : answers[questionId];
-            const formatted = Array.isArray(value)
-              ? formatTimeHHmmHyphen(value[0])
-              : formatTimeHHmmHyphen(value);
-            if (formatted) {
-              nonRepeatedAnswers.push({
-                question_id: questionId,
-                answer_text: formatted,
-                file_path: "",
-                repeated_id: batchId,
               });
             }
           } else if (
@@ -1980,7 +1518,6 @@ export default function FormatScreen(props) {
                 question_id: questionId,
                 answer_text: value,
                 file_path: "",
-                repeated_id: batchId,
               });
             }
           } else if (
@@ -2006,7 +1543,6 @@ export default function FormatScreen(props) {
                 question_id: questionId,
                 answer_text: value,
                 file_path: "",
-                repeated_id: batchId,
               });
             }
           } else if (
@@ -2024,7 +1560,6 @@ export default function FormatScreen(props) {
                 question_id: questionId,
                 answer_text: value,
                 file_path: "",
-                repeated_id: batchId,
               });
             }
           }
@@ -2093,7 +1628,7 @@ export default function FormatScreen(props) {
         question_id: a.question_id,
         response: "",
         file_path: a.file_path || "",
-        repeated_id: a.repeated_id || batchId || "",
+        repeated_id: "",
       }));
 
       const saveResponseRes = await fetch(
@@ -2177,113 +1712,7 @@ export default function FormatScreen(props) {
             </View>
           </View>
           {/* Preguntas No Repetidas */}
-          {/* form_design driven renderer */}
-          {formItems && formItems.length > 0 && (
-            <View style={styles.questionsSection}>
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionIndicator} />
-                <Text style={styles.sectionTitle}>Formulario</Text>
-              </View>
-              <View style={styles.questionsContainer}>
-                {loading ? (
-                  <View style={styles.loadingContainer}>
-                    <Animated.View style={{ transform: [{ rotate: spin }] }}>
-                      <SvgXml xml={spinnerSvg} width={50} height={50} />
-                    </Animated.View>
-                    <Text style={styles.loadingText}>
-                      Cargando formulario...
-                    </Text>
-                  </View>
-                ) : (
-                  <FormPreviewRenderer
-                    formItems={formItems}
-                    values={formValues}
-                    onChange={handleFDChange}
-                    errors={formErrors}
-                    onFileSelect={handleFDFileSelect}
-                    isSubmitting={submitting}
-                    onRequestLocation={(fieldId) =>
-                      handleCaptureLocation(fieldId)
-                    }
-                    renderFirm={({ item, value, setValue }) => (
-                      <FirmField
-                        key={item.id}
-                        label={item.props?.label || "Firma Digital"}
-                        options={
-                          facialUsers.length > 0
-                            ? facialUsers.map((u) => ({
-                                id: u.id,
-                                name: u.name,
-                                num_document:
-                                  u.person_id ||
-                                  u.num_document ||
-                                  "Sin documento",
-                              }))
-                            : []
-                        }
-                        required={!!item.props?.required}
-                        onChange={(ev) => {
-                          const val = ev?.target?.value ?? ev ?? "";
-                          setSelectedUserId(val);
-                          handleAnswerChange(item.id, val);
-                        }}
-                        value={selectedUserId}
-                        disabled={submitting}
-                        error={false}
-                        documentHash={String(
-                          facialUsers.find((f) => f.id === selectedUserId)
-                            ?.hash || ""
-                        )}
-                        apiUrl="https://api-signfacial-safe.service.saferut.com"
-                        autoCloseDelay={10000}
-                        onFirmSuccess={(data) => {
-                          console.log(
-                            "✅ Firma completada exitosamente:",
-                            data
-                          );
-                        }}
-                        onFirmError={(error) => {
-                          console.error("❌ Error en la firma:", error);
-                        }}
-                        onValueChange={(firmCompleteData) => {
-                          const fd =
-                            firmCompleteData?.firmData ||
-                            firmCompleteData?.firm ||
-                            {};
-                          const filtered = {
-                            firmData: {
-                              success: !!fd.success,
-                              person_id: fd.person_id || fd.personId || "",
-                              person_name:
-                                fd.person_name ||
-                                fd.personName ||
-                                fd.name ||
-                                "",
-                              qr_url:
-                                fd.qr_url || fd.qrUrl || fd.signature_url || "",
-                            },
-                          };
-                          const serialized = JSON.stringify(filtered);
-                          setValue(serialized);
-                          handleAnswerChange(item.id, serialized);
-                          const preview = filtered.firmData.qr_url || null;
-                          if (preview) {
-                            setSignatureUris((prev) => ({
-                              ...prev,
-                              [item.id]: preview,
-                            }));
-                          }
-                        }}
-                      />
-                    )}
-                  />
-                )}
-              </View>
-            </View>
-          )}
-
-          {/* legacy questions path as fallback */}
-          {formItems.length === 0 && questions.some((q) => !q.is_repeated) && (
+          {questions.some((q) => !q.is_repeated) && (
             <View style={styles.questionsSection}>
               <View style={styles.sectionHeader}>
                 <View style={styles.sectionIndicator} />
@@ -2439,7 +1868,7 @@ export default function FormatScreen(props) {
           )}
 
           {/* Preguntas Repetidas (secciones) */}
-          {formItems.length === 0 && isRepeatedQuestions.length > 0 && (
+          {isRepeatedQuestions.length > 0 && (
             <View style={styles.questionsSection}>
               <View style={styles.sectionHeader}>
                 <View
@@ -2839,8 +2268,7 @@ export default function FormatScreen(props) {
           )}
 
           {/* Formularios Completados */}
-          {formItems.length === 0 &&
-            isRepeatedQuestions.length > 1 &&
+          {isRepeatedQuestions.length > 1 &&
             submittedRepeatedGroups.length > 0 && (
               <View style={styles.submittedSection}>
                 <View style={styles.submittedHeader}>
