@@ -264,7 +264,12 @@ export default function FormatScreen(props) {
       // Only send HH-MM (hyphen)
       const hhmm = formatTimeHHmmHyphen(value);
       if (!isEmptyVal(hhmm))
-        buf.push({ question_id: questionId, answer_text: hhmm, file_path: "", repeated_id: repeatedId });
+        buf.push({
+          question_id: questionId,
+          answer_text: hhmm,
+          file_path: "",
+          repeated_id: repeatedId,
+        });
     } else if (type === "checkbox") {
       buf.push({
         question_id: questionId,
@@ -1354,7 +1359,10 @@ export default function FormatScreen(props) {
           if (fb.length > 0) {
             console.log(
               "🛟 Fallback aplicado: respuestas reconstruidas desde answers:",
-              fb.map((a) => ({ q: a.question_id, v: String(a.answer_text).slice(0, 40) }))
+              fb.map((a) => ({
+                q: a.question_id,
+                v: String(a.answer_text).slice(0, 40),
+              }))
             );
             allAnswers = fb;
           }
