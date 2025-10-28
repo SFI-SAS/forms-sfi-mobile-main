@@ -37,6 +37,7 @@ export default function Settings() {
   const colorScheme = useColorScheme();
   const router = useRouter();
 
+  
   useEffect(() => {
     AsyncStorage.getItem(BACKEND_URL_KEY).then((url) => {
       setBackendUrl(url || "");
