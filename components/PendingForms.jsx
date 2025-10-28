@@ -81,7 +81,7 @@ export default function PendingForms() {
   // Función para manejar errores de autenticación
   const handleAuthError = async (error) => {
     const errorMessage = error?.message || error?.toString() || "";
-    
+
     // Detectar si es un error de autenticación
     if (
       errorMessage.includes("No authentication token") ||
@@ -90,11 +90,11 @@ export default function PendingForms() {
       errorMessage.includes("401")
     ) {
       console.log("🔒 Token inválido o ausente. Cerrando sesión...");
-      
+
       // Limpiar datos de sesión
       await AsyncStorage.setItem("isLoggedOut", "true");
       await AsyncStorage.removeItem("authToken");
-      
+
       // Mostrar alerta y redirigir al login
       Alert.alert(
         "Sesión Expirada",
@@ -107,10 +107,10 @@ export default function PendingForms() {
         ],
         { cancelable: false }
       );
-      
+
       return true; // Indica que se manejó un error de autenticación
     }
-    
+
     return false; // No es un error de autenticación
   };
 
@@ -119,7 +119,9 @@ export default function PendingForms() {
     const checkAuthToken = async () => {
       const token = await AsyncStorage.getItem("authToken");
       if (!token) {
-        console.log("🔒 No hay token al cargar PendingForms. Redirigiendo al login...");
+        console.log(
+          "🔒 No hay token al cargar PendingForms. Redirigiendo al login..."
+        );
         Alert.alert(
           "Sesión no válida",
           "No se encontró una sesión activa. Por favor, inicia sesión.",
@@ -133,7 +135,7 @@ export default function PendingForms() {
         );
       }
     };
-    
+
     checkAuthToken();
   }, []);
 
@@ -148,13 +150,11 @@ export default function PendingForms() {
           return;
         }
 
-        // Unifica los formularios pendientes de la clave legacy y los nuevos de save-response
+        // Unifica formularios pendientes desde la cola unificada y las claves legacy
         const storedPendingForms = await AsyncStorage.getItem("pending_forms");
-        const legacyPending = storedPendingForms
+        const unifiedQueue = storedPendingForms
           ? JSON.parse(storedPendingForms)
           : [];
-
-        // También busca los formularios pendientes por save-response (nuevo flujo)
         const storedPendingSaveResponse = await AsyncStorage.getItem(
           PENDING_SAVE_RESPONSE_KEY
         );
@@ -162,33 +162,28 @@ export default function PendingForms() {
           ? JSON.parse(storedPendingSaveResponse)
           : [];
 
-        // Unifica ambos, evitando duplicados por id
-        const idsLegacy = legacyPending.map((f) => f.id);
+        // Construir listado único {id, title, description}
+        const idsUnified = (unifiedQueue || []).map((f) => f.id);
 
         // Intenta obtener title y description de metadata offline
         const storedMeta = await AsyncStorage.getItem("offline_forms_metadata");
         const metaObj = storedMeta ? JSON.parse(storedMeta) : {};
 
         const unified = [
-          ...legacyPending.map((f) => ({
+          ...(unifiedQueue || []).map((f) => ({
             id: f.id,
-            title:
-              f.title || (metaObj && metaObj[f.id] && metaObj[f.id].title) || "",
+            title: (metaObj && metaObj[f.id] && metaObj[f.id].title) || "",
             description:
-              f.description ||
-              (metaObj && metaObj[f.id] && metaObj[f.id].description) ||
-              "",
+              (metaObj && metaObj[f.id] && metaObj[f.id].description) || "",
           })),
           ...pendingSaveResponse
-            .filter((f) => !idsLegacy.includes(f.form_id))
+            .filter((f) => !idsUnified.includes(f.form_id))
             .map((f) => ({
               id: f.form_id,
               title:
-                f.title ||
                 (metaObj && metaObj[f.form_id] && metaObj[f.form_id].title) ||
                 "",
               description:
-                f.description ||
                 (metaObj &&
                   metaObj[f.form_id] &&
                   metaObj[f.form_id].description) ||
@@ -221,17 +216,12 @@ export default function PendingForms() {
           if (formAnswers.length > 0) {
             answersObj[form.id] = formAnswers;
           } else {
-            // Busca en legacy pending_forms si no hay en pending_save_answers
-            const storedPendingForms =
-              await AsyncStorage.getItem("pending_forms");
-            const legacyPending = storedPendingForms
-              ? JSON.parse(storedPendingForms)
-              : [];
-            const legacyForm = legacyPending.find(
+            // Busca en la cola unificada pending_forms (nuevo esquema)
+            const queueItem = (unifiedQueue || []).find(
               (f) => String(f.id) === String(form.id)
             );
-            if (legacyForm && Array.isArray(legacyForm.responses)) {
-              answersObj[form.id] = legacyForm.responses;
+            if (queueItem && Array.isArray(queueItem.answersFull)) {
+              answersObj[form.id] = queueItem.answersFull;
             } else {
               answersObj[form.id] = [];
             }
@@ -239,8 +229,17 @@ export default function PendingForms() {
           // Construir el mapa de question_id -> question_text para este formulario
           if (offlineQuestions[form.id]) {
             const qMap = {};
-            offlineQuestions[form.id].forEach((q) => {
-              qMap[q.id] = q.question_text;
+            const raw = offlineQuestions[form.id];
+            // Admite array plano o { questions } o { questions: [], form_design: ... }
+            const qArr = Array.isArray(raw)
+              ? raw
+              : Array.isArray(raw?.questions)
+                ? raw.questions
+                : [];
+            (qArr || []).forEach((q) => {
+              if (q && q.id !== undefined) {
+                qMap[q.id] = q.question_text || q.text || "";
+              }
             });
             questionsObj[form.id] = qMap;
           } else {
@@ -282,108 +281,174 @@ export default function PendingForms() {
         },
       };
 
-      // 1. Obtener datos pendientes de save-response y save-answers para este form.id
-      const storedPendingSaveResponse = await AsyncStorage.getItem(
-        PENDING_SAVE_RESPONSE_KEY
-      );
-      const pendingSaveResponse = storedPendingSaveResponse
-        ? JSON.parse(storedPendingSaveResponse)
+      // 1. Intentar usar la cola unificada primero
+      const storedPendingForms = await AsyncStorage.getItem("pending_forms");
+      const unifiedQueue = storedPendingForms
+        ? JSON.parse(storedPendingForms)
         : [];
-      const saveResponseData = pendingSaveResponse.find(
-        (r) => String(r.form_id) === String(form.id)
+      const queueItem = (unifiedQueue || []).find(
+        (f) => String(f.id) === String(form.id)
       );
 
-      const storedPendingSaveAnswers = await AsyncStorage.getItem(
-        PENDING_SAVE_ANSWERS_KEY
-      );
-      const pendingSaveAnswers = storedPendingSaveAnswers
-        ? JSON.parse(storedPendingSaveAnswers)
-        : [];
-      const saveAnswersData = pendingSaveAnswers.filter(
-        (a) => String(a.form_id) === String(form.id)
-      );
-
-      // 2. Enviar save-response primero (solo para crear el response_id, modo offline)
       let responseId = null;
-      if (saveResponseData) {
+      if (queueItem) {
+        // save-response (crea response_id)
         const saveResponseRes = await fetch(
-          `${backendUrl}/responses/save-response/${form.id}?mode=offline&action=send_and_close`,
+          `${backendUrl}/responses/save-response/${form.id}?action=send_and_close`,
           {
             method: "POST",
             headers: requestOptions.headers,
-            body: JSON.stringify(saveResponseData.answers),
+            body: JSON.stringify(queueItem.answersForApi || []),
           }
         );
-        
-        // Verificar si la respuesta es 401 Unauthorized
-        if (saveResponseRes.status === 401) {
+        if (saveResponseRes.status === 401)
           throw new Error("Unauthorized - Token inválido");
-        }
-        
         const saveResponseJson = await saveResponseRes.json();
         responseId = saveResponseJson.response_id;
-      }
 
-      // 3. Enviar cada respuesta individualmente a save-answers (igual que online)
-      if (responseId && saveAnswersData.length > 0) {
-        for (const answer of saveAnswersData) {
-          const answerRes = await fetch(
-            `${backendUrl}/responses/save-answers/`,
+        // save-answers secuencial
+        if (responseId && Array.isArray(queueItem.answersFull)) {
+          for (const answer of queueItem.answersFull) {
+            const isFile =
+              answer.question_type === "file" || !!answer.file_path;
+            const answerRes = await fetch(
+              `${backendUrl}/responses/save-answers/?action=send_and_close`,
+              {
+                method: "POST",
+                headers: requestOptions.headers,
+                body: JSON.stringify({
+                  response_id: responseId,
+                  question_id: answer.question_id,
+                  answer_text: isFile ? "" : answer.answer_text,
+                  file_path: answer.file_path || "",
+                }),
+              }
+            );
+            if (answerRes.status === 401)
+              throw new Error("Unauthorized - Token inválido");
+            const resJson = await answerRes.json();
+            // asociar serial si aplica
+            if (
+              isFile &&
+              queueItem.fileSerials &&
+              queueItem.fileSerials[answer.question_id] &&
+              resJson?.answer?.answer_id
+            ) {
+              try {
+                await fetch(`${backendUrl}/responses/file-serials/`, {
+                  method: "POST",
+                  headers: requestOptions.headers,
+                  body: JSON.stringify({
+                    answer_id: resJson.answer.answer_id,
+                    serial: queueItem.fileSerials[answer.question_id],
+                  }),
+                });
+              } catch {}
+            }
+          }
+        }
+
+        // Quitar item de la cola y del estado local
+        const remaining = (unifiedQueue || []).filter(
+          (f) => String(f.id) !== String(form.id)
+        );
+        await AsyncStorage.setItem("pending_forms", JSON.stringify(remaining));
+        setPendingForms((prev) =>
+          prev.filter((f) => String(f.id) !== String(form.id))
+        );
+      } else {
+        // 2. Fallback legacy (pending_save_*), por compatibilidad
+        const storedPendingSaveResponse = await AsyncStorage.getItem(
+          PENDING_SAVE_RESPONSE_KEY
+        );
+        const pendingSaveResponse = storedPendingSaveResponse
+          ? JSON.parse(storedPendingSaveResponse)
+          : [];
+        const saveResponseData = pendingSaveResponse.find(
+          (r) => String(r.form_id) === String(form.id)
+        );
+        const storedPendingSaveAnswers = await AsyncStorage.getItem(
+          PENDING_SAVE_ANSWERS_KEY
+        );
+        const pendingSaveAnswers = storedPendingSaveAnswers
+          ? JSON.parse(storedPendingSaveAnswers)
+          : [];
+        const saveAnswersData = pendingSaveAnswers.filter(
+          (a) => String(a.form_id) === String(form.id)
+        );
+
+        if (saveResponseData) {
+          const saveResponseRes = await fetch(
+            `${backendUrl}/responses/save-response/${form.id}?mode=offline&action=send_and_close`,
             {
               method: "POST",
               headers: requestOptions.headers,
-              body: JSON.stringify({
-                response_id: responseId,
-                question_id: answer.question_id,
-                answer_text: answer.answer_text,
-                file_path: answer.file_path,
-              }),
+              body: JSON.stringify(saveResponseData.answers || []),
             }
           );
-          
-          // Verificar si la respuesta es 401 Unauthorized
-          if (answerRes.status === 401) {
+          if (saveResponseRes.status === 401)
             throw new Error("Unauthorized - Token inválido");
+          const saveResponseJson = await saveResponseRes.json();
+          responseId = saveResponseJson.response_id;
+        }
+        if (responseId && saveAnswersData.length > 0) {
+          for (const answer of saveAnswersData) {
+            const answerRes = await fetch(
+              `${backendUrl}/responses/save-answers/`,
+              {
+                method: "POST",
+                headers: requestOptions.headers,
+                body: JSON.stringify({
+                  response_id: responseId,
+                  question_id: answer.question_id,
+                  answer_text: answer.answer_text,
+                  file_path: answer.file_path,
+                }),
+              }
+            );
+            if (answerRes.status === 401)
+              throw new Error("Unauthorized - Token inválido");
           }
         }
+
+        const newPendingSaveResponse = (await AsyncStorage.getItem(
+          PENDING_SAVE_RESPONSE_KEY
+        ))
+          ? JSON.parse(
+              await AsyncStorage.getItem(PENDING_SAVE_RESPONSE_KEY)
+            ).filter((r) => String(r.form_id) !== String(form.id))
+          : [];
+        await AsyncStorage.setItem(
+          PENDING_SAVE_RESPONSE_KEY,
+          JSON.stringify(newPendingSaveResponse)
+        );
+        const newPendingSaveAnswers = (await AsyncStorage.getItem(
+          PENDING_SAVE_ANSWERS_KEY
+        ))
+          ? JSON.parse(
+              await AsyncStorage.getItem(PENDING_SAVE_ANSWERS_KEY)
+            ).filter((a) => String(a.form_id) !== String(form.id))
+          : [];
+        await AsyncStorage.setItem(
+          PENDING_SAVE_ANSWERS_KEY,
+          JSON.stringify(newPendingSaveAnswers)
+        );
+        setPendingForms((prev) =>
+          prev.filter((f) => String(f.id) !== String(form.id))
+        );
       }
 
-      // Limpieza de datos enviados
-      const newPendingSaveResponse = pendingSaveResponse.filter(
-        (r) => String(r.form_id) !== String(form.id)
-      );
-      await AsyncStorage.setItem(
-        PENDING_SAVE_RESPONSE_KEY,
-        JSON.stringify(newPendingSaveResponse)
-      );
-      const newPendingSaveAnswers = pendingSaveAnswers.filter(
-        (a) => String(a.form_id) !== String(form.id)
-      );
-      await AsyncStorage.setItem(
-        PENDING_SAVE_ANSWERS_KEY,
-        JSON.stringify(newPendingSaveAnswers)
-      );
-
-      // Elimina el formulario de la lista local
-      const updatedPendingForms = pendingForms.filter(
-        (f) => String(f.id) !== String(form.id)
-      );
-      setPendingForms(updatedPendingForms);
-      await AsyncStorage.setItem(
-        "pending_forms",
-        JSON.stringify(updatedPendingForms)
-      );
       console.log(
-        "[DEBUG][OFFLINE] Actualizado pending_forms tras envío",
-        updatedPendingForms
+        "[DEBUG][OFFLINE] Envío manual completado para formulario",
+        form.id
       );
       Alert.alert("Sincronización", "Formulario enviado correctamente.");
     } catch (error) {
       console.error("❌ Error en handleSubmitPendingForm:", error);
-      
+
       // Verificar si es un error de autenticación
       const isAuthError = await handleAuthError(error);
-      
+
       // Si no es error de autenticación, mostrar alerta genérica
       if (!isAuthError) {
         Alert.alert(
@@ -506,8 +571,8 @@ export default function PendingForms() {
                       {loading
                         ? "ENVIANDO..."
                         : isOnline
-                        ? "SINCRONIZAR AHORA"
-                        : "SIN CONEXIÓN"}
+                          ? "SINCRONIZAR AHORA"
+                          : "SIN CONEXIÓN"}
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -526,7 +591,9 @@ export default function PendingForms() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Sesión Cerrada por Inactividad</Text>
+            <Text style={styles.modalTitle}>
+              Sesión Cerrada por Inactividad
+            </Text>
             <Text style={styles.modalText}>
               Por seguridad, tu sesión se cerró automáticamente después de 10
               minutos.

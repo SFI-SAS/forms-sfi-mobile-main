@@ -49,6 +49,7 @@ const RNSelect = ({ value, onValueChange, options = [], enabled = true }) => (
       selectedValue={value ?? ""}
       onValueChange={onValueChange}
       enabled={enabled}
+      mode="dropdown"
       style={styles.picker}
     >
       <Picker.Item label="Seleccione..." value="" />
