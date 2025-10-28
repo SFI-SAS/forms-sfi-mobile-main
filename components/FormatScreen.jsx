@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from "react";
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   Alert,
@@ -24,6 +25,9 @@ import * as Location from "expo-location";
 import QuestionRenderer from "./FormatRenderer/QuestionRenderer";
 import FirmField from "./FirmField";
 import axios from "axios";
+import { Picker } from "@react-native-picker/picker";
+import DateTimePicker from "@react-native-community/datetimepicker";
+import { parseFormDesignToQuestions } from "../utils/formDesignParser";
 const { width, height } = Dimensions.get("window");
 
 const QUESTIONS_KEY = "offline_questions";
@@ -113,7 +117,9 @@ export default function FormatScreen(props) {
         // 🆕 Verificar conexión primero
         const netInfo = await NetInfo.fetch();
         if (!netInfo.isConnected) {
-          console.log("📵 Sin conexión - Cargando usuarios faciales desde caché offline");
+          console.log(
+            "📵 Sin conexión - Cargando usuarios faciales desde caché offline"
+          );
 
           // Intentar cargar desde caché offline
           try {
@@ -121,7 +127,10 @@ export default function FormatScreen(props) {
             if (cached) {
               const cachedUsers = JSON.parse(cached);
               setFacialUsers(cachedUsers);
-              console.log("✅ Usuarios faciales cargados desde caché:", cachedUsers.length);
+              console.log(
+                "✅ Usuarios faciales cargados desde caché:",
+                cachedUsers.length
+              );
               return;
             }
           } catch (e) {
@@ -158,31 +167,31 @@ export default function FormatScreen(props) {
 
         const mapped = Array.isArray(res.data)
           ? res.data
-            .map((item) => {
-              try {
-                const parsed = JSON.parse(item.answer_text || "{}");
-                const faceData = parsed.faceData || parsed;
-                if (!faceData) return null;
-                return {
-                  id:
-                    faceData.person_id ||
-                    faceData.personId ||
-                    String(Math.random()),
-                  name:
-                    faceData.personName ||
-                    faceData.person_name ||
-                    faceData.name ||
-                    "Sin nombre",
-                  person_id: faceData.person_id || faceData.personId || "",
-                  num_document: faceData.person_id || faceData.personId || "", // 🆕 Agregado
-                  hash: item.encrypted_hash || item.hash || "",
-                };
-              } catch (err) {
-                console.error("Error parseando datos faciales:", err);
-                return null;
-              }
-            })
-            .filter(Boolean)
+              .map((item) => {
+                try {
+                  const parsed = JSON.parse(item.answer_text || "{}");
+                  const faceData = parsed.faceData || parsed;
+                  if (!faceData) return null;
+                  return {
+                    id:
+                      faceData.person_id ||
+                      faceData.personId ||
+                      String(Math.random()),
+                    name:
+                      faceData.personName ||
+                      faceData.person_name ||
+                      faceData.name ||
+                      "Sin nombre",
+                    person_id: faceData.person_id || faceData.personId || "",
+                    num_document: faceData.person_id || faceData.personId || "", // 🆕 Agregado
+                    hash: item.encrypted_hash || item.hash || "",
+                  };
+                } catch (err) {
+                  console.error("Error parseando datos faciales:", err);
+                  return null;
+                }
+              })
+              .filter(Boolean)
           : [];
 
         setFacialUsers(mapped);
@@ -190,7 +199,10 @@ export default function FormatScreen(props) {
         // 🆕 Guardar en caché para uso offline
         if (mapped.length > 0) {
           try {
-            await AsyncStorage.setItem("cached_facial_users", JSON.stringify(mapped));
+            await AsyncStorage.setItem(
+              "cached_facial_users",
+              JSON.stringify(mapped)
+            );
             console.log("💾 Usuarios faciales guardados en caché");
           } catch (e) {
             console.warn("No se pudo guardar caché de usuarios faciales");
@@ -198,7 +210,6 @@ export default function FormatScreen(props) {
         }
 
         console.log("✅ Usuarios faciales cargados:", mapped.length);
-
       } catch (error) {
         console.error("❌ Error cargando datos faciales:", error.message);
 
@@ -277,14 +288,85 @@ export default function FormatScreen(props) {
         setLoading(false);
         return;
       }
-      setQuestions(offlineQuestions[formId]);
+      // support cached shape either array (legacy) or object { questions, form_design }
+      const rawEntry = offlineQuestions[formId];
+      let questionsArray = [];
+      if (Array.isArray(rawEntry)) questionsArray = rawEntry;
+      else if (rawEntry && typeof rawEntry === "object") {
+        // Prefer stored parsed questions, but if missing, try to derive from form_design
+        if (
+          Array.isArray(rawEntry.questions) &&
+          rawEntry.questions.length > 0
+        ) {
+          questionsArray = rawEntry.questions;
+        } else if (rawEntry.form_design) {
+          try {
+            questionsArray = parseFormDesignToQuestions(
+              rawEntry.form_design,
+              rawEntry.questions || []
+            );
+          } catch (e) {
+            console.warn("Error parsing form_design to questions:", e);
+            questionsArray = Array.isArray(rawEntry.questions)
+              ? rawEntry.questions
+              : [];
+          }
+        } else {
+          questionsArray = Array.isArray(rawEntry.questions)
+            ? rawEntry.questions
+            : [];
+        }
+      }
+
+      // Normalize incoming question_type values to canonical set used by the app
+      const normalizeType = (t) => {
+        if (!t && t !== 0) return t;
+        const s = String(t).toLowerCase();
+        if (s === "texto" || s === "text") return "text";
+        if (s === "numerico" || s === "number" || s === "numeric")
+          return "number";
+        if (s === "fecha" || s === "date") return "date";
+        if (s === "hora" || s === "time") return "time";
+        if (s === "archivo" || s === "file") return "file";
+        if (s === "select" || s === "table" || s === "tabla") return "table";
+        if (s === "firma" || s === "firm" || s === "signature") return "firm";
+        return s;
+      };
+
+      const normalizedQuestions = questionsArray.map((q) => {
+        try {
+          const copy = { ...(q || {}) };
+          if (copy.question_type)
+            copy.question_type = normalizeType(copy.question_type);
+          // normalize options shape to simple strings when possible
+          if (Array.isArray(copy.options)) {
+            copy.options = copy.options.map((opt) => {
+              if (!opt && opt !== 0) return opt;
+              if (typeof opt === "string") return opt;
+              if (typeof opt === "object")
+                return (
+                  opt.option_text ||
+                  opt.label ||
+                  opt.text ||
+                  JSON.stringify(opt)
+                );
+              return String(opt);
+            });
+          }
+          return copy;
+        } catch (e) {
+          return q;
+        }
+      });
+
+      setQuestions(normalizedQuestions);
       const storedRelated = await AsyncStorage.getItem(RELATED_ANSWERS_KEY);
       const offlineRelated = storedRelated ? JSON.parse(storedRelated) : {};
       const tableAnswersObj = {};
       const locationRelatedObj = {};
       const correlationsObj = {};
       const relatedQuestionsObj = {};
-      offlineQuestions[formId].forEach((q) => {
+      normalizedQuestions.forEach((q) => {
         if (q.question_type === "table") {
           const rel = offlineRelated[q.id];
           if (rel && Array.isArray(rel.data)) {
@@ -615,6 +697,105 @@ export default function FormatScreen(props) {
     }));
   };
 
+  // --- Repeater helpers: manage sections across repeated questions ---
+  const updateAnswersArrayValue = (questionId, index, value) => {
+    setAnswers((prev) => {
+      const arr = Array.isArray(prev[questionId]) ? [...prev[questionId]] : [];
+      arr[index] = value;
+      return { ...prev, [questionId]: arr };
+    });
+  };
+
+  const handleAddSection = (groupId = null) => {
+    // Add a section only for questions in the given repeated group (or all if null)
+    const groupQ = groupId
+      ? isRepeatedQuestions.filter((q) => (q.parentId || "default") === groupId)
+      : isRepeatedQuestions;
+    setTextAnswers((prev) => {
+      const copy = { ...prev };
+      groupQ.forEach((q) => {
+        if (q.question_type === "text") {
+          copy[q.id] = [...(copy[q.id] || []), ""];
+        }
+      });
+      return copy;
+    });
+    setTableAnswersState((prev) => {
+      const copy = { ...prev };
+      groupQ.forEach((q) => {
+        if (q.question_type === "table") {
+          copy[q.id] = [...(copy[q.id] || []), ""];
+        }
+      });
+      return copy;
+    });
+    setAnswers((prev) => {
+      const copy = { ...prev };
+      groupQ.forEach((q) => {
+        if (q.question_type !== "text" && q.question_type !== "table") {
+          const arr = Array.isArray(copy[q.id])
+            ? [...copy[q.id]]
+            : [copy[q.id] || ""];
+          arr.push("");
+          copy[q.id] = arr;
+        }
+      });
+      return copy;
+    });
+  };
+
+  const handleRemoveSection = (groupId = null, index) => {
+    const groupQ = groupId
+      ? isRepeatedQuestions.filter((q) => (q.parentId || "default") === groupId)
+      : isRepeatedQuestions;
+    setTextAnswers((prev) => {
+      const copy = { ...prev };
+      groupQ.forEach((q) => {
+        if (q.question_type === "text") {
+          copy[q.id] = (copy[q.id] || []).filter((_, i) => i !== index);
+        }
+      });
+      return copy;
+    });
+    setTableAnswersState((prev) => {
+      const copy = { ...prev };
+      groupQ.forEach((q) => {
+        if (q.question_type === "table") {
+          copy[q.id] = (copy[q.id] || []).filter((_, i) => i !== index);
+        }
+      });
+      return copy;
+    });
+    setAnswers((prev) => {
+      const copy = { ...prev };
+      groupQ.forEach((q) => {
+        if (q.question_type !== "text" && q.question_type !== "table") {
+          if (Array.isArray(copy[q.id])) {
+            copy[q.id] = copy[q.id].filter((_, i) => i !== index);
+          }
+        }
+      });
+      return copy;
+    });
+  };
+
+  const handleDateChangeForIndex = (questionId, index, selectedDate) => {
+    if (selectedDate) {
+      const formattedDate = selectedDate.toISOString().split("T")[0];
+      setAnswers((prev) => {
+        const arr = Array.isArray(prev[questionId])
+          ? [...prev[questionId]]
+          : [];
+        arr[index] = formattedDate;
+        return { ...prev, [questionId]: arr };
+      });
+    }
+    setDatePickerVisible((prev) => ({
+      ...prev,
+      [`${questionId}_${index}`]: false,
+    }));
+  };
+
   const handleDateChange = (questionId, selectedDate) => {
     if (selectedDate) {
       const formattedDate = selectedDate.toISOString().split("T")[0];
@@ -763,6 +944,27 @@ export default function FormatScreen(props) {
   const handleSubmitForm = async () => {
     console.log("📤 Iniciando envío de formulario ID:", id);
     setSubmitting(true);
+    // Validate: all table (Select/Table) questions must have at least one selected option
+    try {
+      const missingTable = questions.some((q) => {
+        if (q.question_type !== "table") return false;
+        const vals = tableAnswersState[q.id] || [];
+        return !vals.some(
+          (v) => v !== undefined && v !== null && String(v).trim() !== ""
+        );
+      });
+      if (missingTable) {
+        Alert.alert(
+          "Error",
+          "Por favor selecciona una opción en las preguntas de tipo Tabla antes de continuar."
+        );
+        setSubmitting(false);
+        return;
+      }
+    } catch (e) {
+      // continue if validation fails unexpectedly
+      console.warn("Validation check failed:", e);
+    }
     try {
       const token = await AsyncStorage.getItem("authToken");
       if (!token) throw new Error("No authentication token found");
@@ -1514,11 +1716,18 @@ export default function FormatScreen(props) {
                         <FirmField
                           key={question.id}
                           label={question.question_text || "Firma Digital"}
-                          options={facialUsers.length > 0 ? facialUsers.map((u) => ({
-                            id: u.id,
-                            name: u.name,
-                            num_document: u.person_id || u.num_document || "Sin documento",
-                          })) : []} // 🆕 Array vacío si no hay usuarios
+                          options={
+                            facialUsers.length > 0
+                              ? facialUsers.map((u) => ({
+                                  id: u.id,
+                                  name: u.name,
+                                  num_document:
+                                    u.person_id ||
+                                    u.num_document ||
+                                    "Sin documento",
+                                }))
+                              : []
+                          } // 🆕 Array vacío si no hay usuarios
                           required={question.required ?? false}
                           onChange={(ev) => {
                             const val = ev?.target?.value ?? ev ?? "";
@@ -1536,7 +1745,10 @@ export default function FormatScreen(props) {
                           apiUrl="https://api-signfacial-safe.service.saferut.com"
                           autoCloseDelay={10000}
                           onFirmSuccess={(data) => {
-                            console.log("✅ Firma completada exitosamente:", data);
+                            console.log(
+                              "✅ Firma completada exitosamente:",
+                              data
+                            );
                           }}
                           onFirmError={(error) => {
                             console.error("❌ Error en la firma:", error);
@@ -1635,7 +1847,7 @@ export default function FormatScreen(props) {
             </View>
           )}
 
-          {/* Preguntas Repetidas */}
+          {/* Preguntas Repetidas (secciones) */}
           {isRepeatedQuestions.length > 0 && (
             <View style={styles.questionsSection}>
               <View style={styles.sectionHeader}>
@@ -1658,41 +1870,378 @@ export default function FormatScreen(props) {
                     </Text>
                   </View>
                 ) : (
-                  isRepeatedQuestions.map((question) => (
-                    <QuestionRenderer
-                      key={question.id}
-                      question={question}
-                      isLocked={false}
-                      answers={answers}
-                      textAnswers={textAnswers}
-                      tableAnswersState={tableAnswersState}
-                      tableAnswers={tableAnswers}
-                      datePickerVisible={datePickerVisible}
-                      fileSerials={fileSerials}
-                      fileUris={fileUris}
-                      pickerSearch={pickerSearch}
-                      tableAutoFilled={tableAutoFilled}
-                      locationError={locationError}
-                      locationRelatedAnswers={locationRelatedAnswers}
-                      locationSelected={locationSelected}
-                      allowAddRemove={isRepeatedQuestions.length === 1}
-                      setAnswers={setAnswers}
-                      handleTextChange={handleTextChange}
-                      handleRemoveTextField={handleRemoveTextField}
-                      handleAddTextField={handleAddTextField}
-                      handleTableSelectChangeWithCorrelation={
-                        handleTableSelectChangeWithCorrelation
+                  (() => {
+                    // determine how many sections (max length among repeated answers)
+                    let sections = 0;
+                    isRepeatedQuestions.forEach((q) => {
+                      if (q.question_type === "text") {
+                        sections = Math.max(
+                          sections,
+                          (textAnswers[q.id] || []).length
+                        );
+                      } else if (q.question_type === "table") {
+                        sections = Math.max(
+                          sections,
+                          (tableAnswersState[q.id] || []).length
+                        );
+                      } else {
+                        sections = Math.max(
+                          sections,
+                          Array.isArray(answers[q.id])
+                            ? answers[q.id].length
+                            : 0
+                        );
                       }
-                      setPickerSearch={setPickerSearch}
-                      setDatePickerVisible={setDatePickerVisible}
-                      handleDateChange={handleDateChange}
-                      handleFileButtonPress={handleFileButtonPress}
-                      handleCaptureLocation={handleCaptureLocation}
-                      setLocationSelected={setLocationSelected}
-                      handleAddTableAnswer={handleAddTableAnswer}
-                      handleRemoveTableAnswer={handleRemoveTableAnswer}
-                    />
-                  ))
+                    });
+
+                    if (sections === 0) sections = 1; // always show at least one section
+
+                    return (
+                      <View>
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            marginBottom: 10,
+                          }}
+                        >
+                          <Text style={{ fontWeight: "600", color: "#4A5568" }}>
+                            Registros: {sections}
+                          </Text>
+                          <View style={{ flexDirection: "row", gap: 8 }}>
+                            <TouchableOpacity
+                              style={[
+                                styles.addButton,
+                                { width: 42, paddingVertical: 8 },
+                              ]}
+                              onPress={handleAddSection}
+                            >
+                              <Text style={styles.addButtonText}>+</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+
+                        {Array.from({ length: sections }).map((_, idx) => (
+                          <View
+                            key={idx}
+                            style={{
+                              marginBottom: 14,
+                              padding: 12,
+                              borderRadius: 8,
+                              backgroundColor: "#FAFBFC",
+                              borderWidth: 1,
+                              borderColor: "#E6EEF2",
+                            }}
+                          >
+                            <View
+                              style={{
+                                flexDirection: "row",
+                                justifyContent: "space-between",
+                                marginBottom: 8,
+                              }}
+                            >
+                              <Text
+                                style={{ fontWeight: "700", color: "#2D3748" }}
+                              >
+                                Registro #{idx + 1}
+                              </Text>
+                              <TouchableOpacity
+                                onPress={() => handleRemoveSection(idx)}
+                                style={styles.clearButton}
+                              >
+                                <Text style={styles.clearButtonText}>
+                                  Eliminar
+                                </Text>
+                              </TouchableOpacity>
+                            </View>
+
+                            {isRepeatedQuestions.map((q) => (
+                              <View key={q.id} style={{ marginBottom: 10 }}>
+                                <Text
+                                  style={{
+                                    fontSize: 14,
+                                    fontWeight: "600",
+                                    color: "#2D3748",
+                                    marginBottom: 6,
+                                  }}
+                                >
+                                  {q.question_text}
+                                  {q.required && (
+                                    <Text style={{ color: "#ef4444" }}> *</Text>
+                                  )}
+                                </Text>
+                                {/* Render per-type input for this section index */}
+                                {q.question_type === "text" && (
+                                  <>
+                                    <TextInput
+                                      style={styles.input}
+                                      placeholder={
+                                        q.placeholder ||
+                                        (q.props && q.props.placeholder) ||
+                                        "Escribe tu respuesta"
+                                      }
+                                      value={
+                                        (textAnswers[q.id] &&
+                                          textAnswers[q.id][idx]) ||
+                                        ""
+                                      }
+                                      onChangeText={(val) =>
+                                        handleTextChange(q.id, idx, val)
+                                      }
+                                    />
+                                  </>
+                                )}
+                                {q.question_type === "table" && (
+                                  <>
+                                    <View style={styles.pickerSearchWrapper}>
+                                      <TextInput
+                                        style={styles.pickerSearchInput}
+                                        placeholder={
+                                          q.placeholder ||
+                                          (q.props && q.props.placeholder) ||
+                                          "Buscar opción..."
+                                        }
+                                        value={
+                                          pickerSearch[`${q.id}_${idx}`] || ""
+                                        }
+                                        onChangeText={(text) =>
+                                          setPickerSearch((prev) => ({
+                                            ...prev,
+                                            [`${q.id}_${idx}`]: text,
+                                          }))
+                                        }
+                                      />
+                                    </View>
+                                    <Picker
+                                      selectedValue={
+                                        (tableAnswersState[q.id] &&
+                                          tableAnswersState[q.id][idx]) ||
+                                        ""
+                                      }
+                                      onValueChange={(val) =>
+                                        handleTableSelectChangeWithCorrelation(
+                                          q.id,
+                                          idx,
+                                          val
+                                        )
+                                      }
+                                      style={styles.picker}
+                                    >
+                                      <Picker.Item
+                                        label={
+                                          q.placeholder ||
+                                          "Selecciona una opción"
+                                        }
+                                        value=""
+                                      />
+                                      {Array.isArray(tableAnswers[q.id]) &&
+                                        tableAnswers[q.id]
+                                          .filter((opt) =>
+                                            (pickerSearch[`${q.id}_${idx}`] ||
+                                              "") === ""
+                                              ? true
+                                              : opt
+                                                  .toLowerCase()
+                                                  .includes(
+                                                    (
+                                                      pickerSearch[
+                                                        `${q.id}_${idx}`
+                                                      ] || ""
+                                                    ).toLowerCase()
+                                                  )
+                                          )
+                                          .map((opt, i) => (
+                                            <Picker.Item
+                                              key={i}
+                                              label={opt}
+                                              value={opt}
+                                            />
+                                          ))}
+                                    </Picker>
+                                  </>
+                                )}
+                                {q.question_type === "number" && (
+                                  <TextInput
+                                    style={styles.input}
+                                    placeholder={
+                                      q.placeholder ||
+                                      (q.props && q.props.placeholder) ||
+                                      "Escribe un número"
+                                    }
+                                    keyboardType="numeric"
+                                    value={
+                                      (Array.isArray(answers[q.id]) &&
+                                        answers[q.id][idx]) ||
+                                      ""
+                                    }
+                                    onChangeText={(val) =>
+                                      updateAnswersArrayValue(q.id, idx, val)
+                                    }
+                                  />
+                                )}
+                                {q.question_type === "date" && (
+                                  <>
+                                    <TouchableOpacity
+                                      style={styles.dateButton}
+                                      onPress={() =>
+                                        setDatePickerVisible((prev) => ({
+                                          ...prev,
+                                          [`${q.id}_${idx}`]: true,
+                                        }))
+                                      }
+                                    >
+                                      <Text style={styles.dateButtonText}>
+                                        {(Array.isArray(answers[q.id]) &&
+                                          answers[q.id][idx]) ||
+                                          q.placeholder ||
+                                          "Seleccionar fecha"}
+                                      </Text>
+                                    </TouchableOpacity>
+                                    {datePickerVisible[`${q.id}_${idx}`] && (
+                                      <DateTimePicker
+                                        value={
+                                          answers[q.id] && answers[q.id][idx]
+                                            ? new Date(answers[q.id][idx])
+                                            : new Date()
+                                        }
+                                        mode="date"
+                                        display="default"
+                                        onChange={(e, d) =>
+                                          handleDateChangeForIndex(q.id, idx, d)
+                                        }
+                                      />
+                                    )}
+                                  </>
+                                )}
+                                {q.question_type === "file" && (
+                                  <TouchableOpacity
+                                    style={styles.fileButton}
+                                    onPress={() => {
+                                      // delegate to file picker and store in answers as array
+                                      (async () => {
+                                        const result =
+                                          await DocumentPicker.getDocumentAsync(
+                                            {
+                                              type: "*/*",
+                                              copyToCacheDirectory: true,
+                                            }
+                                          );
+                                        if (
+                                          result &&
+                                          !result.canceled &&
+                                          result.assets?.[0]?.uri
+                                        ) {
+                                          setAnswers((prev) => {
+                                            const arr = Array.isArray(
+                                              prev[q.id]
+                                            )
+                                              ? [...prev[q.id]]
+                                              : [];
+                                            arr[idx] = result.assets[0].uri;
+                                            return { ...prev, [q.id]: arr };
+                                          });
+                                        }
+                                      })();
+                                    }}
+                                  >
+                                    <Text style={styles.fileButtonText}>
+                                      {Array.isArray(answers[q.id]) &&
+                                      answers[q.id][idx]
+                                        ? "Archivo seleccionado"
+                                        : "Subir archivo"}
+                                    </Text>
+                                  </TouchableOpacity>
+                                )}
+                                {q.question_type === "location" && (
+                                  <>
+                                    <TouchableOpacity
+                                      style={[
+                                        styles.locationButton,
+                                        Array.isArray(answers[q.id]) &&
+                                          answers[q.id][idx] && {
+                                            backgroundColor: "#22c55e",
+                                          },
+                                      ]}
+                                      onPress={async () => {
+                                        try {
+                                          let { status } =
+                                            await Location.requestForegroundPermissionsAsync();
+                                          if (status !== "granted") {
+                                            Alert.alert(
+                                              "Permiso denegado",
+                                              "Se requiere permiso de ubicación."
+                                            );
+                                            return;
+                                          }
+                                          let loc =
+                                            await Location.getCurrentPositionAsync(
+                                              {}
+                                            );
+                                          const value = `${loc.coords.latitude}, ${loc.coords.longitude}`;
+                                          setAnswers((prev) => {
+                                            const arr = Array.isArray(
+                                              prev[q.id]
+                                            )
+                                              ? [...prev[q.id]]
+                                              : [];
+                                            arr[idx] = value;
+                                            return { ...prev, [q.id]: arr };
+                                          });
+                                        } catch (e) {
+                                          Alert.alert(
+                                            "Error",
+                                            "No se pudo obtener la ubicación."
+                                          );
+                                        }
+                                      }}
+                                    >
+                                      <Text style={styles.locationButtonText}>
+                                        {Array.isArray(answers[q.id]) &&
+                                        answers[q.id][idx]
+                                          ? "Ubicación capturada"
+                                          : "Capturar ubicación"}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  </>
+                                )}
+                                {q.question_type === "firm" && (
+                                  <>
+                                    <FirmField
+                                      label={q.question_text}
+                                      options={
+                                        facialUsers.length > 0
+                                          ? facialUsers.map((u) => ({
+                                              id: u.id,
+                                              name: u.name,
+                                            }))
+                                          : []
+                                      }
+                                      required={q.required ?? false}
+                                      onValueChange={(val) => {
+                                        setAnswers((prev) => {
+                                          const arr = Array.isArray(prev[q.id])
+                                            ? [...prev[q.id]]
+                                            : [];
+                                          arr[idx] = val;
+                                          return { ...prev, [q.id]: arr };
+                                        });
+                                      }}
+                                      value={
+                                        (Array.isArray(answers[q.id]) &&
+                                          answers[q.id][idx]) ||
+                                        ""
+                                      }
+                                    />
+                                  </>
+                                )}
+                              </View>
+                            ))}
+                          </View>
+                        ))}
+                      </View>
+                    );
+                  })()
                 )}
               </View>
             </View>
@@ -1733,26 +2282,26 @@ export default function FormatScreen(props) {
                           <View style={styles.submittedValueContainer}>
                             {Array.isArray(group[q.id])
                               ? group[q.id]
-                                .filter((ans) => ans && ans !== "")
-                                .map((ans, i) => (
+                                  .filter((ans) => ans && ans !== "")
+                                  .map((ans, i) => (
+                                    <Text
+                                      key={i}
+                                      style={styles.submittedValue}
+                                      numberOfLines={2}
+                                      ellipsizeMode="tail"
+                                    >
+                                      {ans}
+                                    </Text>
+                                  ))
+                              : group[q.id] && (
                                   <Text
-                                    key={i}
                                     style={styles.submittedValue}
                                     numberOfLines={2}
                                     ellipsizeMode="tail"
                                   >
-                                    {ans}
+                                    {group[q.id]}
                                   </Text>
-                                ))
-                              : group[q.id] && (
-                                <Text
-                                  style={styles.submittedValue}
-                                  numberOfLines={2}
-                                  ellipsizeMode="tail"
-                                >
-                                  {group[q.id]}
-                                </Text>
-                              )}
+                                )}
                           </View>
                         </View>
                       ))}

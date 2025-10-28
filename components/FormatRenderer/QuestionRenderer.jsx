@@ -49,7 +49,11 @@ export default function QuestionRenderer({
         <View key={index} style={styles.dynamicFieldContainer}>
           <TextInput
             style={styles.input}
-            placeholder="Escribe tu respuesta"
+            placeholder={
+              question.placeholder ||
+              (question.props && question.props.placeholder) ||
+              "Escribe tu respuesta"
+            }
             value={field}
             onChangeText={(text) =>
               !isLocked && handleTextChange(question.id, index, text)
@@ -124,7 +128,11 @@ export default function QuestionRenderer({
           <View style={styles.pickerSearchWrapper}>
             <TextInput
               style={styles.pickerSearchInput}
-              placeholder="Buscar opción..."
+              placeholder={
+                question.placeholder ||
+                (question.props && question.props.placeholder) ||
+                "Buscar opción..."
+              }
               value={pickerSearch[`${question.id}_${index}`] || ""}
               onChangeText={(text) =>
                 setPickerSearch((prev) => ({
@@ -155,7 +163,10 @@ export default function QuestionRenderer({
             ]}
             enabled={!isLocked}
           >
-            <Picker.Item label="Selecciona una opción" value="" />
+            <Picker.Item
+              label={question.placeholder || "Selecciona una opción"}
+              value=""
+            />
             {Array.isArray(tableAnswers[question.id]) &&
               tableAnswers[question.id]
                 .filter((option) =>
@@ -201,8 +212,7 @@ export default function QuestionRenderer({
           <TouchableOpacity
             style={[
               styles.checkbox,
-              answers[question.id]?.includes(option) &&
-                styles.checkboxSelected,
+              answers[question.id]?.includes(option) && styles.checkboxSelected,
             ]}
             onPress={() =>
               !isLocked &&
@@ -260,7 +270,11 @@ export default function QuestionRenderer({
   const renderNumberQuestion = () => (
     <TextInput
       style={styles.input}
-      placeholder="Escribe un número"
+      placeholder={
+        question.placeholder ||
+        (question.props && question.props.placeholder) ||
+        "Escribe un número"
+      }
       keyboardType="numeric"
       value={answers[question.id]?.[0] || ""}
       onChangeText={(value) =>
@@ -288,15 +302,13 @@ export default function QuestionRenderer({
         disabled={isLocked}
       >
         <Text style={styles.dateButtonText}>
-          {answers[question.id] || "Seleccionar fecha"}
+          {answers[question.id] || question.placeholder || "Seleccionar fecha"}
         </Text>
       </TouchableOpacity>
       {datePickerVisible[question.id] && (
         <DateTimePicker
           value={
-            answers[question.id]
-              ? new Date(answers[question.id])
-              : new Date()
+            answers[question.id] ? new Date(answers[question.id]) : new Date()
           }
           mode="date"
           display="default"

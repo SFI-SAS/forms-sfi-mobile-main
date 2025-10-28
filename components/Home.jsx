@@ -22,7 +22,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { SvgXml } from "react-native-svg";
 import { HomeIcon, InfoIcon } from "../components/Icons";
 import { LinearGradient } from "expo-linear-gradient";
-
+import { parseFormDesignToQuestions } from "../utils/formDesignParser";
 
 const { width, height } = Dimensions.get("window");
 
@@ -42,6 +42,8 @@ const getBackendUrl = async () => {
   return stored || "";
 };
 
+// parseFormDesignToQuestions now moved to utils/formDesignParser.js
+
 // --- COMPONENTES REUTILIZABLES ---
 
 // Avatar circular con iniciales
@@ -49,11 +51,11 @@ const UserAvatar = ({ name }) => {
   const initials =
     name && typeof name === "string"
       ? name
-        .split(" ")
-        .map((n) => n[0])
-        .join("")
-        .slice(0, 2)
-        .toUpperCase()
+          .split(" ")
+          .map((n) => n[0])
+          .join("")
+          .slice(0, 2)
+          .toUpperCase()
       : "U";
   return (
     <View style={styles.avatarCircle}>
@@ -236,7 +238,10 @@ const BottomTabBar = ({ activeTab, onTabPress }) => (
               source={require("../assets/sync_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24.png")}
               style={[
                 styles.tabBarIcon,
-                { tintColor: activeTab === "pending-forms" ? "#12A0AF" : "#64748b" },
+                {
+                  tintColor:
+                    activeTab === "pending-forms" ? "#12A0AF" : "#64748b",
+                },
               ]}
             />
           </View>
@@ -267,34 +272,33 @@ const BottomTabBar = ({ activeTab, onTabPress }) => (
 );
 const TabBarButton = ({ icon, label, active, onPress, danger }) => (
   <TouchableOpacity
-    style={[
-      styles.tabBarButton,
-      active && styles.tabBarButtonActive,
-    ]}
+    style={[styles.tabBarButton, active && styles.tabBarButtonActive]}
     onPress={onPress}
     activeOpacity={0.7}
   >
-    <View style={[
-      styles.tabBarIconContainer,
-      active && styles.tabBarIconContainerActive,
-      danger && active && styles.tabBarIconContainerDanger,
-    ]}>
+    <View
+      style={[
+        styles.tabBarIconContainer,
+        active && styles.tabBarIconContainerActive,
+        danger && active && styles.tabBarIconContainerDanger,
+      ]}
+    >
       {icon}
     </View>
     <Text
       style={[
         styles.tabBarLabel,
-        active && (danger ? styles.tabBarLabelDanger : styles.tabBarLabelActive),
+        active &&
+          (danger ? styles.tabBarLabelDanger : styles.tabBarLabelActive),
       ]}
       numberOfLines={1}
     >
       {label}
     </Text>
     {active && (
-      <View style={[
-        styles.activeIndicator,
-        danger && styles.activeIndicatorDanger,
-      ]} />
+      <View
+        style={[styles.activeIndicator, danger && styles.activeIndicatorDanger]}
+      />
     )}
   </TouchableOpacity>
 );
@@ -328,7 +332,6 @@ export function AppWithTabBar() {
       {/* Aquí renderiza la pantalla actual */}
       <Home activeTab={activeTab} onTabPress={handleTabPress} />
       <View style={styles.tabBarAbsolute}>
-
         <BottomTabBar activeTab={activeTab} onTabPress={handleTabPress} />
       </View>
     </View>
@@ -523,23 +526,32 @@ export default function Home() {
           if (!qRes.ok)
             throw new Error(qData.detail || "Error fetching questions");
 
-          // Procesar preguntas
-          const adjustedQuestions = qData.questions.map((question) => {
-            if (
-              (question.question_type === "multiple_choice" ||
-                question.question_type === "one_choice") &&
-              Array.isArray(question.options)
-            ) {
-              return {
-                ...question,
-                options: question.options.map((option) => option.option_text),
-              };
-            }
-            if (question.question_type === "table") {
-              return { ...question, options: [] };
-            }
-            return question;
-          });
+          // Procesar preguntas: preferir form_design como fuente de verdad
+          let adjustedQuestions = [];
+          // Preferir form_design como fuente de verdad. Aceptar objetos o arrays
+          const designSource = qData.form_design || qData.format_design || null;
+          if (designSource) {
+            // Use only form_design as the source of truth — do NOT pass qData.questions
+            adjustedQuestions = parseFormDesignToQuestions(designSource);
+          } else if (Array.isArray(qData.questions)) {
+            // Fallback al comportamiento previo
+            adjustedQuestions = qData.questions.map((question) => {
+              if (
+                (question.question_type === "multiple_choice" ||
+                  question.question_type === "one_choice") &&
+                Array.isArray(question.options)
+              ) {
+                return {
+                  ...question,
+                  options: question.options.map((option) => option.option_text),
+                };
+              }
+              if (question.question_type === "table") {
+                return { ...question, options: [] };
+              }
+              return question;
+            });
+          }
 
           // 2. Obtener respuestas relacionadas para preguntas tipo tabla
           const tableQuestions = adjustedQuestions.filter(
@@ -561,14 +573,14 @@ export default function Home() {
                 questionId: question.id,
                 data: Array.isArray(relData.data)
                   ? relData.data
-                    .map((item) =>
-                      typeof item === "object" && item.name
-                        ? item.name
-                        : typeof item === "string"
-                          ? item
-                          : ""
-                    )
-                    .filter((v) => typeof v === "string" && v.length > 0)
+                      .map((item) =>
+                        typeof item === "object" && item.name
+                          ? item.name
+                          : typeof item === "string"
+                            ? item
+                            : ""
+                      )
+                      .filter((v) => typeof v === "string" && v.length > 0)
                   : [],
                 correlations: relData.correlations || {},
                 related_question: relData.related_question || null,
@@ -602,6 +614,7 @@ export default function Home() {
           return {
             formId: form.id,
             questions: adjustedQuestions,
+            form_design: qData.form_design || qData.format_design || null,
             metadata: {
               title: qData.title,
               description: qData.description,
@@ -619,7 +632,11 @@ export default function Home() {
 
       batchResults.forEach((result) => {
         if (result) {
-          allQuestions[result.formId] = result.questions;
+          // Store both parsed questions and original form_design for rendering
+          allQuestions[result.formId] = {
+            questions: result.questions,
+            form_design: result.form_design || null,
+          };
           allFormsMetadata[result.formId] = result.metadata;
           // --- FIX: Merge relatedAnswers por pregunta ---
           Object.assign(allRelatedAnswers, result.relatedAnswers);
@@ -887,7 +904,6 @@ export default function Home() {
       colors={["#4B34C7", "#4B34C7"]}
       style={styles.fullBackground}
     >
-
       <View style={styles.container}>
         {/* Fondo decorativo superior eliminado, ahora todo el fondo es morado */}
         <Text style={styles.sectionTitleWhite}>Welcome</Text>
@@ -1305,89 +1321,89 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
   },
   tabBarContainer: {
-  backgroundColor: '#ffffff',
-  borderTopWidth: 0,
-  paddingVertical: 8,
-  paddingBottom: Platform.OS === "ios" ? 20 : 10,
-  paddingHorizontal: 8,
-  elevation: 20,
-  shadowColor: "#000",
-  shadowOpacity: 0.15,
-  shadowRadius: 12,
-  shadowOffset: { width: 0, height: -4 },
-},
-tabBarInner: {
-  flexDirection: "row",
-  justifyContent: "space-around",
-  alignItems: "center",
-  backgroundColor: "#f8fafc",
-  borderRadius: 20,
-  paddingVertical: 6,
-  paddingHorizontal: 4,
-  borderWidth: 1,
-  borderColor: "#e2e8f0",
-},
-tabBarButton: {
-  flex: 1,
-  alignItems: "center",
-  justifyContent: "center",
-  paddingVertical: 8,
-  paddingHorizontal: 4,
-  borderRadius: 16,
-  position: 'relative',
-  minHeight: 60,
-},
-tabBarButtonActive: {
-  backgroundColor: "rgba(18, 160, 175, 0.08)",
-},
-iconWrapper: {
-  width: width * 0.08,
-  height: width * 0.08,
-  alignItems: 'center',
-  justifyContent: 'center',
-},
-tabBarIconContainer: {
-  marginBottom: 4,
-  transform: [{ scale: 1 }],
-},
-tabBarIconContainerActive: {
-  transform: [{ scale: 1.1 }],
-},
-tabBarIconContainerDanger: {
-  backgroundColor: 'rgba(239, 68, 68, 0.08)',
-  borderRadius: 12,
-  padding: 6,
-},
-tabBarIcon: {
-  width: width * 0.065,
-  height: width * 0.065,
-},
-tabBarLabel: {
-  fontSize: width * 0.028,
-  color: "#64748b",
-  fontWeight: "600",
-  marginTop: 2,
-  textAlign: 'center',
-},
-tabBarLabelActive: {
-  color: "#12A0AF",
-  fontWeight: "700",
-},
-tabBarLabelDanger: {
-  color: "#ef4444",
-  fontWeight: "700",
-},
-activeIndicator: {
-  position: 'absolute',
-  bottom: 2,
-  width: 32,
-  height: 3,
-  backgroundColor: "#12A0AF",
-  borderRadius: 2,
-},
-activeIndicatorDanger: {
-  backgroundColor: "#ef4444",
-},
+    backgroundColor: "#ffffff",
+    borderTopWidth: 0,
+    paddingVertical: 8,
+    paddingBottom: Platform.OS === "ios" ? 20 : 10,
+    paddingHorizontal: 8,
+    elevation: 20,
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: -4 },
+  },
+  tabBarInner: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "center",
+    backgroundColor: "#f8fafc",
+    borderRadius: 20,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+  },
+  tabBarButton: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    borderRadius: 16,
+    position: "relative",
+    minHeight: 60,
+  },
+  tabBarButtonActive: {
+    backgroundColor: "rgba(18, 160, 175, 0.08)",
+  },
+  iconWrapper: {
+    width: width * 0.08,
+    height: width * 0.08,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tabBarIconContainer: {
+    marginBottom: 4,
+    transform: [{ scale: 1 }],
+  },
+  tabBarIconContainerActive: {
+    transform: [{ scale: 1.1 }],
+  },
+  tabBarIconContainerDanger: {
+    backgroundColor: "rgba(239, 68, 68, 0.08)",
+    borderRadius: 12,
+    padding: 6,
+  },
+  tabBarIcon: {
+    width: width * 0.065,
+    height: width * 0.065,
+  },
+  tabBarLabel: {
+    fontSize: width * 0.028,
+    color: "#64748b",
+    fontWeight: "600",
+    marginTop: 2,
+    textAlign: "center",
+  },
+  tabBarLabelActive: {
+    color: "#12A0AF",
+    fontWeight: "700",
+  },
+  tabBarLabelDanger: {
+    color: "#ef4444",
+    fontWeight: "700",
+  },
+  activeIndicator: {
+    position: "absolute",
+    bottom: 2,
+    width: 32,
+    height: 3,
+    backgroundColor: "#12A0AF",
+    borderRadius: 2,
+  },
+  activeIndicatorDanger: {
+    backgroundColor: "#ef4444",
+  },
   tabBarIcon: {
     width: width * 0.07,
     height: width * 0.07,
@@ -1499,7 +1515,6 @@ activeIndicatorDanger: {
   },
 });
 
-
 // Cuando guardas las respuestas relacionadas en AsyncStorage, asegúrate de guardar la estructura correcta.
 // El objeto debe tener la forma:
 // { [questionId]: { data: [{name: "valor"}], correlations: {...}, ... } }
@@ -1525,14 +1540,14 @@ const fetchAndCacheRelatedAnswers = async (
         relatedAnswers[question.id] = {
           data: Array.isArray(relData.data)
             ? relData.data
-              .map((item) =>
-                typeof item === "object" && item.name
-                  ? item.name
-                  : typeof item === "string"
-                    ? item
-                    : ""
-              )
-              .filter((v) => typeof v === "string" && v.length > 0)
+                .map((item) =>
+                  typeof item === "object" && item.name
+                    ? item.name
+                    : typeof item === "string"
+                      ? item
+                      : ""
+                )
+                .filter((v) => typeof v === "string" && v.length > 0)
             : [],
           correlations: relData.correlations || {},
           related_question: relData.related_question || null,
