@@ -109,7 +109,8 @@ export default function FormatScreen(props) {
   const [locationError, setLocationError] = useState({});
   const [signatureUris, setSignatureUris] = useState({});
   const [selectedSigner, setSelectedSigner] = useState({});
-  const [selectedUserId, setSelectedUserId] = useState("");
+  // firm selections per field instance (supports repeaters): key can be `${fieldId}` or `${fieldId}__${rowIndex}`
+  const [selectedUserId, setSelectedUserId] = useState(""); // deprecated: kept for backward compatibility
   const [facialUsers, setFacialUsers] = useState([]);
   // form_design rendering state
   const [formItems, setFormItems] = useState([]);
@@ -2290,77 +2291,87 @@ export default function FormatScreen(props) {
                     onFileSelect={handleFDFileSelect}
                     isSubmitting={submitting}
                     onRequestLocation={handleCaptureLocation}
-                    renderFirm={({ item, value, setValue }) => (
-                      <FirmField
-                        key={item.id}
-                        label={item.props?.label || "Firma Digital"}
-                        options={
-                          facialUsers.length > 0
-                            ? facialUsers.map((u) => ({
-                                id: u.id,
-                                name: u.name,
-                                num_document:
-                                  u.person_id ||
-                                  u.num_document ||
-                                  "Sin documento",
-                              }))
-                            : []
-                        }
-                        required={!!item.props?.required}
-                        onChange={(ev) => {
-                          const val = ev?.target?.value ?? ev ?? "";
-                          setSelectedUserId(val);
-                          handleAnswerChange(item.id, val);
-                        }}
-                        value={selectedUserId}
-                        disabled={submitting}
-                        error={false}
-                        documentHash={String(
-                          facialUsers.find((f) => f.id === selectedUserId)
-                            ?.hash || ""
-                        )}
-                        apiUrl="https://api-signfacial-safe.service.saferut.com"
-                        autoCloseDelay={10000}
-                        onFirmSuccess={(data) => {
-                          console.log(
-                            "✅ Firma completada exitosamente:",
-                            data
-                          );
-                        }}
-                        onFirmError={(error) => {
-                          console.error("❌ Error en la firma:", error);
-                        }}
-                        onValueChange={(firmCompleteData) => {
-                          const fd =
-                            firmCompleteData?.firmData ||
-                            firmCompleteData?.firm ||
-                            {};
-                          const filtered = {
-                            firmData: {
-                              success: !!fd.success,
-                              person_id: fd.person_id || fd.personId || "",
-                              person_name:
-                                fd.person_name ||
-                                fd.personName ||
-                                fd.name ||
-                                "",
-                              qr_url:
-                                fd.qr_url || fd.qrUrl || fd.signature_url || "",
-                            },
-                          };
-                          const serialized = JSON.stringify(filtered);
-                          setValue(serialized);
-                          handleAnswerChange(item.id, serialized);
-                          const preview = filtered.firmData.qr_url || null;
-                          if (preview) {
-                            setSignatureUris((prev) => ({
+                    renderFirm={({ item, value, setValue, rowIndex }) => {
+                      const key =
+                        rowIndex !== undefined && rowIndex !== null
+                          ? `${item.id}__${rowIndex}`
+                          : item.id;
+                      const selected = selectedSigner[key] || "";
+                      const user = facialUsers.find((f) => f.id === selected);
+                      const userOptions =
+                        facialUsers.length > 0
+                          ? facialUsers.map((u) => ({
+                              id: u.id,
+                              name: u.name,
+                              num_document:
+                                u.person_id ||
+                                u.num_document ||
+                                "Sin documento",
+                            }))
+                          : [];
+                      return (
+                        <FirmField
+                          key={`${item.id}-${rowIndex ?? "single"}`}
+                          label={item.props?.label || "Firma Digital"}
+                          options={userOptions}
+                          required={!!item.props?.required}
+                          onChange={(ev) => {
+                            const val = ev?.target?.value ?? ev ?? "";
+                            setSelectedSigner((prev) => ({
                               ...prev,
-                              [item.id]: preview,
+                              [key]: val,
                             }));
-                          }
-                        }}
-                      />
-                    )}
+                          }}
+                          value={selected}
+                          disabled={submitting}
+                          error={false}
+                          documentHash={String(user?.hash || "")}
+                          apiUrl="https://api-signfacial-safe.service.saferut.com"
+                          autoCloseDelay={10000}
+                          onFirmSuccess={(data) => {
+                            console.log(
+                              "✅ Firma completada exitosamente:",
+                              data
+                            );
+                          }}
+                          onFirmError={(error) => {
+                            console.error("❌ Error en la firma:", error);
+                          }}
+                          onValueChange={(firmCompleteData) => {
+                            const fd =
+                              firmCompleteData?.firmData ||
+                              firmCompleteData?.firm ||
+                              {};
+                            const filtered = {
+                              firmData: {
+                                success: !!fd.success,
+                                person_id: fd.person_id || fd.personId || "",
+                                person_name:
+                                  fd.person_name ||
+                                  fd.personName ||
+                                  fd.name ||
+                                  "",
+                                qr_url:
+                                  fd.qr_url ||
+                                  fd.qrUrl ||
+                                  fd.signature_url ||
+                                  "",
+                              },
+                            };
+                            const serialized = JSON.stringify(filtered);
+                            setValue(serialized);
+                            handleAnswerChange(item.id, serialized);
+                            const preview = filtered.firmData.qr_url || null;
+                            if (preview) {
+                              setSignatureUris((prev) => ({
+                                ...prev,
+                                [item.id]: preview,
+                              }));
+                            }
+                          }}
+                        />
+                      );
+                    }}
                   />
                 )}
               </View>
@@ -2407,16 +2418,19 @@ export default function FormatScreen(props) {
                           required={question.required ?? false}
                           onChange={(ev) => {
                             const val = ev?.target?.value ?? ev ?? "";
-                            console.log("📝 Usuario seleccionado:", val);
-                            setSelectedUserId(val);
-                            handleAnswerChange(question.id, val);
+                            setSelectedSigner((prev) => ({
+                              ...prev,
+                              [question.id]: val,
+                            }));
                           }}
-                          value={selectedUserId}
+                          value={selectedSigner[question.id] || ""}
                           disabled={submitting}
                           error={false}
                           documentHash={String(
-                            facialUsers.find((f) => f.id === selectedUserId)
-                              ?.hash || ""
+                            facialUsers.find(
+                              (f) =>
+                                f.id === (selectedSigner[question.id] || "")
+                            )?.hash || ""
                           )}
                           apiUrl="https://api-signfacial-safe.service.saferut.com"
                           autoCloseDelay={10000}
@@ -2883,34 +2897,89 @@ export default function FormatScreen(props) {
                                   </>
                                 )}
                                 {q.question_type === "firm" && (
-                                  <>
-                                    <FirmField
-                                      label={q.question_text}
-                                      options={
-                                        facialUsers.length > 0
-                                          ? facialUsers.map((u) => ({
-                                              id: u.id,
-                                              name: u.name,
-                                            }))
-                                          : []
-                                      }
-                                      required={q.required ?? false}
-                                      onValueChange={(val) => {
-                                        setAnswers((prev) => {
-                                          const arr = Array.isArray(prev[q.id])
-                                            ? [...prev[q.id]]
-                                            : [];
-                                          arr[idx] = val;
-                                          return { ...prev, [q.id]: arr };
-                                        });
-                                      }}
-                                      value={
-                                        (Array.isArray(answers[q.id]) &&
-                                          answers[q.id][idx]) ||
-                                        ""
-                                      }
-                                    />
-                                  </>
+                                  <FirmField
+                                    label={q.question_text}
+                                    options={
+                                      facialUsers.length > 0
+                                        ? facialUsers.map((u) => ({
+                                            id: u.id,
+                                            name: u.name,
+                                            num_document:
+                                              u.person_id ||
+                                              u.num_document ||
+                                              "Sin documento",
+                                          }))
+                                        : []
+                                    }
+                                    required={q.required ?? false}
+                                    onChange={(ev) => {
+                                      const val = ev?.target?.value ?? ev ?? "";
+                                      const key = `${q.id}__${idx}`;
+                                      setSelectedSigner((prev) => ({
+                                        ...prev,
+                                        [key]: val,
+                                      }));
+                                    }}
+                                    value={
+                                      selectedSigner[`${q.id}__${idx}`] || ""
+                                    }
+                                    disabled={submitting}
+                                    error={false}
+                                    documentHash={String(
+                                      facialUsers.find(
+                                        (f) =>
+                                          f.id ===
+                                          (selectedSigner[`${q.id}__${idx}`] ||
+                                            "")
+                                      )?.hash || ""
+                                    )}
+                                    apiUrl="https://api-signfacial-safe.service.saferut.com"
+                                    autoCloseDelay={10000}
+                                    onFirmSuccess={(data) => {
+                                      console.log(
+                                        "✅ Firma completada exitosamente:",
+                                        data
+                                      );
+                                    }}
+                                    onFirmError={(error) => {
+                                      console.error(
+                                        "❌ Error en la firma:",
+                                        error
+                                      );
+                                    }}
+                                    onValueChange={(firmCompleteData) => {
+                                      const fd =
+                                        firmCompleteData?.firmData ||
+                                        firmCompleteData?.firm ||
+                                        {};
+                                      const filtered = {
+                                        firmData: {
+                                          success: !!fd.success,
+                                          person_id:
+                                            fd.person_id || fd.personId || "",
+                                          person_name:
+                                            fd.person_name ||
+                                            fd.personName ||
+                                            fd.name ||
+                                            "",
+                                          qr_url:
+                                            fd.qr_url ||
+                                            fd.qrUrl ||
+                                            fd.signature_url ||
+                                            "",
+                                        },
+                                      };
+                                      const serialized =
+                                        JSON.stringify(filtered);
+                                      setAnswers((prev) => {
+                                        const arr = Array.isArray(prev[q.id])
+                                          ? [...prev[q.id]]
+                                          : [];
+                                        arr[idx] = serialized;
+                                        return { ...prev, [q.id]: arr };
+                                      });
+                                    }}
+                                  />
                                 )}
                               </View>
                             ))}

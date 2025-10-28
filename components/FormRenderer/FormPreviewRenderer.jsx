@@ -146,8 +146,11 @@ const Repeater = ({ item, values = [], onChange, renderField }) => {
           <View style={{ gap: 10 }}>
             {(item.children || []).map((child) => (
               <View key={`${child.id}-${idx}`}>
-                {renderField(child, row[child.id], (v) =>
-                  setCell(idx, child.id, v)
+                {renderField(
+                  child,
+                  row[child.id],
+                  (v) => setCell(idx, child.id, v),
+                  idx
                 )}
               </View>
             ))}
@@ -450,8 +453,20 @@ const FormPreviewRenderer = ({
           item={item}
           values={repeaterValue}
           onChange={(v) => onChange(item.id, v)}
-          renderField={(child, val, setter) =>
-            renderLeaf({
+          renderField={(child, val, setter, rowIndex) => {
+            // Allow external render for firm even inside repeaters
+            if (child.type === "firm") {
+              if (typeof renderFirm === "function") {
+                return renderFirm({
+                  item: child,
+                  value: val,
+                  setValue: setter,
+                  rowIndex,
+                });
+              }
+              return null;
+            }
+            return renderLeaf({
               item: child,
               value: val,
               setValue: setter,
@@ -459,8 +474,8 @@ const FormPreviewRenderer = ({
               onFileSelect,
               correlations,
               onCorrelationAutoFill: handleCorrelationAutoFill,
-            })
-          }
+            });
+          }}
         />
       );
     }
@@ -488,7 +503,8 @@ const FormPreviewRenderer = ({
     }
     if (item.type === "firm") {
       if (typeof renderFirm === "function") {
-        return renderFirm({ item, value, setValue });
+        // Non-repeater firm
+        return renderFirm({ item, value, setValue, rowIndex: undefined });
       }
       // Si no hay renderer de firma, ocultar el campo en lugar de mostrar mensaje
       return null;

@@ -352,7 +352,10 @@ export default function Home() {
   const [spinAnimUser] = useState(new Animated.Value(0));
   const [searchText, setSearchText] = useState("");
   const [searchResults, setSearchResults] = useState([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastSyncAt, setLastSyncAt] = useState(null);
   const inactivityTimer = useRef(null);
+  const hasFetchedRef = useRef(false); // Controlar consultas solo una vez por sesión
 
   useFocusEffect(
     React.useCallback(() => {
@@ -666,7 +669,7 @@ export default function Home() {
   };
 
   // ✅ OPTIMIZADO: Función principal fetchUserForms
-  const fetchUserForms = async () => {
+  const fetchUserForms = async ({ skipCacheIfUnchanged = true } = {}) => {
     try {
       const token = await AsyncStorage.getItem("authToken");
       if (!token) throw new Error("No authentication token found");
@@ -684,19 +687,37 @@ export default function Home() {
         throw new Error(data.detail || "Error fetching user forms");
       }
 
+      // Leer cache previa para detectar cambios y evitar trabajos innecesarios
+      let previousRaw = null;
+      try {
+        previousRaw = await AsyncStorage.getItem("offline_forms");
+      } catch (_) {}
+
+      const newRaw = JSON.stringify(data);
+      const unchanged = previousRaw && previousRaw === newRaw;
+
       // ✅ MOSTRAR DATOS INMEDIATAMENTE
       setUserForms(data);
       organizeByCategorys(data);
       setLoading(false); // Ocultar spinner inmediatamente
 
-      // ✅ GUARDAR EN BACKGROUND (no bloquear UI)
-      // Usar Promise sin await para que se ejecute en paralelo
-      Promise.all([
-        AsyncStorage.setItem("offline_forms", JSON.stringify(data)),
-        fetchAndCacheQuestionsAndRelated(data, token),
-      ]).catch((error) => {
-        console.error("❌ Error en operaciones de background:", error);
-      });
+      // ✅ GUARDAR EN BACKGROUND (no bloquear UI), solo si cambió o si no queremos saltarlo
+      if (!skipCacheIfUnchanged || !unchanged) {
+        Promise.all([
+          AsyncStorage.setItem("offline_forms", newRaw),
+          fetchAndCacheQuestionsAndRelated(data, token),
+        ])
+          .then(async () => {
+            const ts = new Date().toISOString();
+            setLastSyncAt(ts);
+            try {
+              await AsyncStorage.setItem("last_sync_at", ts);
+            } catch (_) {}
+          })
+          .catch((error) => {
+            console.error("❌ Error en operaciones de background:", error);
+          });
+      }
     } catch (error) {
       console.error("❌ Error al obtener los formularios del usuario:", error);
       setLoading(false);
@@ -783,35 +804,67 @@ export default function Home() {
     preloadCriticalData();
   }, []);
 
-  // ✅ OPTIMIZADO: useEffect principal con operaciones en paralelo
+  // ✅ CONTROLADO: useEffect principal SOLO consulta la primera vez
   useEffect(() => {
-    const checkNetworkStatus = async () => {
+    const controlledInitialFetch = async () => {
       const state = await NetInfo.fetch();
       setIsOffline(!state.isConnected);
 
-      if (state.isConnected) {
-        // ✅ Ejecutar ambas consultas en paralelo
-        Promise.all([fetchUserForms(), fetchUserInfo()]).catch((error) => {
-          console.error("❌ Error en consultas principales:", error);
-        });
-      } else {
-        // ✅ También ejecutar carga offline en paralelo
-        Promise.all([loadOfflineForms(), loadUserInfoOffline()]).catch(
-          (error) => {
-            console.error("❌ Error cargando datos offline:", error);
-          }
-        );
+      // Cargar última sincronización
+      try {
+        const ts = await AsyncStorage.getItem("last_sync_at");
+        if (ts) setLastSyncAt(ts);
+      } catch (_) {}
+
+      // Solo consultar en el primer render
+      if (!hasFetchedRef.current) {
+        hasFetchedRef.current = true;
+        await refreshAll({ force: false });
       }
     };
 
-    checkNetworkStatus();
+    controlledInitialFetch();
 
+    // Mantener listener solo para estado offline/online, sin consultas
     const unsubscribe = NetInfo.addEventListener((state) => {
       setIsOffline(!state.isConnected);
     });
 
     return () => unsubscribe();
   }, []);
+
+  // Acción controlada: refrescar bajo demanda
+  const refreshAll = async ({ force = false } = {}) => {
+    try {
+      setRefreshing(true);
+      setLoading(true);
+      const state = await NetInfo.fetch();
+      setIsOffline(!state.isConnected);
+
+      if (state.isConnected) {
+        await Promise.all([
+          fetchUserForms({ skipCacheIfUnchanged: !force }),
+          fetchUserInfo(),
+        ]);
+      } else {
+        await Promise.all([loadOfflineForms(), loadUserInfoOffline()]);
+      }
+
+      // Guardar timestamp de sync si hubo conexión
+      if (state.isConnected) {
+        const ts = new Date().toISOString();
+        setLastSyncAt(ts);
+        try {
+          await AsyncStorage.setItem("last_sync_at", ts);
+        } catch (_) {}
+      }
+    } catch (e) {
+      console.error("❌ Error en refreshAll:", e);
+    } finally {
+      setRefreshing(false);
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (loading) {
@@ -926,9 +979,31 @@ export default function Home() {
         </View>
 
         {/* Mueve el título y las categorías hacia abajo */}
-        <Text style={[styles.sectionTitleWhite, { marginTop: 12 }]}>
-          Assigned forms
-        </Text>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={[styles.sectionTitleWhite, { marginTop: 12, marginBottom: 0 }]}>
+            Assigned forms
+          </Text>
+          <TouchableOpacity
+            style={[styles.refreshButton, (refreshing || loading) && styles.refreshButtonDisabled]}
+            onPress={() => refreshAll({ force: true })}
+            disabled={refreshing || loading}
+            activeOpacity={0.8}
+          >
+            <Image
+              source={require("../assets/sync_25dp_FFFFFF_FILL0_wght400_GRAD0_opsz24.png")}
+              style={styles.refreshIcon}
+              resizeMode="contain"
+            />
+            <Text style={styles.refreshLabel}>
+              {refreshing ? "Updating..." : "Refresh"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+        {lastSyncAt && (
+          <Text style={styles.lastSyncText} numberOfLines={1}>
+            Last sync: {new Date(lastSyncAt).toLocaleString()}
+          </Text>
+        )}
         <ScrollView
           contentContainerStyle={{
             flexGrow: 1,
@@ -1132,6 +1207,40 @@ const styles = StyleSheet.create({
     textShadowColor: "#0002",
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
+  },
+  sectionHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: width * 0.04,
+  },
+  refreshButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#12A0AF",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  refreshButtonDisabled: {
+    opacity: 0.6,
+  },
+  refreshIcon: {
+    width: width * 0.05,
+    height: width * 0.05,
+    tintColor: "#fff",
+    marginRight: 6,
+  },
+  refreshLabel: {
+    color: "#fff",
+    fontWeight: "bold",
+  },
+  lastSyncText: {
+    color: "#e2e8f0",
+    textAlign: "right",
+    paddingHorizontal: width * 0.04,
+    marginTop: 4,
+    fontSize: width * 0.03,
   },
   // --- UserCard ---
   userCardGradient: {
