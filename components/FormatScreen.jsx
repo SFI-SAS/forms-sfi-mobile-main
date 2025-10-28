@@ -2702,6 +2702,7 @@ export default function FormatScreen(props) {
                                           val
                                         )
                                       }
+                                      mode="dialog"
                                       style={styles.picker}
                                     >
                                       <Picker.Item

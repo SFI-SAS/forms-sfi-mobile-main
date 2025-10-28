@@ -52,7 +52,7 @@ const FirmField = ({
   const [authStatus, setAuthStatus] = useState("idle");
   const [authMessage, setAuthMessage] = useState("");
   const [firmCompleted, setFirmCompleted] = useState(false);
-  
+
   // 🆕 Nuevo estado para saber si estamos offline
   const [isOffline, setIsOffline] = useState(false);
 
@@ -63,7 +63,7 @@ const FirmField = ({
 
   // 🆕 Detectar estado de conexión
   useEffect(() => {
-    const unsubscribe = NetInfo.addEventListener(state => {
+    const unsubscribe = NetInfo.addEventListener((state) => {
       const offline = !state.isConnected;
       setIsOffline(offline);
       console.log("📶 Estado de conexión:", offline ? "OFFLINE" : "ONLINE");
@@ -89,12 +89,12 @@ const FirmField = ({
 
         if (userSignature) {
           console.log("✅ Cargando firma offline para usuario:", value);
-          
+
           setFirmData(userSignature);
           setFirmCompleted(true);
           setAuthStatus("success");
           setAuthMessage("Firma cargada desde caché offline");
-          
+
           // Notificar al padre
           const completeFirmData = { firmData: userSignature };
           try {
@@ -131,14 +131,14 @@ const FirmField = ({
     try {
       const stored = await AsyncStorage.getItem(OFFLINE_SIGNATURES_KEY);
       const offlineSignatures = stored ? JSON.parse(stored) : {};
-      
+
       offlineSignatures[userId] = signatureData;
-      
+
       await AsyncStorage.setItem(
         OFFLINE_SIGNATURES_KEY,
         JSON.stringify(offlineSignatures)
       );
-      
+
       console.log("💾 Firma guardada offline para usuario:", userId);
     } catch (e) {
       console.error("❌ Error guardando firma offline:", e);
@@ -168,7 +168,8 @@ const FirmField = ({
           PermissionsAndroid.PERMISSIONS.CAMERA,
           {
             title: "Permiso de cámara",
-            message: "Se requiere acceso a la cámara para el reconocimiento facial",
+            message:
+              "Se requiere acceso a la cámara para el reconocimiento facial",
             buttonNeutral: "Preguntar después",
             buttonNegative: "Cancelar",
             buttonPositive: "Aceptar",
@@ -188,16 +189,19 @@ const FirmField = ({
    */
   const handleFirmar = async () => {
     if (signingRef.current) return;
-    
+
     if (!selectedUser) {
       setFirmError("Debe seleccionar un usuario antes de firmar");
       Alert.alert("Error", "Debe seleccionar un usuario antes de firmar");
       return;
     }
-    
+
     if (!documentHash) {
       setFirmError("No se ha proporcionado el hash del documento a firmar");
-      Alert.alert("Error", "No se ha proporcionado el hash del documento a firmar");
+      Alert.alert(
+        "Error",
+        "No se ha proporcionado el hash del documento a firmar"
+      );
       return;
     }
 
@@ -314,7 +318,10 @@ const FirmField = ({
 
   const handleSignSuccess = async (data = {}) => {
     try {
-      console.log('📥 Datos completos recibidos desde SFI Facial (firma):', data);
+      console.log(
+        "📥 Datos completos recibidos desde SFI Facial (firma):",
+        data
+      );
 
       setFirmData(data);
       setFirmError(null);
@@ -334,7 +341,10 @@ const FirmField = ({
 
       const completeFirmData = { firmData: filteredFirmData };
 
-      console.log("📦 Datos filtrados que se pasarán al padre:", completeFirmData);
+      console.log(
+        "📦 Datos filtrados que se pasarán al padre:",
+        completeFirmData
+      );
 
       // 🆕 Guardar firma offline para uso futuro
       if (value) {
@@ -346,7 +356,7 @@ const FirmField = ({
       } catch (e) {
         console.warn("onFirmSuccess falló:", e);
       }
-      
+
       try {
         onValueChange?.(completeFirmData);
       } catch (e) {
@@ -364,7 +374,10 @@ const FirmField = ({
             document_hash: documentHash || null,
             savedAt: Date.now(),
           });
-          await AsyncStorage.setItem(PENDING_SIGNATURES_KEY, JSON.stringify(arr));
+          await AsyncStorage.setItem(
+            PENDING_SIGNATURES_KEY,
+            JSON.stringify(arr)
+          );
         } catch (e) {
           console.warn("No se pudo encolar firma en AsyncStorage:", e);
         }
@@ -400,7 +413,9 @@ const FirmField = ({
       case "timeout":
         return {
           message: "❌ Autenticación Fallida",
-          subMessage: authMessage || "Usuario no encontrado o problemas con la autenticación",
+          subMessage:
+            authMessage ||
+            "Usuario no encontrado o problemas con la autenticación",
           bgColor: "#FEE2E2",
           borderColor: "#FECACA",
           textColor: "#991B1B",
@@ -596,37 +611,44 @@ const FirmField = ({
       {/* Selector de Usuario + Botón Firmar */}
       <View style={styles.inputRow}>
         <View style={[styles.pickerContainer, error && styles.pickerError]}>
-<Picker
-  selectedValue={value || ""}
-  onValueChange={(itemValue) => {
-    console.log("🔄 Picker onChange - valor seleccionado:", itemValue);
-    if (onChange) {
-      onChange({ target: { value: itemValue } });
-    }
-  }}
-  enabled={!disabled && options.length > 0} // 🆕 Deshabilitar si no hay opciones
-  style={styles.picker}
->
-  <Picker.Item 
-    label={options.length === 0 
-      ? "No hay usuarios disponibles - Verifica tu conexión" 
-      : "Seleccionar usuario para firmar..."} 
-    value="" 
-  />
-  {options.map((user) => (
-    <Picker.Item
-      key={user.id}
-      label={`${user.name} - ${user.num_document}`}
-      value={user.id}
-    />
-  ))}
-</Picker>
+          <Picker
+            selectedValue={value || ""}
+            onValueChange={(itemValue) => {
+              console.log(
+                "🔄 Picker onChange - valor seleccionado:",
+                itemValue
+              );
+              if (onChange) {
+                onChange({ target: { value: itemValue } });
+              }
+            }}
+            enabled={!disabled && options.length > 0} // 🆕 Deshabilitar si no hay opciones
+            mode="dialog"
+            style={styles.picker}
+          >
+            <Picker.Item
+              label={
+                options.length === 0
+                  ? "No hay usuarios disponibles - Verifica tu conexión"
+                  : "Seleccionar usuario para firmar..."
+              }
+              value=""
+            />
+            {options.map((user) => (
+              <Picker.Item
+                key={user.id}
+                label={`${user.name} - ${user.num_document}`}
+                value={user.id}
+              />
+            ))}
+          </Picker>
         </View>
 
         <TouchableOpacity
           style={[
             styles.firmButton,
-            (!value || value === "" || disabled || isSigning) && styles.firmButtonDisabled,
+            (!value || value === "" || disabled || isSigning) &&
+              styles.firmButtonDisabled,
             firmCompleted && styles.firmButtonSuccess,
           ]}
           disabled={!value || value === "" || disabled || isSigning}
@@ -634,7 +656,11 @@ const FirmField = ({
           activeOpacity={0.7}
         >
           <Text style={styles.firmButtonText}>
-            {firmCompleted ? (isOffline ? "✅ Firma Offline" : "✅ Firmado") : "🖊️ Firmar"}
+            {firmCompleted
+              ? isOffline
+                ? "✅ Firma Offline"
+                : "✅ Firmado"
+              : "🖊️ Firmar"}
           </Text>
         </TouchableOpacity>
       </View>
@@ -660,13 +686,15 @@ const FirmField = ({
             <Text style={styles.successIcon}>✅</Text>
             <View style={styles.successTextContainer}>
               <Text style={styles.successTitle}>
-                {isOffline ? "Firma cargada (offline)" : "Firma completada exitosamente"}
+                {isOffline
+                  ? "Firma cargada (offline)"
+                  : "Firma completada exitosamente"}
               </Text>
               <Text style={styles.successSubtitle}>
-                Usuario: {firmData.person_name || 'Sin nombre'}
+                Usuario: {firmData.person_name || "Sin nombre"}
               </Text>
               <Text style={styles.successDetails}>
-                ID: {firmData.person_id || 'Sin ID'}
+                ID: {firmData.person_id || "Sin ID"}
               </Text>
             </View>
           </View>
@@ -714,10 +742,20 @@ const FirmField = ({
                   <View style={styles.authStatusContent}>
                     <Text style={styles.authIcon}>{authDisplay.icon}</Text>
                     <View style={styles.authTextContainer}>
-                      <Text style={[styles.authMessage, { color: authDisplay.textColor }]}>
+                      <Text
+                        style={[
+                          styles.authMessage,
+                          { color: authDisplay.textColor },
+                        ]}
+                      >
                         {authDisplay.message}
                       </Text>
-                      <Text style={[styles.authSubMessage, { color: authDisplay.textColor }]}>
+                      <Text
+                        style={[
+                          styles.authSubMessage,
+                          { color: authDisplay.textColor },
+                        ]}
+                      >
                         {authDisplay.subMessage}
                       </Text>
                     </View>
@@ -727,7 +765,9 @@ const FirmField = ({
 
               {processStatus && (
                 <View style={styles.processStatusContainer}>
-                  <Text style={styles.processStatusText}>Estado: {processStatus}</Text>
+                  <Text style={styles.processStatusText}>
+                    Estado: {processStatus}
+                  </Text>
                 </View>
               )}
 
@@ -736,7 +776,8 @@ const FirmField = ({
                   <WebView
                     source={{
                       html: getWebViewHTML(),
-                      baseUrl: "https://reconocimiento-facial-safe.service.saferut.com/index.js",
+                      baseUrl:
+                        "https://reconocimiento-facial-safe.service.saferut.com/index.js",
                     }}
                     originWhitelist={["*"]}
                     javaScriptEnabled={true}
