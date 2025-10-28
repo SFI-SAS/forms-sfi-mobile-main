@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -118,41 +118,43 @@ export default function FormatScreen(props) {
 
   // --- Formatting helpers ---
   const pad2 = (n) => (n < 10 ? `0${n}` : String(n));
+  // Now returns YYYY-MM-DD as requested
   const formatDateDDMMYYYY = (value) => {
     if (!value && value !== 0) return "";
     try {
-      // If already in YYYY-MM-DD
+      // Accept YYYY-MM-DD (return as-is)
       if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
-        const [Y, M, D] = value.split("-");
-        return `${D}-${M}-${Y}`;
-      }
-      // If already in DD-MM-YYYY
-      if (typeof value === "string" && /^\d{2}-\d{2}-\d{4}$/.test(value)) {
         return value;
+      }
+      // Convert DD-MM-YYYY to YYYY-MM-DD
+      if (typeof value === "string" && /^\d{2}-\d{2}-\d{4}$/.test(value)) {
+        const [D, M, Y] = value.split("-");
+        return `${Y}-${M}-${D}`;
       }
       const d = value instanceof Date ? value : new Date(value);
       if (!isNaN(d.getTime()))
-        return `${pad2(d.getDate())}-${pad2(d.getMonth() + 1)}-${d.getFullYear()}`;
+        return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
     } catch {}
     return String(value);
   };
 
+  // Now returns HH:MM as requested (accepts HH-MM or HH:MM, normalizes to colon)
   const formatTimeHHmmHyphen = (value) => {
     if (value === undefined || value === null) return "";
-    // Accept already formatted HH-MM
-    if (typeof value === "string" && /^\d{1,2}-\d{2}$/.test(value)) {
-      const [h, m] = value.split("-");
-      return `${pad2(Number(h))}-${pad2(Number(m))}`;
-    }
-    // Accept HH:MM and convert to hyphen
+    // Accept already formatted HH:MM
     if (typeof value === "string" && /^\d{1,2}:\d{2}$/.test(value)) {
       const [h, m] = value.split(":");
-      return `${pad2(Number(h))}-${pad2(Number(m))}`;
+      return `${pad2(Number(h))}:${pad2(Number(m))}`;
+    }
+    // Accept HH-MM and convert to colon
+    if (typeof value === "string" && /^\d{1,2}-\d{2}$/.test(value)) {
+      const [h, m] = value.split("-");
+      return `${pad2(Number(h))}:${pad2(Number(m))}`;
     }
     try {
       const d = value instanceof Date ? value : new Date(value);
       if (!isNaN(d.getTime()))
-        return `${pad2(d.getHours())}-${pad2(d.getMinutes())}`;
+        return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
     } catch {}
     return String(value);
   };
@@ -167,14 +169,21 @@ export default function FormatScreen(props) {
   const getExternalQuestionIdFromItem = (it) => {
     if (!it) return null;
     const p = it.props || {};
+    const toInt = (v) => {
+      if (v === undefined || v === null) return null;
+      if (typeof v === "number" && Number.isInteger(v)) return v;
+      if (typeof v === "string" && /^\d+$/.test(v)) return parseInt(v, 10);
+      return null;
+    };
+    // Prefer explicit external numeric ids only; avoid falling back to UUIDs
     return (
-      p.question ||
-      p.question_id ||
-      p.questionId ||
-      p.linkExternalId ||
-      it.linkExternalId ||
-      p.id ||
-      it.id ||
+      toInt(p.question) ||
+      toInt(p.question_id) ||
+      toInt(p.questionId) ||
+      toInt(p.linkExternalId) ||
+      toInt(it.linkExternalId) ||
+      toInt(p.id) ||
+      toInt(it.id) ||
       null
     );
   };
@@ -305,7 +314,7 @@ export default function FormatScreen(props) {
               const val = row[child.id];
               const qid = getExternalQuestionIdFromItem(child);
               if (isRenderableAnswerType(ct)) {
-                // Usar batchId global para repeated_id
+                // Only repeaters carry repeated_id
                 pushAnswer(out, qid, val, ct, batchId);
               }
             });
@@ -316,7 +325,8 @@ export default function FormatScreen(props) {
       // leaf
       const qid = getExternalQuestionIdFromItem(it);
       if (isRenderableAnswerType(t)) {
-        pushAnswer(out, qid, values[it.id], t, batchId);
+        // Non-repeated items should not carry repeated_id
+        pushAnswer(out, qid, values[it.id], t, "");
       }
     };
     (items || []).forEach(walk);
@@ -339,10 +349,28 @@ export default function FormatScreen(props) {
       const children = Array.isArray(childrenRaw)
         ? childrenRaw.map(mapNode).filter(Boolean)
         : [];
+      // Try to preserve any external id hints at both top-level and props
+      const linkExternalId =
+        node.linkExternalId ??
+        node.question_id ??
+        node.questionId ??
+        node.externalId ??
+        node.external_id ??
+        node.props?.linkExternalId ??
+        node.props?.question_id ??
+        node.props?.questionId ??
+        null;
       return {
         id,
         type,
-        props: props && typeof props === "object" ? { ...props } : {},
+        props:
+          props && typeof props === "object"
+            ? { ...props, ...(linkExternalId ? { linkExternalId } : {}) }
+            : linkExternalId
+              ? { linkExternalId }
+              : {},
+        // Also expose on the item in case consumers don't look into props
+        ...(linkExternalId ? { linkExternalId } : {}),
         children,
       };
     };
@@ -746,38 +774,44 @@ export default function FormatScreen(props) {
     if (id) loadFormMeta();
   }, [id, logoUrlParam]);
 
-  const handleFDChange = (fieldId, value) => {
-    // Unificar la captura para que siempre pase por handleAnswerChange
-    // (incluye logs ✏️ y guardado offline)
-    handleAnswerChange(fieldId, value);
-  };
+  const handleFDChange = useCallback(
+    (fieldId, value) => {
+      // Unificar la captura para que siempre pase por handleAnswerChange
+      // (incluye logs ✏️ y guardado offline)
+      handleAnswerChange(fieldId, value);
+    },
+    [handleAnswerChange]
+  );
 
-  const handleFDFileSelect = async (fieldId) => {
-    try {
-      // Map fieldId (form_design item id) to backend question_id
-      const it = findItemById(formItems, fieldId);
-      const mappedQuestionId = getExternalQuestionIdFromItem(it) || fieldId;
-      // Generate serial for the backend question id
-      await generateSerial(mappedQuestionId);
-      const result = await DocumentPicker.getDocumentAsync({
-        type: "*/*",
-        copyToCacheDirectory: true,
-      });
-      if (result && !result.canceled && result.assets?.[0]?.uri) {
-        const uri = result.assets[0].uri;
-        setFileUris((prev) => ({ ...prev, [fieldId]: uri }));
-        // update both form_design values and legacy answers map
-        setFormValues((prev) => ({ ...prev, [fieldId]: uri }));
-        handleAnswerChange(fieldId, uri);
-        Alert.alert("Archivo seleccionado", `Ruta: ${uri}`);
+  const handleFDFileSelect = useCallback(
+    async (fieldId) => {
+      try {
+        // Map fieldId (form_design item id) to backend question_id
+        const it = findItemById(formItems, fieldId);
+        const mappedQuestionId = getExternalQuestionIdFromItem(it) || fieldId;
+        // Generate serial for the backend question id
+        await generateSerial(mappedQuestionId);
+        const result = await DocumentPicker.getDocumentAsync({
+          type: "*/*",
+          copyToCacheDirectory: true,
+        });
+        if (result && !result.canceled && result.assets?.[0]?.uri) {
+          const uri = result.assets[0].uri;
+          setFileUris((prev) => ({ ...prev, [fieldId]: uri }));
+          // update both form_design values and legacy answers map
+          setFormValues((prev) => ({ ...prev, [fieldId]: uri }));
+          handleAnswerChange(fieldId, uri);
+          Alert.alert("Archivo seleccionado", `Ruta: ${uri}`);
+        }
+      } catch (e) {
+        console.error("File select error", e);
+        Alert.alert("Error", "No se pudo seleccionar el archivo.");
       }
-    } catch (e) {
-      console.error("File select error", e);
-      Alert.alert("Error", "No se pudo seleccionar el archivo.");
-    }
-  };
+    },
+    [formItems, generateSerial, handleAnswerChange]
+  );
 
-  const handleAnswerChange = (questionId, value) => {
+  const handleAnswerChange = useCallback((questionId, value) => {
     console.log(
       `✏️ Capturando respuesta para pregunta ID ${questionId}:`,
       value
@@ -802,7 +836,7 @@ export default function FormatScreen(props) {
       .catch((error) =>
         console.error("❌ Error guardando respuestas en AsyncStorage:", error)
       );
-  };
+  }, []);
 
   const handleFileButtonPress = async (questionId) => {
     await generateSerial(questionId);
@@ -1349,9 +1383,9 @@ export default function FormatScreen(props) {
               const qid = getExternalQuestionIdFromItem(it);
               const v = answers[fieldId];
               if (Array.isArray(v)) {
-                v.forEach((vv) => pushAnswer(out, qid, vv, t, batchId));
+                v.forEach((vv) => pushAnswer(out, qid, vv, t, ""));
               } else {
-                pushAnswer(out, qid, v, t, batchId);
+                pushAnswer(out, qid, v, t, "");
               }
             });
             return out;
@@ -1517,49 +1551,33 @@ export default function FormatScreen(props) {
         state.isConnected ? "online" : "offline"
       );
 
-      if (mode === "offline") {
-        const saveResponseData = {
-          form_id: id,
-          answers: allAnswers.map((a) => ({
-            question_id: a.question_id,
-            response: "",
-            file_path: a.file_path || "",
-            repeated_id: a.repeated_id || batchId || "",
-          })),
-          mode: "offline",
-          timestamp: Date.now(),
-        };
-
-        const saveAnswersData = allAnswers.map((a) => ({
-          form_id: id,
+      // Prepare API payload for both online/offline
+      const allAnswersForApi = allAnswers.map((a) => {
+        const base = {
           question_id: a.question_id,
-          answer_text: a.answer_text,
+          response: a.file_path ? "" : (a.answer_text ?? ""),
           file_path: a.file_path || "",
+        };
+        if (a.repeated_id) base.repeated_id = a.repeated_id;
+        return base;
+      });
+
+      if (mode === "offline") {
+        // Unified offline queue entry
+        const storedPendingRaw = await AsyncStorage.getItem("pending_forms");
+        const pendingQueue = storedPendingRaw
+          ? JSON.parse(storedPendingRaw)
+          : [];
+        pendingQueue.push({
+          id,
+          answersForApi: allAnswersForApi,
+          answersFull: allAnswers,
+          fileSerials,
           timestamp: Date.now(),
-        }));
-
-        const storedPendingSaveResponse = await AsyncStorage.getItem(
-          PENDING_SAVE_RESPONSE_KEY
-        );
-        const pendingSaveResponse = storedPendingSaveResponse
-          ? JSON.parse(storedPendingSaveResponse)
-          : [];
-        pendingSaveResponse.push(saveResponseData);
+        });
         await AsyncStorage.setItem(
-          PENDING_SAVE_RESPONSE_KEY,
-          JSON.stringify(pendingSaveResponse)
-        );
-
-        const storedPendingSaveAnswers = await AsyncStorage.getItem(
-          PENDING_SAVE_ANSWERS_KEY
-        );
-        const pendingSaveAnswers = storedPendingSaveAnswers
-          ? JSON.parse(storedPendingSaveAnswers)
-          : [];
-        pendingSaveAnswers.push(...saveAnswersData);
-        await AsyncStorage.setItem(
-          PENDING_SAVE_ANSWERS_KEY,
-          JSON.stringify(pendingSaveAnswers)
+          "pending_forms",
+          JSON.stringify(pendingQueue)
         );
 
         await saveCompletedFormAnswers({
@@ -1592,12 +1610,7 @@ export default function FormatScreen(props) {
         );
       } catch {}
 
-      const allAnswersForApi = allAnswers.map((a) => ({
-        question_id: a.question_id,
-        response: "",
-        file_path: a.file_path || "",
-        repeated_id: a.repeated_id || batchId || "",
-      }));
+      // allAnswersForApi already prepared above
 
       const requestOptions = {
         headers: {
@@ -1608,7 +1621,7 @@ export default function FormatScreen(props) {
 
       console.log("📡 Creando registro de respuesta...");
       const saveResponseRes = await fetch(
-        `${backendUrl}/responses/save-response/${id}?mode=${mode}&action=send_and_close`,
+        `${backendUrl}/responses/save-response/${id}?action=send_and_close`,
         {
           method: "POST",
           headers: requestOptions.headers,
@@ -1703,148 +1716,51 @@ export default function FormatScreen(props) {
       const mode = await NetInfo.fetch().then((state) =>
         state.isConnected ? "online" : "offline"
       );
-
-      const repeatedAnswers = [];
-      for (const question of isRepeatedQuestions) {
-        const questionId = question.id;
-        if (
-          question.question_type === "text" &&
-          textAnswers[questionId]?.length > 0
-        ) {
-          const validAnswers = textAnswers[questionId].filter(
-            (answer) => answer.trim() !== ""
+      let allToSend = [];
+      if (formItems && formItems.length > 0) {
+        // form_design path: build answers from renderer items/values just like web
+        try {
+          let arr = serializeFormItemsAnswers(formItems, formValues, batchId);
+          if (!arr || arr.length === 0) {
+            // Minimal fallback: reconstruct from current formValues
+            const fb = [];
+            try {
+              Object.entries(formValues || {}).forEach(([k, v]) => {
+                if (v === undefined || v === null || String(v).trim() === "")
+                  return;
+                const it = findItemById(formItems, k);
+                if (!it) return;
+                const extId = getExternalQuestionIdFromItem(it);
+                if (!extId) return;
+                const t = (it.type || "").toLowerCase();
+                // Non-repeated fallback entries shouldn't carry repeated_id
+                pushAnswer(fb, extId, v, t, "");
+              });
+            } catch {}
+            arr = fb;
+          }
+          allToSend = arr || [];
+        } catch (e) {
+          console.error(
+            "❌ Error serializando respuestas (form_design progressive):",
+            e
           );
-          validAnswers.forEach((answer) => {
-            repeatedAnswers.push({
-              question_id: questionId,
-              answer_text: answer,
-              file_path: "",
-              repeated_id: batchId,
-            });
-          });
-        } else if (
-          question.question_type === "table" &&
-          tableAnswersState[questionId]?.length > 0
-        ) {
-          const validAnswers = tableAnswersState[questionId].filter(
-            (answer) => answer.trim() !== ""
-          );
-          validAnswers.forEach((answer) => {
-            repeatedAnswers.push({
-              question_id: questionId,
-              answer_text: answer,
-              file_path: "",
-              repeated_id: batchId,
-            });
-          });
-        } else if (
-          question.question_type === "multiple_choice" &&
-          Array.isArray(answers[questionId]) &&
-          answers[questionId].length > 0
-        ) {
-          answers[questionId].forEach((option) => {
-            repeatedAnswers.push({
-              question_id: questionId,
-              answer_text: option,
-              file_path: "",
-              repeated_id: batchId,
-            });
-          });
-        } else if (
-          question.question_type === "one_choice" &&
-          answers[questionId]
-        ) {
-          repeatedAnswers.push({
-            question_id: questionId,
-            answer_text: answers[questionId],
-            file_path: "",
-            repeated_id: batchId,
-          });
-        } else if (question.question_type === "file" && answers[questionId]) {
-          repeatedAnswers.push({
-            question_id: questionId,
-            question_type: "file",
-            answer_text: "",
-            file_path: "",
-            repeated_id: batchId,
-          });
-        } else if (question.question_type === "date" && answers[questionId]) {
-          const formatted = formatDateDDMMYYYY(
-            Array.isArray(answers[questionId])
-              ? answers[questionId][0]
-              : answers[questionId]
-          );
-          repeatedAnswers.push({
-            question_id: questionId,
-            answer_text: formatted,
-            file_path: "",
-            repeated_id: batchId,
-          });
-        } else if (question.question_type === "time" && answers[questionId]) {
-          const formatted = formatTimeHHmmHyphen(
-            Array.isArray(answers[questionId])
-              ? answers[questionId][0]
-              : answers[questionId]
-          );
-          repeatedAnswers.push({
-            question_id: questionId,
-            answer_text: formatted,
-            file_path: "",
-            repeated_id: batchId,
-          });
-        } else if (
-          question.question_type === "number" &&
-          (Array.isArray(answers[questionId])
-            ? answers[questionId]?.[0]
-            : answers[questionId])
-        ) {
-          const value = Array.isArray(answers[questionId])
-            ? answers[questionId][0]
-            : answers[questionId];
-          repeatedAnswers.push({
-            question_id: questionId,
-            answer_text: value,
-            file_path: "",
-            repeated_id: batchId,
-          });
-        } else if (
-          question.question_type === "location" &&
-          answers[questionId]
-        ) {
-          repeatedAnswers.push({
-            question_id: questionId,
-            answer_text: answers[questionId],
-            file_path: "",
-            repeated_id: batchId,
-          });
-        } else if (question.question_type === "firm" && answers[questionId]) {
-          repeatedAnswers.push({
-            question_id: questionId,
-            answer_text: answers[questionId],
-            file_path: "",
-            repeated_id: batchId,
-          });
+          allToSend = [];
         }
-      }
-
-      let nonRepeatedAnswers = [];
-      for (const question of questions) {
-        if (!question.is_repeated) {
+      } else {
+        // Legacy path: build from repeated/non-repeated groups
+        const repeatedAnswers = [];
+        for (const question of isRepeatedQuestions) {
           const questionId = question.id;
           if (
             question.question_type === "text" &&
-            (firstNonRepeatedAnswers[questionId]?.length > 0 ||
-              textAnswers[questionId]?.length > 0)
+            textAnswers[questionId]?.length > 0
           ) {
-            const values =
-              nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
-                ? firstNonRepeatedAnswers[questionId]
-                : textAnswers[questionId];
-            const validAnswers = (values || []).filter(
-              (answer) => answer && answer.trim() !== ""
+            const validAnswers = textAnswers[questionId].filter(
+              (answer) => answer.trim() !== ""
             );
             validAnswers.forEach((answer) => {
-              nonRepeatedAnswers.push({
+              repeatedAnswers.push({
                 question_id: questionId,
                 answer_text: answer,
                 file_path: "",
@@ -1853,18 +1769,13 @@ export default function FormatScreen(props) {
             });
           } else if (
             question.question_type === "table" &&
-            (firstNonRepeatedAnswers[questionId]?.length > 0 ||
-              tableAnswersState[questionId]?.length > 0)
+            tableAnswersState[questionId]?.length > 0
           ) {
-            const values =
-              nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
-                ? firstNonRepeatedAnswers[questionId]
-                : tableAnswersState[questionId];
-            const validAnswers = (values || []).filter(
-              (answer) => answer && answer.trim() !== ""
+            const validAnswers = tableAnswersState[questionId].filter(
+              (answer) => answer.trim() !== ""
             );
             validAnswers.forEach((answer) => {
-              nonRepeatedAnswers.push({
+              repeatedAnswers.push({
                 question_id: questionId,
                 answer_text: answer,
                 file_path: "",
@@ -1873,22 +1784,11 @@ export default function FormatScreen(props) {
             });
           } else if (
             question.question_type === "multiple_choice" &&
-            Array.isArray(
-              nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
-                ? firstNonRepeatedAnswers[questionId]
-                : answers[questionId]
-            ) &&
-            (nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
-              ? firstNonRepeatedAnswers[questionId]
-              : answers[questionId]
-            ).length > 0
+            Array.isArray(answers[questionId]) &&
+            answers[questionId].length > 0
           ) {
-            const values =
-              nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
-                ? firstNonRepeatedAnswers[questionId]
-                : answers[questionId];
-            values.forEach((option) => {
-              nonRepeatedAnswers.push({
+            answers[questionId].forEach((option) => {
+              repeatedAnswers.push({
                 question_id: questionId,
                 answer_text: option,
                 file_path: "",
@@ -1897,149 +1797,295 @@ export default function FormatScreen(props) {
             });
           } else if (
             question.question_type === "one_choice" &&
-            (nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
-              ? firstNonRepeatedAnswers[questionId]
-              : answers[questionId])
+            answers[questionId]
           ) {
-            const value =
-              nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
-                ? firstNonRepeatedAnswers[questionId]
-                : answers[questionId];
-            if (value) {
-              nonRepeatedAnswers.push({
-                question_id: questionId,
-                answer_text: value,
-                file_path: "",
-                repeated_id: batchId,
-              });
-            }
-          } else if (
-            question.question_type === "file" &&
-            (nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
-              ? firstNonRepeatedAnswers[questionId]
-              : answers[questionId])
-          ) {
-            const value =
-              nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
-                ? firstNonRepeatedAnswers[questionId]
-                : answers[questionId];
-            if (value) {
-              nonRepeatedAnswers.push({
-                question_id: questionId,
-                answer_text: "",
-                file_path: value,
-                repeated_id: batchId,
-              });
-            }
-          } else if (
-            question.question_type === "date" &&
-            (nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
-              ? firstNonRepeatedAnswers[questionId]
-              : answers[questionId])
-          ) {
-            const value =
-              nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
-                ? firstNonRepeatedAnswers[questionId]
-                : answers[questionId];
-            const formatted = Array.isArray(value)
-              ? formatDateDDMMYYYY(value[0])
-              : formatDateDDMMYYYY(value);
-            if (formatted) {
-              nonRepeatedAnswers.push({
-                question_id: questionId,
-                answer_text: formatted,
-                file_path: "",
-                repeated_id: batchId,
-              });
-            }
-          } else if (
-            question.question_type === "time" &&
-            (nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
-              ? firstNonRepeatedAnswers[questionId]
-              : answers[questionId])
-          ) {
-            const value =
-              nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
-                ? firstNonRepeatedAnswers[questionId]
-                : answers[questionId];
-            const formatted = Array.isArray(value)
-              ? formatTimeHHmmHyphen(value[0])
-              : formatTimeHHmmHyphen(value);
-            if (formatted) {
-              nonRepeatedAnswers.push({
-                question_id: questionId,
-                answer_text: formatted,
-                file_path: "",
-                repeated_id: batchId,
-              });
-            }
-          } else if (
-            question.question_type === "location" &&
-            (nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
-              ? firstNonRepeatedAnswers[questionId]
-              : answers[questionId])
-          ) {
-            const value =
-              nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
-                ? firstNonRepeatedAnswers[questionId]
-                : answers[questionId];
-            if (value) {
-              nonRepeatedAnswers.push({
-                question_id: questionId,
-                answer_text: value,
-                file_path: "",
-                repeated_id: batchId,
-              });
-            }
+            repeatedAnswers.push({
+              question_id: questionId,
+              answer_text: answers[questionId],
+              file_path: "",
+              repeated_id: batchId,
+            });
+          } else if (question.question_type === "file" && answers[questionId]) {
+            repeatedAnswers.push({
+              question_id: questionId,
+              question_type: "file",
+              answer_text: "",
+              file_path: "",
+              repeated_id: batchId,
+            });
+          } else if (question.question_type === "date" && answers[questionId]) {
+            const formatted = formatDateDDMMYYYY(
+              Array.isArray(answers[questionId])
+                ? answers[questionId][0]
+                : answers[questionId]
+            );
+            repeatedAnswers.push({
+              question_id: questionId,
+              answer_text: formatted,
+              file_path: "",
+              repeated_id: batchId,
+            });
+          } else if (question.question_type === "time" && answers[questionId]) {
+            const formatted = formatTimeHHmmHyphen(
+              Array.isArray(answers[questionId])
+                ? answers[questionId][0]
+                : answers[questionId]
+            );
+            repeatedAnswers.push({
+              question_id: questionId,
+              answer_text: formatted,
+              file_path: "",
+              repeated_id: batchId,
+            });
           } else if (
             question.question_type === "number" &&
-            (nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
-              ? Array.isArray(firstNonRepeatedAnswers[questionId])
-                ? firstNonRepeatedAnswers[questionId][0]
-                : firstNonRepeatedAnswers[questionId]
-              : Array.isArray(answers[questionId])
-                ? answers[questionId][0]
-                : answers[questionId])
+            (Array.isArray(answers[questionId])
+              ? answers[questionId]?.[0]
+              : answers[questionId])
           ) {
-            const value =
-              nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
+            const value = Array.isArray(answers[questionId])
+              ? answers[questionId][0]
+              : answers[questionId];
+            repeatedAnswers.push({
+              question_id: questionId,
+              answer_text: value,
+              file_path: "",
+              repeated_id: batchId,
+            });
+          } else if (
+            question.question_type === "location" &&
+            answers[questionId]
+          ) {
+            repeatedAnswers.push({
+              question_id: questionId,
+              answer_text: answers[questionId],
+              file_path: "",
+              repeated_id: batchId,
+            });
+          } else if (question.question_type === "firm" && answers[questionId]) {
+            repeatedAnswers.push({
+              question_id: questionId,
+              answer_text: answers[questionId],
+              file_path: "",
+              repeated_id: batchId,
+            });
+          }
+        }
+
+        let nonRepeatedAnswers = [];
+        for (const question of questions) {
+          if (!question.is_repeated) {
+            const questionId = question.id;
+            if (
+              question.question_type === "text" &&
+              (firstNonRepeatedAnswers[questionId]?.length > 0 ||
+                textAnswers[questionId]?.length > 0)
+            ) {
+              const values =
+                nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
+                  ? firstNonRepeatedAnswers[questionId]
+                  : textAnswers[questionId];
+              const validAnswers = (values || []).filter(
+                (answer) => answer && answer.trim() !== ""
+              );
+              validAnswers.forEach((answer) => {
+                nonRepeatedAnswers.push({
+                  question_id: questionId,
+                  answer_text: answer,
+                  file_path: "",
+                  repeated_id: batchId,
+                });
+              });
+            } else if (
+              question.question_type === "table" &&
+              (firstNonRepeatedAnswers[questionId]?.length > 0 ||
+                tableAnswersState[questionId]?.length > 0)
+            ) {
+              const values =
+                nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
+                  ? firstNonRepeatedAnswers[questionId]
+                  : tableAnswersState[questionId];
+              const validAnswers = (values || []).filter(
+                (answer) => answer && answer.trim() !== ""
+              );
+              validAnswers.forEach((answer) => {
+                nonRepeatedAnswers.push({
+                  question_id: questionId,
+                  answer_text: answer,
+                  file_path: "",
+                  repeated_id: batchId,
+                });
+              });
+            } else if (
+              question.question_type === "multiple_choice" &&
+              Array.isArray(
+                nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
+                  ? firstNonRepeatedAnswers[questionId]
+                  : answers[questionId]
+              ) &&
+              (nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
+                ? firstNonRepeatedAnswers[questionId]
+                : answers[questionId]
+              ).length > 0
+            ) {
+              const values =
+                nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
+                  ? firstNonRepeatedAnswers[questionId]
+                  : answers[questionId];
+              values.forEach((option) => {
+                nonRepeatedAnswers.push({
+                  question_id: questionId,
+                  answer_text: option,
+                  file_path: "",
+                  repeated_id: batchId,
+                });
+              });
+            } else if (
+              question.question_type === "one_choice" &&
+              (nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
+                ? firstNonRepeatedAnswers[questionId]
+                : answers[questionId])
+            ) {
+              const value =
+                nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
+                  ? firstNonRepeatedAnswers[questionId]
+                  : answers[questionId];
+              if (value) {
+                nonRepeatedAnswers.push({
+                  question_id: questionId,
+                  answer_text: value,
+                  file_path: "",
+                  repeated_id: batchId,
+                });
+              }
+            } else if (
+              question.question_type === "file" &&
+              (nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
+                ? firstNonRepeatedAnswers[questionId]
+                : answers[questionId])
+            ) {
+              const value =
+                nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
+                  ? firstNonRepeatedAnswers[questionId]
+                  : answers[questionId];
+              if (value) {
+                nonRepeatedAnswers.push({
+                  question_id: questionId,
+                  answer_text: "",
+                  file_path: value,
+                  repeated_id: batchId,
+                });
+              }
+            } else if (
+              question.question_type === "date" &&
+              (nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
+                ? firstNonRepeatedAnswers[questionId]
+                : answers[questionId])
+            ) {
+              const value =
+                nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
+                  ? firstNonRepeatedAnswers[questionId]
+                  : answers[questionId];
+              const formatted = Array.isArray(value)
+                ? formatDateDDMMYYYY(value[0])
+                : formatDateDDMMYYYY(value);
+              if (formatted) {
+                nonRepeatedAnswers.push({
+                  question_id: questionId,
+                  answer_text: formatted,
+                  file_path: "",
+                  repeated_id: batchId,
+                });
+              }
+            } else if (
+              question.question_type === "time" &&
+              (nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
+                ? firstNonRepeatedAnswers[questionId]
+                : answers[questionId])
+            ) {
+              const value =
+                nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
+                  ? firstNonRepeatedAnswers[questionId]
+                  : answers[questionId];
+              const formatted = Array.isArray(value)
+                ? formatTimeHHmmHyphen(value[0])
+                : formatTimeHHmmHyphen(value);
+              if (formatted) {
+                nonRepeatedAnswers.push({
+                  question_id: questionId,
+                  answer_text: formatted,
+                  file_path: "",
+                  repeated_id: batchId,
+                });
+              }
+            } else if (
+              question.question_type === "location" &&
+              (nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
+                ? firstNonRepeatedAnswers[questionId]
+                : answers[questionId])
+            ) {
+              const value =
+                nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
+                  ? firstNonRepeatedAnswers[questionId]
+                  : answers[questionId];
+              if (value) {
+                nonRepeatedAnswers.push({
+                  question_id: questionId,
+                  answer_text: value,
+                  file_path: "",
+                  repeated_id: batchId,
+                });
+              }
+            } else if (
+              question.question_type === "number" &&
+              (nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
                 ? Array.isArray(firstNonRepeatedAnswers[questionId])
                   ? firstNonRepeatedAnswers[questionId][0]
                   : firstNonRepeatedAnswers[questionId]
                 : Array.isArray(answers[questionId])
                   ? answers[questionId][0]
-                  : answers[questionId];
-            if (value !== undefined && value !== null && value !== "") {
-              nonRepeatedAnswers.push({
-                question_id: questionId,
-                answer_text: value,
-                file_path: "",
-                repeated_id: batchId,
-              });
-            }
-          } else if (
-            question.question_type === "firm" &&
-            (nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
-              ? firstNonRepeatedAnswers[questionId]
-              : answers[questionId])
-          ) {
-            const value =
-              nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
+                  : answers[questionId])
+            ) {
+              const value =
+                nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
+                  ? Array.isArray(firstNonRepeatedAnswers[questionId])
+                    ? firstNonRepeatedAnswers[questionId][0]
+                    : firstNonRepeatedAnswers[questionId]
+                  : Array.isArray(answers[questionId])
+                    ? answers[questionId][0]
+                    : answers[questionId];
+              if (value !== undefined && value !== null && value !== "") {
+                nonRepeatedAnswers.push({
+                  question_id: questionId,
+                  answer_text: value,
+                  file_path: "",
+                  repeated_id: batchId,
+                });
+              }
+            } else if (
+              question.question_type === "firm" &&
+              (nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
                 ? firstNonRepeatedAnswers[questionId]
-                : answers[questionId];
-            if (value) {
-              nonRepeatedAnswers.push({
-                question_id: questionId,
-                answer_text: value,
-                file_path: "",
-                repeated_id: batchId,
-              });
+                : answers[questionId])
+            ) {
+              const value =
+                nonRepeatedLocked && firstNonRepeatedAnswers[questionId]
+                  ? firstNonRepeatedAnswers[questionId]
+                  : answers[questionId];
+              if (value) {
+                nonRepeatedAnswers.push({
+                  question_id: questionId,
+                  answer_text: value,
+                  file_path: "",
+                  repeated_id: batchId,
+                });
+              }
             }
           }
         }
-      }
 
-      const allToSend = [...nonRepeatedAnswers, ...repeatedAnswers];
+        allToSend = [...nonRepeatedAnswers, ...repeatedAnswers];
+      }
 
       if (allToSend.length === 0) {
         Alert.alert("Error", "No hay respuestas para enviar");
@@ -2048,17 +2094,33 @@ export default function FormatScreen(props) {
       }
 
       if (mode === "offline") {
-        const storedPending = await AsyncStorage.getItem("pending_forms");
-        const pendingForms = storedPending ? JSON.parse(storedPending) : [];
-        pendingForms.push({
+        // Build API payload like online
+        const allAnswersForApi = allToSend.map((a) => {
+          const base = {
+            question_id: a.question_id,
+            response: a.file_path ? "" : (a.answer_text ?? ""),
+            file_path: a.file_path || "",
+          };
+          if (a.repeated_id) base.repeated_id = a.repeated_id;
+          return base;
+        });
+
+        const storedPendingRaw = await AsyncStorage.getItem("pending_forms");
+        const pendingQueue = storedPendingRaw
+          ? JSON.parse(storedPendingRaw)
+          : [];
+        pendingQueue.push({
           id,
-          responses: allToSend,
+          answersForApi: allAnswersForApi,
+          answersFull: allToSend,
+          fileSerials,
           timestamp: Date.now(),
         });
         await AsyncStorage.setItem(
           "pending_forms",
-          JSON.stringify(pendingForms)
+          JSON.stringify(pendingQueue)
         );
+
         await saveCompletedFormAnswers({
           formId: id,
           answers: allToSend,
@@ -2097,15 +2159,28 @@ export default function FormatScreen(props) {
         },
       };
 
-      const allAnswersForApi = allToSend.map((a) => ({
-        question_id: a.question_id,
-        response: "",
-        file_path: a.file_path || "",
-        repeated_id: a.repeated_id || batchId || "",
-      }));
+      const allAnswersForApi = allToSend.map((a) => {
+        const base = {
+          question_id: a.question_id,
+          response: a.file_path ? "" : (a.answer_text ?? ""),
+          file_path: a.file_path || "",
+        };
+        if (a.repeated_id) base.repeated_id = a.repeated_id;
+        return base;
+      });
+
+      console.log(
+        "📦 save-response payload (progressive, preview):",
+        allAnswersForApi.map((r) => ({
+          q: r.question_id,
+          resp: String(r.response).slice(0, 40),
+          file: !!r.file_path,
+          rep: r.repeated_id,
+        }))
+      );
 
       const saveResponseRes = await fetch(
-        `${backendUrl}/responses/save-response/${id}?mode=${mode}&action=send_and_close`,
+        `${backendUrl}/responses/save-response/${id}?action=send_and_close`,
         {
           method: "POST",
           headers: requestOptions.headers,
@@ -2113,6 +2188,11 @@ export default function FormatScreen(props) {
         }
       );
       const saveResponseData = await saveResponseRes.json();
+      console.log(
+        "📡 save-response status:",
+        saveResponseRes.status,
+        saveResponseData
+      );
       const responseId = saveResponseData.response_id;
       if (!responseId) throw new Error("No se pudo obtener el ID de respuesta");
 
@@ -2150,7 +2230,6 @@ export default function FormatScreen(props) {
     }
   };
 
-  console.log(questions);
   return (
     <View style={styles.mainContainer}>
       <LinearGradient
@@ -2210,9 +2289,7 @@ export default function FormatScreen(props) {
                     errors={formErrors}
                     onFileSelect={handleFDFileSelect}
                     isSubmitting={submitting}
-                    onRequestLocation={(fieldId) =>
-                      handleCaptureLocation(fieldId)
-                    }
+                    onRequestLocation={handleCaptureLocation}
                     renderFirm={({ item, value, setValue }) => (
                       <FirmField
                         key={item.id}
