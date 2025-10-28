@@ -2702,7 +2702,7 @@ export default function FormatScreen(props) {
                                           val
                                         )
                                       }
-                                      mode="dialog"
+                                      mode="dropdown"
                                       style={styles.picker}
                                     >
                                       <Picker.Item

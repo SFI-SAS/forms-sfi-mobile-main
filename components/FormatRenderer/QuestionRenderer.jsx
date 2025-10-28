@@ -153,6 +153,7 @@ export default function QuestionRenderer({
                 selectedValue
               )
             }
+            mode="dropdown"
             style={[
               styles.picker,
               tableAutoFilled[question.id] &&
@@ -368,6 +369,7 @@ export default function QuestionRenderer({
                   [question.id]: val,
                 }));
               }}
+              mode="dropdown"
               style={styles.picker}
               enabled={!isLocked}
             >

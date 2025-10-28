@@ -623,7 +623,8 @@ const FirmField = ({
               }
             }}
             enabled={!disabled && options.length > 0} // 🆕 Deshabilitar si no hay opciones
-            mode="dialog"
+            // Evitar crash nativo en Android con el modo dialog
+            mode={Platform.OS === "android" ? "dropdown" : "dialog"}
             style={styles.picker}
           >
             <Picker.Item
@@ -791,6 +792,20 @@ const FirmField = ({
                     onError={(e) => {
                       console.error("WebView error:", e.nativeEvent || e);
                       setFirmError("Error cargando componente de firma");
+                    }}
+                    // Manejar caída del proceso de render (Android) sin crashear la app
+                    onRenderProcessGone={(e) => {
+                      try {
+                        const crashed = e?.nativeEvent?.didCrash;
+                        console.warn(
+                          "WebView render process gone. didCrash=",
+                          crashed
+                        );
+                      } catch {}
+                      setFirmError(
+                        "El componente de firma se reinició. Intenta nuevamente."
+                      );
+                      handleCloseModal();
                     }}
                     style={styles.webView}
                   />
