@@ -980,11 +980,19 @@ export default function Home() {
 
         {/* Mueve el título y las categorías hacia abajo */}
         <View style={styles.sectionHeaderRow}>
-          <Text style={[styles.sectionTitleWhite, { marginTop: 12, marginBottom: 0 }]}>
+          <Text
+            style={[
+              styles.sectionTitleWhite,
+              { marginTop: 12, marginBottom: 0 },
+            ]}
+          >
             Assigned forms
           </Text>
           <TouchableOpacity
-            style={[styles.refreshButton, (refreshing || loading) && styles.refreshButtonDisabled]}
+            style={[
+              styles.refreshButton,
+              (refreshing || loading) && styles.refreshButtonDisabled,
+            ]}
             onPress={() => refreshAll({ force: true })}
             disabled={refreshing || loading}
             activeOpacity={0.8}
