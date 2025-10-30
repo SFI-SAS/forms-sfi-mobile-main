@@ -42,32 +42,33 @@ const RNInput = ({
     style={[styles.input, multiline && styles.textarea]}
   />
 );
-
 const RNSelect = ({ value, onValueChange, options = [], enabled = true }) => (
-  <View style={styles.pickerWrapper}>
-    <Picker
-      selectedValue={value ?? ""}
-      onValueChange={onValueChange}
-      enabled={enabled}
-      mode="dropdown"
-      style={styles.picker}
-    >
-      <Picker.Item label="Seleccione..." value="" />
-      {options.map((opt, idx) => {
-        if (typeof opt === "string")
-          return <Picker.Item key={idx} label={opt} value={opt} />;
-        // support {label, value}
-        return (
-          <Picker.Item
-            key={idx}
-            label={opt.label ?? String(opt.value)}
-            value={opt.value}
-          />
-        );
-      })}
-    </Picker>
+  <View style={styles.pickerContainer}>
+    <View style={styles.pickerWrapper}>
+      <Picker
+        selectedValue={value ?? ""}
+        onValueChange={onValueChange}
+        enabled={enabled}
+        mode="dropdown"
+        style={styles.picker}
+      >
+        <Picker.Item label="Seleccione..." value="" />
+        {options.map((opt, idx) => {
+          if (typeof opt === "string")
+            return <Picker.Item key={idx} label={opt} value={opt} />;
+          return (
+            <Picker.Item
+              key={idx}
+              label={opt.label ?? String(opt.value)}
+              value={opt.value}
+            />
+          );
+        })}
+      </Picker>
+    </View>
   </View>
 );
+
 
 const RNCheckbox = ({ value, onValueChange, disabled }) => (
   <View style={styles.checkboxRow}>
@@ -534,6 +535,12 @@ const FormPreviewRenderer = ({
 export default FormPreviewRenderer;
 
 const styles = StyleSheet.create({
+  pickerContainer: {
+  borderWidth: 1,
+  borderColor: "#E2E8F0",
+  borderRadius: 8,
+  backgroundColor: "#FFF",
+},
   container: {
     gap: 16,
   },
@@ -566,7 +573,11 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     backgroundColor: "#FFF",
   },
-  picker: { height: 44 },
+  picker: {
+    height: 60,
+    width: "100%",
+    marginVertical: -8, // Ajusta este valor según se vea en tu dispositivo
+  },
   checkboxRow: { flexDirection: "row", alignItems: "center" },
   button: {
     backgroundColor: "#0F8390",
