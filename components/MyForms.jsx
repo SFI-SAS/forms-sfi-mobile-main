@@ -61,7 +61,7 @@ export default function MyForms() {
 
   const handleAuthError = async (error) => {
     const errorMessage = error?.message || error?.toString() || "";
-    
+
     if (
       errorMessage.includes("No authentication token") ||
       errorMessage.includes("authentication token") ||
@@ -69,10 +69,10 @@ export default function MyForms() {
       errorMessage.includes("401")
     ) {
       console.log("🔒 Token inválido o ausente. Cerrando sesión...");
-      
+
       await AsyncStorage.setItem("isLoggedOut", "true");
       await AsyncStorage.removeItem("authToken");
-      
+
       Alert.alert(
         "Session Expired",
         "Your session has expired or is invalid. Please log in again.",
@@ -84,10 +84,10 @@ export default function MyForms() {
         ],
         { cancelable: false }
       );
-      
+
       return true;
     }
-    
+
     return false;
   };
 
@@ -95,7 +95,9 @@ export default function MyForms() {
     const checkAuthToken = async () => {
       const token = await AsyncStorage.getItem("authToken");
       if (!token) {
-        console.log("🔒 No hay token al cargar MyForms. Redirigiendo al login...");
+        console.log(
+          "🔒 No hay token al cargar MyForms. Redirigiendo al login..."
+        );
         Alert.alert(
           "Invalid Session",
           "No active session found. Please log in.",
@@ -109,7 +111,7 @@ export default function MyForms() {
         );
       }
     };
-    
+
     checkAuthToken();
   }, []);
 
@@ -121,7 +123,7 @@ export default function MyForms() {
     setLoading(true);
     try {
       const accessToken = await AsyncStorage.getItem("authToken");
-      
+
       if (!accessToken) {
         console.log("🔒 No hay token disponible en MyForms");
         setLoading(false);
@@ -145,80 +147,76 @@ export default function MyForms() {
       if (accessToken) {
         try {
           const backendUrl = await getBackendUrl();
-          const formsRes = await fetch(
-            `${backendUrl}/forms/users/form_by_user`,
+
+          // ✅ OPTIMIZADO: Una sola consulta para obtener TODAS las respuestas
+          console.log("🌐 Obteniendo todas las respuestas del usuario...");
+          const responsesRes = await fetch(
+            `${backendUrl}/responses/get_responses/all`,
             {
               method: "GET",
               headers: { Authorization: `Bearer ${accessToken}` },
             }
           );
-          
-          if (formsRes.status === 401) {
+
+          if (responsesRes.status === 401) {
             throw new Error("Unauthorized - Token inválido");
           }
-          
-          const formsData = await formsRes.json();
-          if (!Array.isArray(formsData)) {
-            throw new Error("No se pudieron cargar los formularios asignados.");
+
+          const allResponsesData = await responsesRes.json();
+          console.log("✅ Respuestas completas obtenidas:", allResponsesData);
+
+          if (!allResponsesData || !Array.isArray(allResponsesData.forms)) {
+            throw new Error("No se pudieron cargar las respuestas.");
           }
 
+          // ✅ PROCESAR datos del endpoint optimizado
           grouped = {};
           formsList = [];
-          for (const form of formsData) {
-            try {
-              const res = await fetch(
-                `${backendUrl}/responses/get_responses/?form_id=${form.id}`,
-                {
-                  method: "GET",
-                  headers: { Authorization: `Bearer ${accessToken}` },
-                }
-              );
-              
-              if (res.status === 401) {
-                throw new Error("Unauthorized - Token inválido");
-              }
-              
-              const responses = await res.json();
-              if (Array.isArray(responses) && responses.length > 0) {
-                grouped[form.id] = responses;
-                formsList.push({
-                  id: form.id,
-                  form_title: form.title || "Sin título",
-                  form_description: form.description || "",
-                  submitted_by: responses[0]?.submitted_by || {},
-                });
-              }
-            } catch (e) {
-              // Si falla la consulta de respuestas, ignora ese formulario
+
+          for (const formData of allResponsesData.forms) {
+            if (formData.response_count > 0) {
+              // Agregar formulario a la lista
+              formsList.push({
+                id: formData.form_id,
+                form_title: formData.form_title || "Sin título",
+                form_description: formData.form_description || "",
+                submitted_by: formData.responses[0]?.submitted_by || {},
+              });
+
+              // Organizar respuestas por form_id
+              grouped[formData.form_id] = formData.responses;
             }
           }
 
           setResponsesByForm(grouped);
           setForms(formsList);
 
+          // ✅ GUARDAR datos completos en cache
           await AsyncStorage.setItem(
             MY_FORMS_OFFLINE_KEY,
             JSON.stringify({ formsList, grouped })
           );
-          console.log(
-            "[DEBUG][OFFLINE] Guardado en MY_FORMS_OFFLINE_KEY (online)",
-            { formsList, grouped }
-          );
+          console.log("✅ Cache actualizado con datos optimizados:", {
+            formsList,
+            grouped,
+          });
           onlineOk = true;
         } catch (err) {
+          console.error("❌ Error obteniendo respuestas:", err);
           onlineOk = false;
         }
       }
 
+      // ✅ FALLBACK a cache offline si la consulta online falla
       if (!onlineOk && offlineData) {
         setForms(offlineData.formsList || []);
         setResponsesByForm(offlineData.grouped || {});
       }
     } catch (error) {
       console.error("❌ Error al cargar formularios enviados:", error);
-      
+
       const isAuthError = await handleAuthError(error);
-      
+
       if (!isAuthError) {
         setForms([]);
         setResponsesByForm({});
@@ -300,11 +298,11 @@ export default function MyForms() {
           "Content-Type": "application/json",
         },
       });
-      
+
       if (res.status === 401) {
         throw new Error("Unauthorized - Token inválido");
       }
-      
+
       let data;
       try {
         data = await res.json();
@@ -343,9 +341,9 @@ export default function MyForms() {
       handleViewForms();
     } catch (error) {
       console.error("❌ Error en reconsideración:", error);
-      
+
       const isAuthError = await handleAuthError(error);
-      
+
       if (!isAuthError) {
         setReconsiderModal((prev) => ({
           ...prev,
@@ -393,7 +391,7 @@ export default function MyForms() {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#1E3A8A" />
-      
+
       {/* Header corporativo */}
       <LinearGradient
         colors={["#4C34C7", "#4C34C7"]}
@@ -403,7 +401,9 @@ export default function MyForms() {
       >
         <View style={styles.headerContent}>
           <Text style={styles.headerTitle}>Submitted Forms</Text>
-          <Text style={styles.headerSubtitle}>Review and Manage Submissions</Text>
+          <Text style={styles.headerSubtitle}>
+            Review and Manage Submissions
+          </Text>
         </View>
       </LinearGradient>
 
@@ -442,7 +442,7 @@ export default function MyForms() {
                   <Text style={styles.formTitle} numberOfLines={2}>
                     {form.form_title || "Untitled Form"}
                   </Text>
-                  
+
                   {form.form_description ? (
                     <Text style={styles.formDescription} numberOfLines={3}>
                       {form.form_description}
@@ -466,7 +466,9 @@ export default function MyForms() {
                   activeOpacity={0.7}
                 >
                   <Text style={styles.expandButtonText}>
-                    {expandedForms[form.id] ? "Hide Responses" : "View Responses"}
+                    {expandedForms[form.id]
+                      ? "Hide Responses"
+                      : "View Responses"}
                   </Text>
                   <Text style={styles.expandButtonIcon}>
                     {expandedForms[form.id] ? "▲" : "▼"}
@@ -485,7 +487,10 @@ export default function MyForms() {
                       {Array.isArray(responsesByForm[form.id]) &&
                       responsesByForm[form.id].length > 0 ? (
                         responsesByForm[form.id].map((resp, idx) => (
-                          <View key={resp.response_id || idx} style={styles.responseCard}>
+                          <View
+                            key={resp.response_id || idx}
+                            style={styles.responseCard}
+                          >
                             {/* Header de respuesta */}
                             <View style={styles.responseHeader}>
                               <Text style={styles.responseNumber}>
@@ -549,7 +554,9 @@ export default function MyForms() {
 
                               {resp.message ? (
                                 <View style={styles.messageContainer}>
-                                  <Text style={styles.messageLabel}>Message:</Text>
+                                  <Text style={styles.messageLabel}>
+                                    Message:
+                                  </Text>
                                   <Text style={styles.messageText}>
                                     {resp.message}
                                   </Text>
@@ -558,9 +565,12 @@ export default function MyForms() {
                             </View>
 
                             {/* Respuestas del formulario */}
-                            {Array.isArray(resp.answers) && resp.answers.length > 0 ? (
+                            {Array.isArray(resp.answers) &&
+                            resp.answers.length > 0 ? (
                               <View style={styles.answersSection}>
-                                <Text style={styles.sectionTitle}>Form Answers</Text>
+                                <Text style={styles.sectionTitle}>
+                                  Form Answers
+                                </Text>
                                 <ScrollView
                                   style={styles.answersScroll}
                                   nestedScrollEnabled
@@ -572,7 +582,9 @@ export default function MyForms() {
                                         {ans.question_text}
                                       </Text>
                                       <Text style={styles.answerText}>
-                                        {ans.answer_text || ans.file_path || "-"}
+                                        {ans.answer_text ||
+                                          ans.file_path ||
+                                          "-"}
                                       </Text>
                                     </View>
                                   ))}
@@ -632,8 +644,12 @@ export default function MyForms() {
                                           </Text>
                                         </View>
                                         {appr.message && (
-                                          <View style={styles.approvalMessageBox}>
-                                            <Text style={styles.approvalMessage}>
+                                          <View
+                                            style={styles.approvalMessageBox}
+                                          >
+                                            <Text
+                                              style={styles.approvalMessage}
+                                            >
                                               {appr.message}
                                             </Text>
                                           </View>
@@ -648,7 +664,9 @@ export default function MyForms() {
                             {resp.approval_status === "rechazado" && (
                               <TouchableOpacity
                                 style={styles.reconsiderButton}
-                                onPress={() => handleReconsider(resp.response_id)}
+                                onPress={() =>
+                                  handleReconsider(resp.response_id)
+                                }
                                 activeOpacity={0.8}
                               >
                                 <Text style={styles.reconsiderButtonText}>
@@ -693,8 +711,8 @@ export default function MyForms() {
           <View style={styles.modalContainer}>
             <Text style={styles.modalTitle}>Request Reconsideration</Text>
             <Text style={styles.modalDescription}>
-              Please provide a detailed reason for requesting reconsideration
-              of this rejected form.
+              Please provide a detailed reason for requesting reconsideration of
+              this rejected form.
             </Text>
 
             <TextInput
@@ -769,7 +787,11 @@ export default function MyForms() {
             </Text>
 
             <TouchableOpacity
-              style={[styles.modalButton, styles.modalButtonSubmit, { width: "100%" }]}
+              style={[
+                styles.modalButton,
+                styles.modalButtonSubmit,
+                { width: "100%" },
+              ]}
               onPress={() => {
                 setShowLogoutModal(false);
                 router.replace("/");
