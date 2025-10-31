@@ -500,180 +500,21 @@ export default function Home() {
     }
   };
 
-  // ✅ OPTIMIZADO: Función para fetchAndCacheQuestionsAndRelated con batches
-  const fetchAndCacheQuestionsAndRelated = async (forms, token) => {
-    // Crear batches más pequeños para no bloquear la UI
-    const BATCH_SIZE = 3; // Procesar 3 formularios a la vez
+  // ✅ ACTUALIZADO: Función para obtener formularios del usuario y precargar todos los datos
+  const fetchUserFormsAndPreloadData = async ({
+    forceRefresh = false,
+  } = {}) => {
+    console.log(
+      `🌐 Fetching formularios del usuario con precarga completa (force=${forceRefresh})`
+    );
 
-    let allQuestions = {};
-    let allFormsMetadata = {};
-    let allRelatedAnswers = {};
-
-    // Procesar formularios en batches
-    for (let i = 0; i < forms.length; i += BATCH_SIZE) {
-      const batch = forms.slice(i, i + BATCH_SIZE);
-      const batchPromises = batch.map(async (form) => {
-        try {
-          const backendUrl = await getBackendUrl();
-          const qRes = await fetch(`${backendUrl}/forms/${form.id}`, {
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
-            },
-          });
-          const qData = await qRes.json();
-          //console.log(`[DEBUG][fetchQuestions] formId=${form.id} qData:`, qData); // <--- LOG DE PREGUNTAS
-          //console.log(`[DEBUG][fetchQuestions prueba] formId=${form.id} qData:`, qData); // <--- LOG DE PREGUNTAS
-
-          if (!qRes.ok)
-            throw new Error(qData.detail || "Error fetching questions");
-
-          // Procesar preguntas: preferir form_design como fuente de verdad
-          let adjustedQuestions = [];
-          // Preferir form_design como fuente de verdad. Aceptar objetos o arrays
-          const designSource = qData.form_design || qData.format_design || null;
-          if (designSource) {
-            // Use only form_design as the source of truth — do NOT pass qData.questions
-            adjustedQuestions = parseFormDesignToQuestions(designSource);
-          } else if (Array.isArray(qData.questions)) {
-            // Fallback al comportamiento previo
-            adjustedQuestions = qData.questions.map((question) => {
-              if (
-                (question.question_type === "multiple_choice" ||
-                  question.question_type === "one_choice") &&
-                Array.isArray(question.options)
-              ) {
-                return {
-                  ...question,
-                  options: question.options.map((option) => option.option_text),
-                };
-              }
-              if (question.question_type === "table") {
-                return { ...question, options: [] };
-              }
-              return question;
-            });
-          }
-
-          // 2. Obtener respuestas relacionadas para preguntas tipo tabla
-          const tableQuestions = adjustedQuestions.filter(
-            (q) => q.question_type === "table"
-          );
-          const relatedPromises = tableQuestions.map(async (question) => {
-            try {
-              const relRes = await fetch(
-                `${backendUrl}/questions/question-table-relation/answers/${question.id}`,
-                {
-                  method: "GET",
-                  headers: { Authorization: `Bearer ${token}` },
-                }
-              );
-              const relData = await relRes.json();
-              //console.log(`[DEBUG][fetchRelatedAnswers] formId=${form.id} relatedResults:`, relData); // <--- LOG DE RELACIONADAS
-              // --- FIX: Guarda data como array de strings ---
-              return {
-                questionId: question.id,
-                data: Array.isArray(relData.data)
-                  ? relData.data
-                      .map((item) =>
-                        typeof item === "object" && item.name
-                          ? item.name
-                          : typeof item === "string"
-                            ? item
-                            : ""
-                      )
-                      .filter((v) => typeof v === "string" && v.length > 0)
-                  : [],
-                correlations: relData.correlations || {},
-                related_question: relData.related_question || null,
-                source: relData.source || "",
-              };
-            } catch (e) {
-              return {
-                questionId: question.id,
-                data: [],
-                correlations: {},
-                related_question: null,
-                source: "",
-              };
-            }
-          });
-
-          const relatedResults = await Promise.all(relatedPromises);
-          // Guarda answers, correlaciones y pregunta relacionada en relatedAnswers
-          const relatedAnswersObj = {};
-          relatedResults.forEach(
-            ({ questionId, data, correlations, related_question, source }) => {
-              relatedAnswersObj[questionId] = {
-                data,
-                correlations,
-                related_question,
-                source,
-              };
-            }
-          );
-
-          return {
-            formId: form.id,
-            questions: adjustedQuestions,
-            form_design: qData.form_design || qData.format_design || null,
-            metadata: {
-              title: qData.title,
-              description: qData.description,
-              logo_url: extractLogoUrl(form, qData),
-            },
-            relatedAnswers: relatedAnswersObj,
-          };
-        } catch (e) {
-          console.error(`❌ Error procesando formulario ${form.id}:`, e);
-          return null;
-        }
-      });
-
-      const batchResults = await Promise.all(batchPromises);
-
-      batchResults.forEach((result) => {
-        if (result) {
-          // Store both parsed questions and original form_design for rendering
-          allQuestions[result.formId] = {
-            questions: result.questions,
-            form_design: result.form_design || null,
-          };
-          allFormsMetadata[result.formId] = result.metadata;
-          // --- FIX: Merge relatedAnswers por pregunta ---
-          Object.assign(allRelatedAnswers, result.relatedAnswers);
-        }
-      });
-
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-
-    // Guardar todo en AsyncStorage al final
-    try {
-      await Promise.all([
-        AsyncStorage.setItem(QUESTIONS_KEY, JSON.stringify(allQuestions)),
-        AsyncStorage.setItem(
-          FORMS_METADATA_KEY,
-          JSON.stringify(allFormsMetadata)
-        ),
-        AsyncStorage.setItem(
-          RELATED_ANSWERS_KEY,
-          JSON.stringify(allRelatedAnswers)
-        ),
-      ]);
-      //console.log("✅ Datos cacheados exitosamente en background");
-    } catch (error) {
-      console.error("❌ Error guardando cache:", error);
-    }
-  };
-
-  // ✅ OPTIMIZADO: Función principal fetchUserForms
-  const fetchUserForms = async ({ skipCacheIfUnchanged = true } = {}) => {
     try {
       const token = await AsyncStorage.getItem("authToken");
       if (!token) throw new Error("No authentication token found");
+
       const backendUrl = await getBackendUrl();
+
+      // 🔥 PASO 1: Obtener TODOS los formularios COMPLETOS del usuario (sin consultas individuales)
       const response = await fetch(`${backendUrl}/forms/users/form_by_user`, {
         method: "GET",
         headers: {
@@ -682,30 +523,256 @@ export default function Home() {
         },
       });
 
-      const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.detail || "Error fetching user forms");
+        const errorData = await response.json();
+        throw new Error(errorData.detail || "Error fetching user forms");
       }
 
-      // Leer cache previa para detectar cambios y evitar trabajos innecesarios
-      let previousRaw = null;
-      try {
-        previousRaw = await AsyncStorage.getItem("offline_forms");
-      } catch (_) {}
+      const userForms = await response.json();
+      console.log(
+        `✅ Recibidos ${userForms.length} formularios COMPLETOS del usuario`
+      );
 
-      const newRaw = JSON.stringify(data);
-      const unchanged = previousRaw && previousRaw === newRaw;
+      // ✅ MOSTRAR FORMULARIOS INMEDIATAMENTE (UI no bloqueante)
+      setUserForms(userForms);
+      organizeByCategorys(userForms);
+      setLoading(false);
+
+      // 🔥 PASO 2: Procesar formularios completos y precargar respuestas relacionadas
+      console.log(
+        `🔄 Procesando ${userForms.length} formularios completos y cargando respuestas relacionadas`
+      );
+
+      let formsMetadata = {};
+      let questionsData = {};
+      let relatedAnswers = {};
+
+      // Cargar cache existente para evitar re-trabajo innecesario
+      let existingQuestions = {};
+      let existingMetadata = {};
+      let existingRelated = {};
+
+      if (!forceRefresh) {
+        try {
+          const [storedQ, storedM, storedR] = await Promise.all([
+            AsyncStorage.getItem(QUESTIONS_KEY),
+            AsyncStorage.getItem(FORMS_METADATA_KEY),
+            AsyncStorage.getItem(RELATED_ANSWERS_KEY),
+          ]);
+          existingQuestions = storedQ ? JSON.parse(storedQ) : {};
+          existingMetadata = storedM ? JSON.parse(storedM) : {};
+          existingRelated = storedR ? JSON.parse(storedR) : {};
+        } catch (e) {
+          console.warn("⚠️ Error cargando cache existente:", e);
+        }
+      }
+
+      // Procesar formularios en batches para no saturar el servidor
+      const BATCH_SIZE = 3;
+      for (let i = 0; i < userForms.length; i += BATCH_SIZE) {
+        const batch = userForms.slice(i, i + BATCH_SIZE);
+        const batchPromises = batch.map(async (form) => {
+          try {
+            // Si ya existe en cache y no es refresh forzado, usar el existente
+            if (
+              !forceRefresh &&
+              existingQuestions[form.id] &&
+              existingMetadata[form.id]
+            ) {
+              console.log(`📋 Usando cache para formulario ${form.id}`);
+              return {
+                formId: form.id,
+                questions: existingQuestions[form.id].questions || [],
+                form_design: existingQuestions[form.id].form_design || null,
+                metadata: existingMetadata[form.id],
+                relatedAnswers: Object.keys(existingRelated).reduce(
+                  (acc, qId) => {
+                    const questionBelongsToForm = (
+                      existingQuestions[form.id].questions || []
+                    ).some((q) => q.id == qId);
+                    if (questionBelongsToForm) {
+                      acc[qId] = existingRelated[qId];
+                    }
+                    return acc;
+                  },
+                  {}
+                ),
+                fromCache: true,
+              };
+            }
+
+            console.log(`🔧 Procesando formulario completo ${form.id}`);
+
+            // ✅ USAR DATOS COMPLETOS del endpoint form_by_user (sin consulta individual)
+            // El formulario ya viene completo desde el backend
+            const formDetail = form; // Los datos completos ya están en el form
+
+            // Procesar preguntas: preferir form_design como fuente de verdad
+            let adjustedQuestions = [];
+            const designSource =
+              formDetail.form_design || formDetail.format_design || null;
+
+            if (designSource) {
+              try {
+                adjustedQuestions = parseFormDesignToQuestions(designSource);
+              } catch (e) {
+                console.warn(
+                  `⚠️ Error parsing form_design para ${form.id}:`,
+                  e
+                );
+                adjustedQuestions = [];
+              }
+            }
+
+            // Fallback a questions array si form_design no funciona
+            if (!adjustedQuestions || adjustedQuestions.length === 0) {
+              if (Array.isArray(formDetail.questions)) {
+                adjustedQuestions = formDetail.questions.map((question) => {
+                  if (
+                    (question.question_type === "multiple_choice" ||
+                      question.question_type === "one_choice") &&
+                    Array.isArray(question.options)
+                  ) {
+                    return {
+                      ...question,
+                      options: question.options.map(
+                        (option) => option.option_text
+                      ),
+                    };
+                  }
+                  if (question.question_type === "table") {
+                    return { ...question, options: [] };
+                  }
+                  return question;
+                });
+              }
+            }
+
+            // VALIDACIÓN CRÍTICA: Asegurar que tenemos datos mínimos
+            if (!adjustedQuestions || adjustedQuestions.length === 0) {
+              console.warn(
+                `⚠️ Formulario ${form.id} sin preguntas válidas, creando fallback`
+              );
+              adjustedQuestions = [
+                {
+                  id: `fallback_${form.id}`,
+                  question_text: "Formulario sin preguntas definidas",
+                  question_type: "text",
+                  is_required: false,
+                },
+              ];
+            }
+
+            // ✅ DATOS RELACIONADOS: Ya vienen completos desde form_by_user
+            // No necesitamos consultas adicionales por ID
+            const formRelatedAnswers = form.related_answers || {};
+
+            return {
+              formId: form.id,
+              questions: adjustedQuestions,
+              form_design: designSource,
+              metadata: {
+                title: formDetail.title || form.title || "Formulario",
+                description: formDetail.description || form.description || "",
+                logo_url: extractLogoUrl(form, formDetail),
+              },
+              relatedAnswers: formRelatedAnswers,
+              fromCache: false,
+            };
+          } catch (e) {
+            console.error(
+              `❌ Error procesando formulario completo ${form.id}:`,
+              e
+            );
+            // FALLBACK CRÍTICO: Crear datos mínimos para evitar que el formulario aparezca vacío
+            return {
+              formId: form.id,
+              questions: [
+                {
+                  id: `error_${form.id}`,
+                  question_text: `Error procesando formulario: ${e.message}`,
+                  question_type: "text",
+                  is_required: false,
+                },
+              ],
+              form_design: null,
+              metadata: {
+                title: form.title || "Formulario",
+                description: form.description || "",
+                logo_url: null,
+              },
+              relatedAnswers: {},
+              fromCache: false,
+              hasError: true,
+            };
+          }
+        });
+
+        const batchResults = await Promise.all(batchPromises);
+
+        batchResults.forEach((result) => {
+          if (result) {
+            questionsData[result.formId] = {
+              questions: result.questions,
+              form_design: result.form_design || null,
+            };
+            formsMetadata[result.formId] = result.metadata;
+            Object.assign(relatedAnswers, result.relatedAnswers);
+
+            if (result.fromCache) {
+              console.log(`📋 Cache usado para ${result.formId}`);
+            } else if (result.hasError) {
+              console.warn(`⚠️ Datos de fallback para ${result.formId}`);
+            } else {
+              console.log(`✅ Formulario procesado: ${result.formId}`);
+            }
+          }
+        });
+
+        // Pequeña pausa entre batches para no saturar
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+
+      // Leer cache previa para detectar cambios
+      let previousFormsRaw = null;
+      let previousQuestionsRaw = null;
+
+      if (!forceRefresh) {
+        try {
+          [previousFormsRaw, previousQuestionsRaw] = await Promise.all([
+            AsyncStorage.getItem("offline_forms"),
+            AsyncStorage.getItem(QUESTIONS_KEY),
+          ]);
+        } catch (_) {}
+      }
+
+      const newFormsRaw = JSON.stringify(userForms);
+      const newQuestionsRaw = JSON.stringify(questionsData);
+      const formsUnchanged =
+        previousFormsRaw && previousFormsRaw === newFormsRaw;
+      const questionsUnchanged =
+        previousQuestionsRaw && previousQuestionsRaw === newQuestionsRaw;
 
       // ✅ MOSTRAR DATOS INMEDIATAMENTE
-      setUserForms(data);
-      organizeByCategorys(data);
-      setLoading(false); // Ocultar spinner inmediatamente
+      setUserForms(userForms);
+      organizeByCategorys(userForms);
+      setLoading(false);
 
-      // ✅ GUARDAR EN BACKGROUND (no bloquear UI), solo si cambió o si no queremos saltarlo
-      if (!skipCacheIfUnchanged || !unchanged) {
+      // ✅ GUARDAR EN BACKGROUND solo si hay cambios o es refresh forzado
+      if (forceRefresh || !formsUnchanged || !questionsUnchanged) {
+        console.log("� Guardando datos actualizados en cache");
+
         Promise.all([
-          AsyncStorage.setItem("offline_forms", newRaw),
-          fetchAndCacheQuestionsAndRelated(data, token),
+          AsyncStorage.setItem("offline_forms", newFormsRaw),
+          AsyncStorage.setItem(QUESTIONS_KEY, newQuestionsRaw),
+          AsyncStorage.setItem(
+            FORMS_METADATA_KEY,
+            JSON.stringify(formsMetadata)
+          ),
+          AsyncStorage.setItem(
+            RELATED_ANSWERS_KEY,
+            JSON.stringify(relatedAnswers)
+          ),
         ])
           .then(async () => {
             const ts = new Date().toISOString();
@@ -713,14 +780,18 @@ export default function Home() {
             try {
               await AsyncStorage.setItem("last_sync_at", ts);
             } catch (_) {}
+            console.log("✅ Cache actualizado exitosamente");
           })
           .catch((error) => {
-            console.error("❌ Error en operaciones de background:", error);
+            console.error("❌ Error guardando cache:", error);
           });
+      } else {
+        console.log("📋 Datos sin cambios, cache preservado");
       }
     } catch (error) {
-      console.error("❌ Error al obtener los formularios del usuario:", error);
+      console.error("❌ Error al obtener todos los formularios:", error);
       setLoading(false);
+      throw error;
     }
   };
 
@@ -843,7 +914,7 @@ export default function Home() {
 
       if (state.isConnected) {
         await Promise.all([
-          fetchUserForms({ skipCacheIfUnchanged: !force }),
+          fetchUserFormsAndPreloadData({ forceRefresh: force }),
           fetchUserInfo(),
         ]);
       } else {

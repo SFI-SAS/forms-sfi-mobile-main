@@ -42,32 +42,29 @@ const BACKEND_URL_KEY = "backend_url";
 const uploadFileToServer = async (fileUri, token, backendUrl) => {
   try {
     console.log("📤 Iniciando upload de archivo:", fileUri);
-    
+
     // Obtener información del archivo
-    const fileName = fileUri.split('/').pop();
-    
+    const fileName = fileUri.split("/").pop();
+
     // Crear FormData
     const formData = new FormData();
-    
+
     // Para React Native, necesitamos pasar el archivo de forma diferente
-    formData.append('file', {
+    formData.append("file", {
       uri: fileUri,
-      type: 'application/octet-stream', // o detectar el tipo real
+      type: "application/octet-stream", // o detectar el tipo real
       name: fileName,
     });
 
     // Realizar el upload
-    const uploadResponse = await fetch(
-      `${backendUrl}/responses/upload-file/`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          // NO incluir Content-Type, FormData lo maneja automáticamente
-        },
-        body: formData,
-      }
-    );
+    const uploadResponse = await fetch(`${backendUrl}/responses/upload-file/`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        // NO incluir Content-Type, FormData lo maneja automáticamente
+      },
+      body: formData,
+    });
 
     if (!uploadResponse.ok) {
       throw new Error(`Error HTTP ${uploadResponse.status}`);
@@ -75,7 +72,7 @@ const uploadFileToServer = async (fileUri, token, backendUrl) => {
 
     const uploadResult = await uploadResponse.json();
     console.log("✅ Upload exitoso:", uploadResult);
-    
+
     return uploadResult.file_name; // Retornar el nombre del archivo en el servidor
   } catch (error) {
     console.error("❌ Error en upload:", error);
@@ -160,8 +157,11 @@ export default function FormatScreen(props) {
   const [formItems, setFormItems] = useState([]);
   const [formValues, setFormValues] = useState({});
   const [formErrors, setFormErrors] = useState({});
-  
-  
+
+  const getBackendUrl = async () => {
+    const stored = await AsyncStorage.getItem(BACKEND_URL_KEY);
+    return stored || "";
+  };
 
   // --- Formatting helpers ---
   const pad2 = (n) => (n < 10 ? `0${n}` : String(n));
@@ -273,76 +273,76 @@ export default function FormatScreen(props) {
   // --- Helpers: serialize answers from form_design renderer ---
   const isEmptyVal = (v) =>
     v === undefined || v === null || String(v).trim() === "";
-const pushAnswer = (buf, questionId, value, type, repeatedId = "") => {
-  if (isEmptyVal(value)) return;
+  const pushAnswer = (buf, questionId, value, type, repeatedId = "") => {
+    if (isEmptyVal(value)) return;
 
-  if (type === "file") {
-    // 🔑 IMPORTANTE: value ya debería ser el nombre del archivo desde el servidor
-    console.log(`📎 Añadiendo archivo a buffer: ${value}`);
-    buf.push({
-      question_id: questionId,
-      question_type: "file",
-      answer_text: "",
-      file_path: String(value), // Usar el nombre del servidor directamente
-      repeated_id: repeatedId,
-    });
-  } else if (type === "date") {
-    const formatted = formatDateDDMMYYYY(value);
-    if (!isEmptyVal(formatted)) {
+    if (type === "file") {
+      // 🔑 IMPORTANTE: value ya debería ser el nombre del archivo desde el servidor
+      console.log(`📎 Añadiendo archivo a buffer: ${value}`);
       buf.push({
         question_id: questionId,
-        answer_text: formatted,
+        question_type: "file",
+        answer_text: "",
+        file_path: String(value), // Usar el nombre del servidor directamente
+        repeated_id: repeatedId,
+      });
+    } else if (type === "date") {
+      const formatted = formatDateDDMMYYYY(value);
+      if (!isEmptyVal(formatted)) {
+        buf.push({
+          question_id: questionId,
+          answer_text: formatted,
+          file_path: "",
+          repeated_id: repeatedId,
+        });
+      }
+    } else if (type === "firm") {
+      let parsed = value;
+      if (typeof parsed === "string") {
+        try {
+          parsed = JSON.parse(parsed);
+        } catch {}
+      }
+      const fd = parsed?.firmData || parsed || {};
+      const filtered = {
+        firmData: {
+          success: !!fd.success,
+          person_id: fd.person_id || fd.personId || "",
+          person_name: fd.person_name || fd.personName || fd.name || "",
+          qr_url: fd.qr_url || fd.qrUrl || fd.signature_url || "",
+        },
+      };
+      buf.push({
+        question_id: questionId,
+        answer_text: JSON.stringify(filtered),
+        file_path: "",
+        repeated_id: repeatedId,
+      });
+    } else if (type === "time") {
+      const hhmm = formatTimeHHmmHyphen(value);
+      if (!isEmptyVal(hhmm))
+        buf.push({
+          question_id: questionId,
+          answer_text: hhmm,
+          file_path: "",
+          repeated_id: repeatedId,
+        });
+    } else if (type === "checkbox") {
+      buf.push({
+        question_id: questionId,
+        answer_text: value ? "true" : "false",
+        file_path: "",
+        repeated_id: repeatedId,
+      });
+    } else {
+      buf.push({
+        question_id: questionId,
+        answer_text: String(value),
         file_path: "",
         repeated_id: repeatedId,
       });
     }
-  } else if (type === "firm") {
-    let parsed = value;
-    if (typeof parsed === "string") {
-      try {
-        parsed = JSON.parse(parsed);
-      } catch {}
-    }
-    const fd = parsed?.firmData || parsed || {};
-    const filtered = {
-      firmData: {
-        success: !!fd.success,
-        person_id: fd.person_id || fd.personId || "",
-        person_name: fd.person_name || fd.personName || fd.name || "",
-        qr_url: fd.qr_url || fd.qrUrl || fd.signature_url || "",
-      },
-    };
-    buf.push({
-      question_id: questionId,
-      answer_text: JSON.stringify(filtered),
-      file_path: "",
-      repeated_id: repeatedId,
-    });
-  } else if (type === "time") {
-    const hhmm = formatTimeHHmmHyphen(value);
-    if (!isEmptyVal(hhmm))
-      buf.push({
-        question_id: questionId,
-        answer_text: hhmm,
-        file_path: "",
-        repeated_id: repeatedId,
-      });
-  } else if (type === "checkbox") {
-    buf.push({
-      question_id: questionId,
-      answer_text: value ? "true" : "false",
-      file_path: "",
-      repeated_id: repeatedId,
-    });
-  } else {
-    buf.push({
-      question_id: questionId,
-      answer_text: String(value),
-      file_path: "",
-      repeated_id: repeatedId,
-    });
-  }
-};
+  };
   const serializeFormItemsAnswers = (items, values, batchId) => {
     const out = [];
     const walk = (it) => {
@@ -596,14 +596,18 @@ const pushAnswer = (buf, questionId, value, type, repeatedId = "") => {
       const offlineQuestions = storedQuestions
         ? JSON.parse(storedQuestions)
         : {};
+
+      // ✅ SIMPLIFICADO: Si no hay datos en cache, mostrar mensaje claro
       if (!offlineQuestions[formId]) {
+        console.warn(`⚠️ No hay datos en cache para formulario ${formId}`);
         Alert.alert(
-          "Modo Offline",
-          "No hay preguntas guardadas para este formulario."
+          "Datos no disponibles",
+          "Los datos del formulario no están disponibles. Por favor, regrese a la pantalla principal y toque el botón Refresh para cargar los datos.",
+          [{ text: "OK", onPress: () => setLoading(false) }]
         );
-        setLoading(false);
         return;
       }
+
       // support cached shape either array (legacy) or object { questions, form_design }
       const rawEntry = offlineQuestions[formId];
       let questionsArray = [];
@@ -632,6 +636,27 @@ const pushAnswer = (buf, questionId, value, type, repeatedId = "") => {
             ? rawEntry.questions
             : [];
         }
+      }
+
+      // VALIDACIÓN CRÍTICA: Asegurar que tenemos preguntas válidas
+      if (!questionsArray || questionsArray.length === 0) {
+        console.warn(
+          `⚠️ No se encontraron preguntas válidas para formulario ${formId}, intentando fetch directo`
+        );
+        const success = await fetchFormDataDirectly(formId);
+        if (success) {
+          return loadAllOfflineData(formId); // Retry after fetch
+        }
+        // Crear pregunta de fallback para evitar pantalla vacía
+        questionsArray = [
+          {
+            id: `fallback_${formId}`,
+            question_text:
+              "Error: No se pudieron cargar las preguntas del formulario",
+            question_type: "text",
+            is_required: false,
+          },
+        ];
       }
 
       // If form_design exists, prepare renderer items and initial values
@@ -830,75 +855,79 @@ const pushAnswer = (buf, questionId, value, type, repeatedId = "") => {
     [handleAnswerChange]
   );
 
-const handleFDFileSelect = useCallback(
-  async (fieldId) => {
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: "*/*",
-        copyToCacheDirectory: true,
-      });
+  const handleFDFileSelect = useCallback(
+    async (fieldId) => {
+      try {
+        const result = await DocumentPicker.getDocumentAsync({
+          type: "*/*",
+          copyToCacheDirectory: true,
+        });
 
-      if (result && !result.canceled && result.assets?.[0]?.uri) {
-        const uri = result.assets[0].uri;
-        console.log("📎 Archivo seleccionado:", uri);
+        if (result && !result.canceled && result.assets?.[0]?.uri) {
+          const uri = result.assets[0].uri;
+          console.log("📎 Archivo seleccionado:", uri);
 
-        // 1. Generar serial para el archivo
-        const it = findItemById(formItems, fieldId);
-        const mappedQuestionId = getExternalQuestionIdFromItem(it) || fieldId;
-        await generateSerial(mappedQuestionId);
+          // 1. Generar serial para el archivo
+          const it = findItemById(formItems, fieldId);
+          const mappedQuestionId = getExternalQuestionIdFromItem(it) || fieldId;
+          await generateSerial(mappedQuestionId);
 
-        // 2. NUEVO: Subir el archivo al servidor
-        const token = await AsyncStorage.getItem("authToken");
-        const backendUrl = await getBackendUrl();
+          // 2. NUEVO: Subir el archivo al servidor
+          const token = await AsyncStorage.getItem("authToken");
+          const backendUrl = await getBackendUrl();
 
-        if (!token || !backendUrl) {
-          Alert.alert("Error", "No hay conexión o token válido");
-          return;
-        }
+          if (!token || !backendUrl) {
+            Alert.alert("Error", "No hay conexión o token válido");
+            return;
+          }
 
-        // Mostrar alerta de progreso
-        Alert.alert(
-          "Cargando archivo",
-          "Por favor espera mientras se sube el archivo...",
-          [{ text: "OK", onPress: () => {} }]
-        );
-
-        try {
-          const serverFileName = await uploadFileToServer(uri, token, backendUrl);
-          console.log("✅ Archivo subido con nombre:", serverFileName);
-
-          // 3. Guardar el nombre del servidor (no el URI local)
-          setFileUris((prev) => ({
-            ...prev,
-            [fieldId]: serverFileName, // 🔑 IMPORTANTE: guardar el nombre del servidor
-          }));
-
-          setFormValues((prev) => ({
-            ...prev,
-            [fieldId]: serverFileName,
-          }));
-
-          handleAnswerChange(fieldId, serverFileName);
-
+          // Mostrar alerta de progreso
           Alert.alert(
-            "✅ Éxito",
-            `Archivo "${serverFileName}" cargado correctamente`
+            "Cargando archivo",
+            "Por favor espera mientras se sube el archivo...",
+            [{ text: "OK", onPress: () => {} }]
           );
-        } catch (uploadError) {
-          console.error("Error uploading file:", uploadError);
-          Alert.alert(
-            "Error",
-            "No se pudo cargar el archivo. Intenta de nuevo."
-          );
+
+          try {
+            const serverFileName = await uploadFileToServer(
+              uri,
+              token,
+              backendUrl
+            );
+            console.log("✅ Archivo subido con nombre:", serverFileName);
+
+            // 3. Guardar el nombre del servidor (no el URI local)
+            setFileUris((prev) => ({
+              ...prev,
+              [fieldId]: serverFileName, // 🔑 IMPORTANTE: guardar el nombre del servidor
+            }));
+
+            setFormValues((prev) => ({
+              ...prev,
+              [fieldId]: serverFileName,
+            }));
+
+            handleAnswerChange(fieldId, serverFileName);
+
+            Alert.alert(
+              "✅ Éxito",
+              `Archivo "${serverFileName}" cargado correctamente`
+            );
+          } catch (uploadError) {
+            console.error("Error uploading file:", uploadError);
+            Alert.alert(
+              "Error",
+              "No se pudo cargar el archivo. Intenta de nuevo."
+            );
+          }
         }
+      } catch (e) {
+        console.error("Error selectando archivo:", e);
+        Alert.alert("Error", "No se pudo seleccionar el archivo.");
       }
-    } catch (e) {
-      console.error("Error selectando archivo:", e);
-      Alert.alert("Error", "No se pudo seleccionar el archivo.");
-    }
-  },
-  [formItems, handleAnswerChange]
-);
+    },
+    [formItems, handleAnswerChange]
+  );
 
   const handleAnswerChange = useCallback((questionId, value) => {
     console.log(
@@ -932,58 +961,62 @@ const handleFDFileSelect = useCallback(
     await handleFileUploadWithSerial(questionId);
   };
 
-const handleFileUploadWithSerial = async (questionId) => {
-  try {
-    const result = await DocumentPicker.getDocumentAsync({
-      type: "*/*",
-      copyToCacheDirectory: true,
-    });
+  const handleFileUploadWithSerial = async (questionId) => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: "*/*",
+        copyToCacheDirectory: true,
+      });
 
-    if (result && !result.canceled && result.assets?.[0]?.uri) {
-      const uri = result.assets[0].uri;
-      console.log("📎 Archivo seleccionado (legacy):", uri);
+      if (result && !result.canceled && result.assets?.[0]?.uri) {
+        const uri = result.assets[0].uri;
+        console.log("📎 Archivo seleccionado (legacy):", uri);
 
-      // Obtener token y URL
-      const token = await AsyncStorage.getItem("authToken");
-      const backendUrl = await getBackendUrl();
+        // Obtener token y URL
+        const token = await AsyncStorage.getItem("authToken");
+        const backendUrl = await getBackendUrl();
 
-      if (!token || !backendUrl) {
-        Alert.alert("Error", "No hay conexión o token válido");
-        return;
+        if (!token || !backendUrl) {
+          Alert.alert("Error", "No hay conexión o token válido");
+          return;
+        }
+
+        // NUEVO: Subir el archivo
+        try {
+          const serverFileName = await uploadFileToServer(
+            uri,
+            token,
+            backendUrl
+          );
+
+          // Guardar el nombre del servidor
+          setFileUris((prev) => ({
+            ...prev,
+            [questionId]: serverFileName,
+          }));
+
+          handleAnswerChange(questionId, serverFileName);
+
+          Alert.alert(
+            "✅ Éxito",
+            `Archivo "${serverFileName}" cargado correctamente`
+          );
+        } catch (uploadError) {
+          console.error("Error uploading file:", uploadError);
+          Alert.alert(
+            "Error",
+            "No se pudo cargar el archivo. Intenta de nuevo."
+          );
+        }
+      } else if (result && result.canceled) {
+        // Cancelado por usuario
+      } else {
+        Alert.alert("Error", "No se pudo seleccionar el archivo.");
       }
-
-      // NUEVO: Subir el archivo
-      try {
-        const serverFileName = await uploadFileToServer(uri, token, backendUrl);
-        
-        // Guardar el nombre del servidor
-        setFileUris((prev) => ({
-          ...prev,
-          [questionId]: serverFileName,
-        }));
-
-        handleAnswerChange(questionId, serverFileName);
-
-        Alert.alert(
-          "✅ Éxito",
-          `Archivo "${serverFileName}" cargado correctamente`
-        );
-      } catch (uploadError) {
-        console.error("Error uploading file:", uploadError);
-        Alert.alert(
-          "Error",
-          "No se pudo cargar el archivo. Intenta de nuevo."
-        );
-      }
-    } else if (result && result.canceled) {
-      // Cancelado por usuario
-    } else {
+    } catch (error) {
       Alert.alert("Error", "No se pudo seleccionar el archivo.");
     }
-  } catch (error) {
-    Alert.alert("Error", "No se pudo seleccionar el archivo.");
-  }
-};
+  };
 
   const generateSerial = async (questionId) => {
     try {
@@ -2923,63 +2956,76 @@ const handleFileUploadWithSerial = async (questionId) => {
                                     )}
                                   </>
                                 )}
-{q.question_type === "file" && (
-  <TouchableOpacity
-    style={styles.fileButton}
-    onPress={() => {
-      (async () => {
-        const result = await DocumentPicker.getDocumentAsync({
-          type: "*/*",
-          copyToCacheDirectory: true,
-        });
+                                {q.question_type === "file" && (
+                                  <TouchableOpacity
+                                    style={styles.fileButton}
+                                    onPress={() => {
+                                      (async () => {
+                                        const result =
+                                          await DocumentPicker.getDocumentAsync(
+                                            {
+                                              type: "*/*",
+                                              copyToCacheDirectory: true,
+                                            }
+                                          );
 
-        if (
-          result &&
-          !result.canceled &&
-          result.assets?.[0]?.uri
-        ) {
-          const uri = result.assets[0].uri;
-          
-          // NUEVO: Subir el archivo
-          const token = await AsyncStorage.getItem("authToken");
-          const backendUrl = await getBackendUrl();
+                                        if (
+                                          result &&
+                                          !result.canceled &&
+                                          result.assets?.[0]?.uri
+                                        ) {
+                                          const uri = result.assets[0].uri;
 
-          if (token && backendUrl) {
-            try {
-              const serverFileName = await uploadFileToServer(
-                uri,
-                token,
-                backendUrl
-              );
+                                          // NUEVO: Subir el archivo
+                                          const token =
+                                            await AsyncStorage.getItem(
+                                              "authToken"
+                                            );
+                                          const backendUrl =
+                                            await getBackendUrl();
 
-              setAnswers((prev) => {
-                const arr = Array.isArray(prev[q.id])
-                  ? [...prev[q.id]]
-                  : [];
-                arr[idx] = serverFileName; // Guardar nombre del servidor
-                return { ...prev, [q.id]: arr };
-              });
+                                          if (token && backendUrl) {
+                                            try {
+                                              const serverFileName =
+                                                await uploadFileToServer(
+                                                  uri,
+                                                  token,
+                                                  backendUrl
+                                                );
 
-              Alert.alert(
-                "✅ Éxito",
-                `Archivo cargado: ${serverFileName}`
-              );
-            } catch (error) {
-              Alert.alert("Error", "No se pudo cargar el archivo");
-            }
-          }
-        }
-      })();
-    }}
-  >
-    <Text style={styles.fileButtonText}>
-      {Array.isArray(answers[q.id]) &&
-      answers[q.id][idx]
-        ? "Archivo seleccionado ✓"
-        : "Subir archivo"}
-    </Text>
-  </TouchableOpacity>
-)}
+                                              setAnswers((prev) => {
+                                                const arr = Array.isArray(
+                                                  prev[q.id]
+                                                )
+                                                  ? [...prev[q.id]]
+                                                  : [];
+                                                arr[idx] = serverFileName; // Guardar nombre del servidor
+                                                return { ...prev, [q.id]: arr };
+                                              });
+
+                                              Alert.alert(
+                                                "✅ Éxito",
+                                                `Archivo cargado: ${serverFileName}`
+                                              );
+                                            } catch (error) {
+                                              Alert.alert(
+                                                "Error",
+                                                "No se pudo cargar el archivo"
+                                              );
+                                            }
+                                          }
+                                        }
+                                      })();
+                                    }}
+                                  >
+                                    <Text style={styles.fileButtonText}>
+                                      {Array.isArray(answers[q.id]) &&
+                                      answers[q.id][idx]
+                                        ? "Archivo seleccionado ✓"
+                                        : "Subir archivo"}
+                                    </Text>
+                                  </TouchableOpacity>
+                                )}
                                 {q.question_type === "location" && (
                                   <>
                                     <TouchableOpacity
