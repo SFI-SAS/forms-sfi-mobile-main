@@ -35,7 +35,7 @@ const FirmField = ({
   onFirmSuccess,
   onFirmError,
   onValueChange,
-  apiUrl = "https://api-signfacial-safe.service.saferut.com",
+  apiUrl = "https://api-facialsafe.service.saferut.com",
   autoCloseDelay = 10000,
 }) => {
   // Estados principales

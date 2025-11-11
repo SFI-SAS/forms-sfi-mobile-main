@@ -2477,7 +2477,7 @@ export default function FormatScreen(props) {
                           disabled={submitting}
                           error={false}
                           documentHash={String(user?.hash || "")}
-                          apiUrl="https://api-signfacial-safe.service.saferut.com"
+                          apiUrl="https://api-facialsafe.service.saferut.com"
                           autoCloseDelay={10000}
                           onFirmSuccess={(data) => {
                             console.log(
@@ -2583,7 +2583,7 @@ export default function FormatScreen(props) {
                                 f.id === (selectedSigner[question.id] || "")
                             )?.hash || ""
                           )}
-                          apiUrl="https://api-signfacial-safe.service.saferut.com"
+                          apiUrl="https://api-facialsafe.service.saferut.com"
                           autoCloseDelay={10000}
                           onFirmSuccess={(data) => {
                             console.log(
@@ -3115,7 +3115,7 @@ export default function FormatScreen(props) {
                                             "")
                                       )?.hash || ""
                                     )}
-                                    apiUrl="https://api-signfacial-safe.service.saferut.com"
+                                    apiUrl="https://api-facialsafe.service.saferut.com"
                                     autoCloseDelay={10000}
                                     onFirmSuccess={(data) => {
                                       console.log(

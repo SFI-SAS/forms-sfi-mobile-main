@@ -1762,7 +1762,7 @@ export default function FormatScreen(props) {
                             facialUsers.find((f) => f.id === selectedUserId)
                               ?.hash || ""
                           )}
-                          apiUrl="https://api-signfacial-safe.service.saferut.com"
+                          apiUrl="https://api-facialsafe.service.saferut.com"
                           autoCloseDelay={10000}
                           onFirmSuccess={(data) => {
                             console.log(
@@ -2046,7 +2046,6 @@ export default function FormatScreen(props) {
                                           val
                                         )
                                       }
-                                      
                                       style={styles.picker}
                                     >
                                       <Picker.Item
