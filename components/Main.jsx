@@ -12,7 +12,7 @@ import {
   AppState,
   KeyboardAvoidingView,
   Platform,
-  ActivityIndicator
+  ActivityIndicator,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
@@ -22,6 +22,7 @@ import { useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { SvgXml } from "react-native-svg";
+import { getMultipleItems } from "../utils/asyncStorageHelper";
 
 const { width, height } = Dimensions.get("window");
 
@@ -90,13 +91,16 @@ export function Main() {
     }, [])
   );
 
-
-
   useEffect(() => {
     const checkToken = async () => {
       try {
-        const savedToken = await AsyncStorage.getItem("authToken");
-        const isLoggedOut = await AsyncStorage.getItem("isLoggedOut");
+        // ✅ Optimización: Cargar authToken y isLoggedOut en paralelo
+        const storageData = await getMultipleItems([
+          "authToken",
+          "isLoggedOut",
+        ]);
+        const savedToken = storageData["authToken"];
+        const isLoggedOut = storageData["isLoggedOut"];
 
         if (savedToken && isLoggedOut !== "true") {
           const backendUrlToUse = await getBackendUrl();
@@ -406,6 +410,7 @@ export function Main() {
               }}
               value={username}
               placeholder="name@company.com"
+              placeholderTextColor="#4B5563"
               keyboardType="email-address"
               style={[
                 styles.input,
@@ -428,6 +433,7 @@ export function Main() {
                 }}
                 value={password}
                 placeholder="••••••••"
+                placeholderTextColor="#4B5563"
                 secureTextEntry={!showPassword}
                 style={[
                   styles.input,
@@ -472,13 +478,12 @@ export function Main() {
                   Configure backend connection
                 </Text>
                 {showBackendError && (
-                  <Text style={styles.errorMessage}>
-                    {backendErrorMsg}
-                  </Text>
+                  <Text style={styles.errorMessage}>{backendErrorMsg}</Text>
                 )}
                 <TextInput
                   style={styles.modalInput}
                   placeholder="https://your-api-from-safemetrics.com"
+                  placeholderTextColor="#4B5563"
                   value={backendInput}
                   onChangeText={setBackendInput}
                   autoCapitalize="none"
@@ -524,7 +529,11 @@ export function Main() {
           >
             {signingIn ? (
               <View style={styles.signingInContainer}>
-                <ActivityIndicator size="small" color="#fff" style={{ marginRight: 10 }} />
+                <ActivityIndicator
+                  size="small"
+                  color="#fff"
+                  style={{ marginRight: 10 }}
+                />
                 <Text style={styles.buttonText}>Accediendo...</Text>
               </View>
             ) : (

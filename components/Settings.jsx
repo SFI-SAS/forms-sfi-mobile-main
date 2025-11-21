@@ -10,12 +10,14 @@ import {
   Appearance,
   useColorScheme,
   ScrollView,
+  Modal,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { MaterialIcons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import NetInfo from "@react-native-community/netinfo";
+import LogViewer from "./LogViewer"; // ✅ NUEVO: Importar LogViewer
 
 const BACKEND_URL_KEY = "backend_url";
 const USER_INFO_KEY = "user_info_offline";
@@ -34,10 +36,10 @@ export default function Settings() {
   const [theme, setTheme] = useState("light");
   const [loadingUserUpdate, setLoadingUserUpdate] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
+  const [showLogViewer, setShowLogViewer] = useState(false); // ✅ NUEVO: Estado para mostrar visor de logs
   const colorScheme = useColorScheme();
   const router = useRouter();
 
-  
   useEffect(() => {
     AsyncStorage.getItem(BACKEND_URL_KEY).then((url) => {
       setBackendUrl(url || "");
@@ -294,7 +296,7 @@ export default function Settings() {
               autoCapitalize="none"
               autoCorrect={false}
               placeholder="https://your-api-safemetrics.com"
-              placeholderTextColor="#B6B6D1"
+              placeholderTextColor="#4B5563"
             />
             <TouchableOpacity
               style={styles.checkButton}
@@ -364,7 +366,7 @@ export default function Settings() {
                 value={userDraft.name || ""}
                 onChangeText={(v) => setUserDraft((u) => ({ ...u, name: v }))}
                 placeholder="Name"
-                placeholderTextColor="#B6B6D1"
+                placeholderTextColor="#4B5563"
               />
               <Text style={styles.userLabel}>Document:</Text>
               <TextInput
@@ -374,7 +376,7 @@ export default function Settings() {
                   setUserDraft((u) => ({ ...u, num_document: v }))
                 }
                 placeholder="Document"
-                placeholderTextColor="#B6B6D1"
+                placeholderTextColor="#4B5563"
               />
               <Text style={styles.userLabel}>Phone:</Text>
               <TextInput
@@ -385,7 +387,7 @@ export default function Settings() {
                 }
                 keyboardType="phone-pad"
                 placeholder="Phone"
-                placeholderTextColor="#B6B6D1"
+                placeholderTextColor="#4B5563"
               />
               <View style={{ flexDirection: "row", marginTop: 10 }}>
                 <TouchableOpacity
@@ -454,7 +456,31 @@ export default function Settings() {
             </Text>
           </TouchableOpacity>
         </View>
+
+        {/* ✅ NUEVA SECCIÓN: Logs de Errores */}
+        <View style={styles.sectionBox}>
+          <Text style={styles.sectionTitle}>Logs de Errores 📋🔍</Text>
+          <Text style={styles.label}>
+            Ver, exportar y administrar logs de errores de la aplicación.
+          </Text>
+          <TouchableOpacity
+            style={styles.button}
+            onPress={() => setShowLogViewer(true)}
+          >
+            <Text style={styles.buttonText}>Ver Logs de Errores</Text>
+          </TouchableOpacity>
+        </View>
       </View>
+
+      {/* ✅ Modal para el visor de logs */}
+      <Modal
+        visible={showLogViewer}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setShowLogViewer(false)}
+      >
+        <LogViewer onClose={() => setShowLogViewer(false)} />
+      </Modal>
     </ScrollView>
   );
 }

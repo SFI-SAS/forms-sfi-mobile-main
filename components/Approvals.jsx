@@ -16,7 +16,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import { MaterialIcons } from "@expo/vector-icons";
 import NetInfo from "@react-native-community/netinfo";
 import { useRouter } from "expo-router";
-import ModalFormResponses from './ModalFormResponses';
+import ModalFormResponses from "./ModalFormResponses";
+import { getMultipleItems } from "../utils/asyncStorageHelper";
 
 const { width, height } = Dimensions.get("window");
 const APPROVALS_OFFLINE_KEY = "approvals_offline";
@@ -28,8 +29,8 @@ const getBackendUrl = async () => {
   return stored || "";
 };
 
-// Componente ApprovalRequirements
-const ApprovalRequirements = ({ requirements, onFillForm }) => {
+// ✅ Componente ApprovalRequirements optimizado con React.memo
+const ApprovalRequirements = React.memo(({ requirements, onFillForm }) => {
   return (
     <View style={styles.requirementsContainer}>
       <View style={styles.requirementsHeader}>
@@ -54,7 +55,11 @@ const ApprovalRequirements = ({ requirements, onFillForm }) => {
                 ]}
               >
                 {requirement.fulfillment_status.is_fulfilled ? (
-                  <MaterialIcons name="check-circle" size={20} color="#16a34a" />
+                  <MaterialIcons
+                    name="check-circle"
+                    size={20}
+                    color="#16a34a"
+                  />
                 ) : (
                   <MaterialIcons name="description" size={20} color="#6b7280" />
                 )}
@@ -73,7 +78,8 @@ const ApprovalRequirements = ({ requirements, onFillForm }) => {
                 {requirement.fulfillment_status.is_fulfilled && (
                   <Text style={styles.requirementCompletedDate}>
                     ✓ Completado:{" "}
-                    {requirement.fulfillment_status.fulfilling_response_submitted_at
+                    {requirement.fulfillment_status
+                      .fulfilling_response_submitted_at
                       ? new Date(
                           requirement.fulfillment_status.fulfilling_response_submitted_at
                         ).toLocaleDateString()
@@ -120,7 +126,7 @@ const ApprovalRequirements = ({ requirements, onFillForm }) => {
       </View>
     </View>
   );
-};
+});
 
 export default function Approvals() {
   const [forms, setForms] = useState([]);
@@ -130,12 +136,13 @@ export default function Approvals() {
   const [refreshing, setRefreshing] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const [pendingApprovalActions, setPendingApprovalActions] = useState([]);
-  
+
   // 📌 NUEVOS ESTADOS PARA EL MODAL
-  const [isFormResponsesModalOpen, setIsFormResponsesModalOpen] = useState(false);
+  const [isFormResponsesModalOpen, setIsFormResponsesModalOpen] =
+    useState(false);
   const [formStatusToView, setFormStatusToView] = useState(null);
   const [formResponsesToShow, setFormResponsesToShow] = useState([]);
-  
+
   const router = useRouter();
 
   useEffect(() => {
@@ -176,10 +183,7 @@ export default function Approvals() {
         const data = await res.json();
         console.log("🟢 Aprobaciones recibidas:", data);
         setForms(data || []);
-        await AsyncStorage.setItem(
-          APPROVALS_OFFLINE_KEY,
-          JSON.stringify(data)
-        );
+        await AsyncStorage.setItem(APPROVALS_OFFLINE_KEY, JSON.stringify(data));
 
         // Procesar grupos de formularios
         const pendingForms = data.filter(
@@ -338,7 +342,10 @@ export default function Approvals() {
       prev.map((group) => {
         if (group.key === groupKey) {
           let newIndex = group.currentIndex;
-          if (direction === "next" && group.currentIndex < group.forms.length - 1) {
+          if (
+            direction === "next" &&
+            group.currentIndex < group.forms.length - 1
+          ) {
             newIndex = group.currentIndex + 1;
           } else if (direction === "prev" && group.currentIndex > 0) {
             newIndex = group.currentIndex - 1;
@@ -382,16 +389,16 @@ export default function Approvals() {
     try {
       const token = await AsyncStorage.getItem("authToken");
       const backendUrl = await getBackendUrl();
-      
+
       // Aquí implementarías la lógica de descarga según tu backend
       Alert.alert("Descarga", `Descargando archivo: ${fileName}`);
-      
+
       // Ejemplo de implementación básica:
       // const response = await fetch(
       //   `${backendUrl}/responses/download-file/${fileName}`,
       //   { headers: { Authorization: `Bearer ${token}` } }
       // );
-      
+
       // Luego usar expo-file-system o similar para guardar el archivo
     } catch (error) {
       console.error("Error al descargar archivo:", error);
@@ -403,14 +410,24 @@ export default function Approvals() {
   const openFormResponsesModal = (status) => {
     setFormStatusToView(status);
     setFormResponsesToShow(
-      status === "approved" 
-        ? aprovedForms.filter((form) =>
-            form.form_title.toLowerCase().includes(searchText.toLowerCase()) ||
-            form.submitted_by?.name.toLowerCase().includes(searchText.toLowerCase())
+      status === "approved"
+        ? aprovedForms.filter(
+            (form) =>
+              form.form_title
+                .toLowerCase()
+                .includes(searchText.toLowerCase()) ||
+              form.submitted_by?.name
+                .toLowerCase()
+                .includes(searchText.toLowerCase())
           )
-        : noAprovedForms.filter((form) =>
-            form.form_title.toLowerCase().includes(searchText.toLowerCase()) ||
-            form.submitted_by?.name.toLowerCase().includes(searchText.toLowerCase())
+        : noAprovedForms.filter(
+            (form) =>
+              form.form_title
+                .toLowerCase()
+                .includes(searchText.toLowerCase()) ||
+              form.submitted_by?.name
+                .toLowerCase()
+                .includes(searchText.toLowerCase())
           )
     );
     setIsFormResponsesModalOpen(true);
@@ -500,7 +517,9 @@ export default function Approvals() {
                   name="refresh"
                   size={18}
                   color="#2563eb"
-                  style={{ transform: [{ rotate: loading ? "360deg" : "0deg" }] }}
+                  style={{
+                    transform: [{ rotate: loading ? "360deg" : "0deg" }],
+                  }}
                 />
                 <Text style={styles.updateButtonText}>Actualizar</Text>
               </TouchableOpacity>
@@ -543,14 +562,16 @@ export default function Approvals() {
             placeholder="Buscar por nombre del formato o usuario..."
             value={searchText}
             onChangeText={setSearchText}
-            placeholderTextColor="#9ca3af"
+            placeholderTextColor="#4B5563"
           />
         </View>
 
         {/* Estadísticas */}
         <View style={styles.statsContainer}>
           <View style={styles.statCard}>
-            <View style={[styles.statIconContainer, { backgroundColor: "#fef3c7" }]}>
+            <View
+              style={[styles.statIconContainer, { backgroundColor: "#fef3c7" }]}
+            >
               <MaterialIcons name="schedule" size={24} color="#f59e0b" />
             </View>
             <Text style={styles.statValue}>{totalPendingForms}</Text>
@@ -558,7 +579,9 @@ export default function Approvals() {
           </View>
 
           <View style={styles.statCard}>
-            <View style={[styles.statIconContainer, { backgroundColor: "#dcfce7" }]}>
+            <View
+              style={[styles.statIconContainer, { backgroundColor: "#dcfce7" }]}
+            >
               <MaterialIcons name="check-circle" size={24} color="#16a34a" />
             </View>
             <Text style={styles.statValue}>{aprovedForms.length}</Text>
@@ -566,7 +589,9 @@ export default function Approvals() {
           </View>
 
           <View style={styles.statCard}>
-            <View style={[styles.statIconContainer, { backgroundColor: "#fee2e2" }]}>
+            <View
+              style={[styles.statIconContainer, { backgroundColor: "#fee2e2" }]}
+            >
               <MaterialIcons name="cancel" size={24} color="#dc2626" />
             </View>
             <Text style={styles.statValue}>{noAprovedForms.length}</Text>
@@ -574,7 +599,9 @@ export default function Approvals() {
           </View>
 
           <View style={styles.statCard}>
-            <View style={[styles.statIconContainer, { backgroundColor: "#dbeafe" }]}>
+            <View
+              style={[styles.statIconContainer, { backgroundColor: "#dbeafe" }]}
+            >
               <MaterialIcons name="info" size={24} color="#2563eb" />
             </View>
             <Text style={styles.statValue}>{forms.length}</Text>
@@ -657,16 +684,25 @@ export default function Approvals() {
               );
 
               return (
-                <View key={`${group.key}-${group.currentIndex}`} style={styles.formCard}>
+                <View
+                  key={`${group.key}-${group.currentIndex}`}
+                  style={styles.formCard}
+                >
                   <View style={styles.formCardContent}>
                     <View style={styles.formHeader}>
-                      <Text style={styles.formTitle}>{currentForm.form_title}</Text>
+                      <Text style={styles.formTitle}>
+                        {currentForm.form_title}
+                      </Text>
 
                       {/* Indicador de múltiples respuestas */}
                       {group.forms.length > 1 && (
                         <View style={styles.multiResponseContainer}>
                           <View style={styles.multiResponseBadge}>
-                            <MaterialIcons name="tag" size={14} color="#2563eb" />
+                            <MaterialIcons
+                              name="tag"
+                              size={14}
+                              color="#2563eb"
+                            />
                             <Text style={styles.multiResponseText}>
                               {group.forms.length} respuestas
                             </Text>
@@ -675,18 +711,23 @@ export default function Approvals() {
                           {/* Navegador */}
                           <View style={styles.navigationContainer}>
                             <TouchableOpacity
-                              onPress={() => navigateResponse(group.key, "prev")}
+                              onPress={() =>
+                                navigateResponse(group.key, "prev")
+                              }
                               disabled={group.currentIndex === 0}
                               style={[
                                 styles.navButton,
-                                group.currentIndex === 0 && styles.navButtonDisabled,
+                                group.currentIndex === 0 &&
+                                  styles.navButtonDisabled,
                               ]}
                             >
                               <MaterialIcons
                                 name="chevron-left"
                                 size={18}
                                 color={
-                                  group.currentIndex === 0 ? "#d1d5db" : "#4b5563"
+                                  group.currentIndex === 0
+                                    ? "#d1d5db"
+                                    : "#4b5563"
                                 }
                               />
                             </TouchableOpacity>
@@ -698,7 +739,9 @@ export default function Approvals() {
                             </View>
 
                             <TouchableOpacity
-                              onPress={() => navigateResponse(group.key, "next")}
+                              onPress={() =>
+                                navigateResponse(group.key, "next")
+                              }
                               disabled={
                                 group.currentIndex === group.forms.length - 1
                               }
@@ -733,7 +776,9 @@ export default function Approvals() {
                       </Text>
                       <Text style={styles.formMetaItem}>
                         📅{" "}
-                        {new Date(currentForm.submitted_at).toLocaleDateString()}
+                        {new Date(
+                          currentForm.submitted_at
+                        ).toLocaleDateString()}
                       </Text>
                       <Text style={styles.formMetaItem}>
                         🆔 Respuesta #{currentForm.response_id}
@@ -748,10 +793,10 @@ export default function Approvals() {
                           vencido
                             ? styles.deadlineVencido
                             : diasRestantes === 0
-                            ? styles.deadlineHoy
-                            : diasRestantes <= 2
-                            ? styles.deadlineProximo
-                            : styles.deadlineNormal,
+                              ? styles.deadlineHoy
+                              : diasRestantes <= 2
+                                ? styles.deadlineProximo
+                                : styles.deadlineNormal,
                         ]}
                       >
                         <Text style={styles.deadlineBadgeText}>
@@ -760,10 +805,10 @@ export default function Approvals() {
                                 diasPasados - currentForm.deadline_days
                               } día(s)`
                             : diasRestantes === 0
-                            ? "⏰ Vence hoy"
-                            : diasRestantes <= 2
-                            ? `⚠️ ${diasRestantes} día(s) restantes`
-                            : `⏳ ${diasRestantes} días restantes`}
+                              ? "⏰ Vence hoy"
+                              : diasRestantes <= 2
+                                ? `⚠️ ${diasRestantes} día(s) restantes`
+                                : `⏳ ${diasRestantes} días restantes`}
                         </Text>
                       </View>
                     )}
@@ -774,7 +819,9 @@ export default function Approvals() {
                       onPress={() => handleViewDetail(group)}
                     >
                       <MaterialIcons name="visibility" size={18} color="#fff" />
-                      <Text style={styles.viewDetailButtonText}>Ver detalle</Text>
+                      <Text style={styles.viewDetailButtonText}>
+                        Ver detalle
+                      </Text>
                     </TouchableOpacity>
 
                     {/* Cadena de aprobación */}
@@ -791,13 +838,13 @@ export default function Approvals() {
                               approver.status === "aprobado"
                                 ? styles.approverApproved
                                 : approver.status === "rechazado"
-                                ? styles.approverRejected
-                                : styles.approverPending,
+                                  ? styles.approverRejected
+                                  : styles.approverPending,
                             ]}
                           >
                             <Text style={styles.approverBadgeText}>
-                              #{approver.sequence_number} {approver.user?.name} •{" "}
-                              {approver.status}
+                              #{approver.sequence_number} {approver.user?.name}{" "}
+                              • {approver.status}
                               {approver.is_mandatory && " (Obligatorio)"}
                             </Text>
                           </View>

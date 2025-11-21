@@ -1,84 +1,109 @@
 import { Stack, useRouter, useSegments } from "expo-router";
 import { View, StyleSheet } from "react-native";
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Logo } from "../components/Logo";
 import React, { useState, useEffect } from "react";
-import BottomTabBar from "../components/BottomTabBar";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-
-const INACTIVITY_TIMEOUT = 10 * 60 * 1000; // 10 minutos
-const TAB_BAR_HEIGHT = 15; // Ajusta según la altura real de tu BottomTabBar
+import NetInfo from "@react-native-community/netinfo";
+import DrawerNavigator from "../components/DrawerNavigator";
+import HamburgerButton from "../components/HamburgerButton";
 
 export default function Layout() {
   const router = useRouter();
   const segments = useSegments();
-  const [activeTab, setActiveTab] = useState("home");
+  const [activeRoute, setActiveRoute] = useState("home");
+  const [drawerVisible, setDrawerVisible] = useState(false);
+  const [userInfo, setUserInfo] = useState(null);
+  const [isOffline, setIsOffline] = useState(false);
   const insets = useSafeAreaInsets();
 
-  // Detecta la ruta actual para mantener el tab activo
+  // Cargar info del usuario
+  useEffect(() => {
+    loadUserInfo();
+  }, []);
+
+  // Detectar estado de conexión
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      setIsOffline(!state.isConnected);
+    });
+
+    // Check inicial
+    NetInfo.fetch().then((state) => {
+      setIsOffline(!state.isConnected);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const loadUserInfo = async () => {
+    try {
+      const stored = await AsyncStorage.getItem("user_info_offline");
+      if (stored) {
+        setUserInfo(JSON.parse(stored));
+      }
+    } catch (error) {
+      console.error("Error loading user info:", error);
+    }
+  };
+
+  // Detecta la ruta actual para mantener activa
   useEffect(() => {
     const path = segments.join("/");
-    if (path.includes("my-forms")) setActiveTab("my-forms");
-    else if (path.includes("pending-forms")) setActiveTab("pending-forms");
-    else if (path === "" || path.includes("home")) setActiveTab("home");
+    if (path.includes("my-forms")) setActiveRoute("my-forms");
+    else if (path.includes("pending-forms")) setActiveRoute("pending-forms");
+    else if (path.includes("approvals")) setActiveRoute("approvals");
+    else if (path.includes("settings")) setActiveRoute("settings");
+    else if (path === "" || path.includes("home")) setActiveRoute("home");
   }, [segments]);
 
-  // Maneja la navegación global desde la tab-bar
-  const handleTabPress = async (tab) => {
-    setActiveTab(tab);
-    if (tab === "home") router.replace("/home");
-    if (tab === "my-forms") router.replace("/my-forms");
-    if (tab === "pending-forms") router.replace("/pending-forms");
-    if (tab === "approvals") router.replace("/approvals");
-    if (tab === "settings") router.replace("/settings");
-    if (tab === "logout") {
+  // Maneja la navegación desde el drawer
+  const handleNavigate = async (route, routeId) => {
+    if (route === "logout") {
       // Limpia token y marca sesión cerrada
       await AsyncStorage.setItem("isLoggedOut", "true");
       await AsyncStorage.removeItem("authToken");
       router.replace("/");
+    } else {
+      if (routeId) setActiveRoute(routeId);
+      router.replace(route);
     }
   };
 
-  // ✅ MODIFICACIÓN: Agregar condición para ocultar en format-screen
+  // Determina si mostrar el botón hamburguesa
   const currentPath = segments.join("/");
-  const isFormatScreen = currentPath.includes("format-screen");
-
-  // Solo muestra la tab-bar si NO estamos en login NI en format-screen
-  const showTabBar =
-    !segments.includes("main") &&
-    segments[0] !== "" &&
-    segments[0] !== undefined &&
-    segments[0] !== null &&
-    segments[0] !== "/" &&
-    segments.join("/") !== "" &&
-    segments.join("/") !== "main" &&
-    !isFormatScreen; // ✅ LÍNEA AGREGADA
+  const isLoginScreen =
+    segments.includes("main") || currentPath === "" || currentPath === "/";
+  const showHamburger = !isLoginScreen;
 
   return (
     <View style={styles.container}>
-      <View 
-        style={[
-          styles.content,
-          {
-            paddingBottom: showTabBar ? TAB_BAR_HEIGHT + insets.bottom : insets.bottom
-          }
-        ]}
-      >
-        <Stack
-          screenOptions={{
-            headerStyle: { backgroundColor: "white" },
-            headerTintColor: "black",
-            headerTitle: () => <Logo />,
-            headerTitleAlign: "center",
-            headerBackVisible: false,
-          }}
-        />
-      </View>
-      {showTabBar && (
-        <View style={[styles.tabBarContainer, { paddingBottom: insets.bottom }]}>
-          <BottomTabBar activeTab={activeTab} onTabPress={handleTabPress} />
-        </View>
-      )}
+      <Stack
+        screenOptions={{
+          headerStyle: { backgroundColor: "white" },
+          headerTintColor: "black",
+          headerTitle: () => <Logo />,
+          headerTitleAlign: "center",
+          headerBackVisible: false,
+          headerLeft: () =>
+            showHamburger ? (
+              <HamburgerButton
+                onPress={() => setDrawerVisible(true)}
+                color="#12A0AF"
+              />
+            ) : null,
+        }}
+      />
+
+      {/* Drawer Navigator */}
+      <DrawerNavigator
+        visible={drawerVisible}
+        onClose={() => setDrawerVisible(false)}
+        activeRoute={activeRoute}
+        onNavigate={handleNavigate}
+        userInfo={userInfo}
+        isOffline={isOffline}
+      />
     </View>
   );
 }
@@ -86,23 +111,6 @@ export default function Layout() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: 'white',
-  },
-  content: {
-    flex: 1,
-  },
-  tabBarContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'white',
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-    elevation: 10,
-    shadowOffset: { width: 0, height: -2 },
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    backgroundColor: "white",
   },
 });

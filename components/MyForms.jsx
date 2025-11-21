@@ -719,7 +719,7 @@ export default function MyForms() {
               style={styles.modalInput}
               multiline
               placeholder="Enter your reason here..."
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor="#4B5563"
               value={reconsiderModal.message}
               onChangeText={(text) =>
                 setReconsiderModal((prev) => ({ ...prev, message: text }))

@@ -2822,6 +2822,7 @@ export default function FormatScreen(props) {
                                         (q.props && q.props.placeholder) ||
                                         "Escribe tu respuesta"
                                       }
+                                      placeholderTextColor="#4B5563"
                                       value={
                                         (textAnswers[q.id] &&
                                           textAnswers[q.id][idx]) ||
@@ -2843,6 +2844,7 @@ export default function FormatScreen(props) {
                                           (q.props && q.props.placeholder) ||
                                           "Buscar opción..."
                                         }
+                                        placeholderTextColor="#4B5563"
                                         value={
                                           pickerSearch[`${q.id}_${idx}`] || ""
                                         }
@@ -2911,6 +2913,7 @@ export default function FormatScreen(props) {
                                       (q.props && q.props.placeholder) ||
                                       "Escribe un número"
                                     }
+                                    placeholderTextColor="#4B5563"
                                     keyboardType="numeric"
                                     value={
                                       (Array.isArray(answers[q.id]) &&
