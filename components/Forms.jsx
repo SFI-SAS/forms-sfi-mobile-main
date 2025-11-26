@@ -43,8 +43,8 @@ const getBackendUrl = async () => {
   return stored || "";
 };
 
-// Tarjeta de formulario
-const FormCard = ({ form, onPress }) => (
+// Tarjeta de formulario - Memoizada para evitar re-renders
+const FormCard = React.memo(({ form, onPress }) => (
   <TouchableOpacity
     style={styles.formCard}
     onPress={onPress}
@@ -64,36 +64,38 @@ const FormCard = ({ form, onPress }) => (
       {form.description}
     </Text>
   </TouchableOpacity>
-);
+));
 
-// Componente para categorías
-const CategoryCard = ({ category, onToggle, isExpanded, onFormPress }) => (
-  <View style={styles.categoryContainer}>
-    <TouchableOpacity
-      style={styles.categoryHeader}
-      onPress={onToggle}
-      activeOpacity={0.8}
-    >
-      <View style={styles.categoryTitleContainer}>
-        <Text style={styles.categoryTitle}>{category.name}</Text>
-        <Text style={styles.categoryCount}>
-          ({category.forms.length} formato
-          {category.forms.length !== 1 ? "s" : ""})
-        </Text>
-      </View>
-      <Text style={styles.expandIcon}>{isExpanded ? "▼" : "▶"}</Text>
-    </TouchableOpacity>
+// Componente para categorías - Memoizado para evitar re-renders
+const CategoryCard = React.memo(
+  ({ category, onToggle, isExpanded, onFormPress }) => (
+    <View style={styles.categoryContainer}>
+      <TouchableOpacity
+        style={styles.categoryHeader}
+        onPress={onToggle}
+        activeOpacity={0.8}
+      >
+        <View style={styles.categoryTitleContainer}>
+          <Text style={styles.categoryTitle}>{category.name}</Text>
+          <Text style={styles.categoryCount}>
+            ({category.forms.length} formato
+            {category.forms.length !== 1 ? "s" : ""})
+          </Text>
+        </View>
+        <Text style={styles.expandIcon}>{isExpanded ? "▼" : "▶"}</Text>
+      </TouchableOpacity>
 
-    {isExpanded && (
-      <View style={styles.formsInCategory}>
-        {category.forms.map((form) => (
-          <View key={form.id} style={styles.formCardWrapper}>
-            <FormCard form={form} onPress={() => onFormPress(form)} />
-          </View>
-        ))}
-      </View>
-    )}
-  </View>
+      {isExpanded && (
+        <View style={styles.formsInCategory}>
+          {category.forms.map((form) => (
+            <View key={form.id} style={styles.formCardWrapper}>
+              <FormCard form={form} onPress={() => onFormPress(form)} />
+            </View>
+          ))}
+        </View>
+      )}
+    </View>
+  )
 );
 
 export default function Forms() {
@@ -267,19 +269,25 @@ export default function Forms() {
     outputRange: ["0deg", "360deg"],
   });
 
-  // Filtrar formularios por búsqueda
+  // Filtrar formularios por búsqueda con debounce
   useEffect(() => {
     if (searchText.trim() === "") {
       setSearchResults([]);
       return;
     }
-    const text = searchText.trim().toLowerCase();
-    const results = userForms.filter(
-      (form) =>
-        (form.title && form.title.toLowerCase().includes(text)) ||
-        (form.description && form.description.toLowerCase().includes(text))
-    );
-    setSearchResults(results);
+
+    // Debounce: esperar 300ms después del último keystroke
+    const timeoutId = setTimeout(() => {
+      const text = searchText.trim().toLowerCase();
+      const results = userForms.filter(
+        (form) =>
+          (form.title && form.title.toLowerCase().includes(text)) ||
+          (form.description && form.description.toLowerCase().includes(text))
+      );
+      setSearchResults(results);
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
   }, [searchText, userForms]);
 
   return (

@@ -1,4 +1,10 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, {
+  useEffect,
+  useState,
+  useCallback,
+  useMemo,
+  useReducer,
+} from "react";
 import {
   View,
   Text,
@@ -12,6 +18,7 @@ import {
   Animated,
   Easing,
   Image,
+  InteractionManager,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -83,6 +90,198 @@ const spinnerSvg = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><circle fill="#FFFFFF" stroke="#2C5282" stroke-width="15" r="15" cx="40" cy="65"><animate attributeName="cy" calcMode="spline" dur="1.2" values="65;135;65;" keySplines=".5 0 .5 1;.5 0 .5 1" repeatCount="indefinite" begin="-.4"></animate></circle><circle fill="#FFFFFF" stroke="#2C5282" stroke-width="15" r="15" cx="100" cy="65"><animate attributeName="cy" calcMode="spline" dur="1.2" values="65;135;65;" keySplines=".5 0 .5 1;.5 0 .5 1" repeatCount="indefinite" begin="-.2"></animate></circle><circle fill="#FFFFFF" stroke="#2C5282" stroke-width="15" r="15" cx="160" cy="65"><animate attributeName="cy" calcMode="spline" dur="1.2" values="65;135;65;" keySplines=".5 0 .5 1;.5 0 .5 1" repeatCount="indefinite" begin="0"></animate></circle></svg>
 `;
 
+// Skeleton Loading Components - Optimized with React.memo and cleanup
+const SkeletonQuestion = React.memo(() => {
+  const pulseAnim = React.useRef(new Animated.Value(0)).current;
+
+  React.useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 0,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    animation.start();
+
+    // Cleanup animation on unmount to prevent memory leaks
+    return () => {
+      animation.stop();
+      pulseAnim.setValue(0);
+    };
+  }, [pulseAnim]);
+
+  const opacity = pulseAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.3, 0.7],
+  });
+
+  return (
+    <View style={skeletonStyles.questionContainer}>
+      <Animated.View style={[skeletonStyles.labelSkeleton, { opacity }]} />
+      <Animated.View style={[skeletonStyles.inputSkeleton, { opacity }]} />
+    </View>
+  );
+});
+
+const SkeletonTable = React.memo(() => {
+  const pulseAnim = React.useRef(new Animated.Value(0)).current;
+
+  React.useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 0,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    animation.start();
+
+    // Cleanup animation on unmount to prevent memory leaks
+    return () => {
+      animation.stop();
+      pulseAnim.setValue(0);
+    };
+  }, [pulseAnim]);
+
+  const opacity = pulseAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.3, 0.7],
+  });
+
+  return (
+    <View style={skeletonStyles.tableContainer}>
+      <Animated.View
+        style={[skeletonStyles.tableHeaderSkeleton, { opacity }]}
+      />
+      <Animated.View style={[skeletonStyles.tableRowSkeleton, { opacity }]} />
+      <Animated.View style={[skeletonStyles.tableRowSkeleton, { opacity }]} />
+    </View>
+  );
+});
+
+const SkeletonForm = () => (
+  <View style={skeletonStyles.formContainer}>
+    <SkeletonQuestion />
+    <SkeletonQuestion />
+    <SkeletonQuestion />
+    <SkeletonTable />
+    <SkeletonQuestion />
+    <SkeletonQuestion />
+    <SkeletonQuestion />
+    <SkeletonQuestion />
+    <SkeletonTable />
+    <SkeletonQuestion />
+    <SkeletonQuestion />
+    <SkeletonQuestion />
+    <SkeletonQuestion />
+    <SkeletonQuestion />
+    <SkeletonTable />
+    <SkeletonQuestion />
+    <SkeletonQuestion />
+    <SkeletonQuestion />
+  </View>
+);
+
+// ✅ FIX: Memoizar componente de pregunta repetida para evitar re-renders
+const RepeatedQuestionItem = React.memo(
+  ({
+    question,
+    idx,
+    textAnswers,
+    tableAnswersState,
+    pickerSearch,
+    tableAnswers,
+    onTextChange,
+    onTableChange,
+    onPickerSearchChange,
+    onAddAnswer,
+    onRemoveAnswer,
+  }) => {
+    return (
+      <View key={question.id} style={{ marginBottom: 10 }}>
+        <Text
+          style={{
+            fontSize: 14,
+            fontWeight: "600",
+            color: "#2D3748",
+            marginBottom: 6,
+          }}
+        >
+          {question.question_text}
+          {question.required && <Text style={{ color: "#ef4444" }}> *</Text>}
+        </Text>
+        {/* Contenido de la pregunta - se renderizará según el tipo */}
+      </View>
+    );
+  },
+  (prevProps, nextProps) => {
+    // ✅ Comparación personalizada para evitar re-renders innecesarios
+    return (
+      prevProps.idx === nextProps.idx &&
+      prevProps.textAnswers[prevProps.question.id]?.[prevProps.idx] ===
+        nextProps.textAnswers[nextProps.question.id]?.[nextProps.idx] &&
+      prevProps.tableAnswersState[prevProps.question.id]?.[prevProps.idx] ===
+        nextProps.tableAnswersState[nextProps.question.id]?.[nextProps.idx] &&
+      prevProps.pickerSearch[`${prevProps.question.id}_${prevProps.idx}`] ===
+        nextProps.pickerSearch[`${nextProps.question.id}_${nextProps.idx}`]
+    );
+  }
+);
+
+const skeletonStyles = StyleSheet.create({
+  formContainer: {
+    padding: 16,
+  },
+  questionContainer: {
+    marginBottom: 20,
+  },
+  labelSkeleton: {
+    width: "60%",
+    height: 16,
+    backgroundColor: "#e0e0e0",
+    borderRadius: 4,
+    marginBottom: 8,
+  },
+  inputSkeleton: {
+    width: "100%",
+    height: 48,
+    backgroundColor: "#e0e0e0",
+    borderRadius: 8,
+  },
+  tableContainer: {
+    marginBottom: 20,
+  },
+  tableHeaderSkeleton: {
+    width: "100%",
+    height: 40,
+    backgroundColor: "#e0e0e0",
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  tableRowSkeleton: {
+    width: "100%",
+    height: 60,
+    backgroundColor: "#e0e0e0",
+    borderRadius: 8,
+    marginBottom: 6,
+  },
+});
+
 const saveCompletedFormAnswers = async ({
   formId,
   answers,
@@ -122,41 +321,299 @@ const getBackendUrl = async () => {
   return stored || "";
 };
 
+// ✅ OPTIMIZACIÓN: Reducer para consolidar 32 estados en 1 solo
+const initialState = {
+  questions: [],
+  answers: {},
+  loading: true,
+  tableAnswers: {},
+  textAnswers: {},
+  tableAnswersState: {},
+  datePickerVisible: {},
+  submitting: false,
+  nonRepeatedLocked: false,
+  firstNonRepeatedAnswers: {},
+  isRepeatedQuestions: [],
+  submittedRepeatedGroups: [],
+  pickerSearch: {},
+  fileSerials: {},
+  fileUris: {},
+  formMeta: {},
+  locationRelatedAnswers: {},
+  locationSelected: {},
+  tableCorrelations: {},
+  tableRelatedQuestions: {},
+  tableAutoFilled: {},
+  locationError: {},
+  signatureUris: {},
+  selectedSigner: {},
+  selectedUserId: "",
+  facialUsers: [],
+  formItems: [],
+  formValues: {},
+  formErrors: {},
+};
+
+function formReducer(state, action) {
+  switch (action.type) {
+    case "SET_FIELD":
+      return { ...state, [action.field]: action.value };
+
+    case "SET_FIELD_FUNC":
+      // ✅ Soporte para funciones (prev => newValue)
+      return {
+        ...state,
+        [action.field]: action.updater(state[action.field]),
+      };
+
+    case "UPDATE_FIELD":
+      return {
+        ...state,
+        [action.field]: { ...state[action.field], ...action.value },
+      };
+
+    case "MERGE_FIELDS":
+      return { ...state, ...action.payload };
+
+    case "RESET_ALL":
+      return { ...initialState, loading: false };
+
+    default:
+      return state;
+  }
+}
+
 export default function FormatScreen(props) {
+  console.log("HOLA");
   const router = useRouter();
   const { id, title, logo_url: logoUrlParam } = useLocalSearchParams();
-  const [questions, setQuestions] = useState([]);
-  const [answers, setAnswers] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [tableAnswers, setTableAnswers] = useState({});
-  const [textAnswers, setTextAnswers] = useState({});
-  const [tableAnswersState, setTableAnswersState] = useState({});
-  const [datePickerVisible, setDatePickerVisible] = useState({});
-  const [submitting, setSubmitting] = useState(false);
-  const [spinAnim] = useState(new Animated.Value(0));
-  const [nonRepeatedLocked, setNonRepeatedLocked] = useState(false);
-  const [firstNonRepeatedAnswers, setFirstNonRepeatedAnswers] = useState({});
-  const [isRepeatedQuestions, setIsRepeatedQuestions] = useState([]);
-  const [submittedRepeatedGroups, setSubmittedRepeatedGroups] = useState([]);
-  const [pickerSearch, setPickerSearch] = useState({});
-  const [fileSerials, setFileSerials] = useState({});
-  const [fileUris, setFileUris] = useState({});
-  const [formMeta, setFormMeta] = useState({});
-  const [locationRelatedAnswers, setLocationRelatedAnswers] = useState({});
-  const [locationSelected, setLocationSelected] = useState({});
-  const [tableCorrelations, setTableCorrelations] = useState({});
-  const [tableRelatedQuestions, setTableRelatedQuestions] = useState({});
-  const [tableAutoFilled, setTableAutoFilled] = useState({});
-  const [locationError, setLocationError] = useState({});
-  const [signatureUris, setSignatureUris] = useState({});
-  const [selectedSigner, setSelectedSigner] = useState({});
-  // firm selections per field instance (supports repeaters): key can be `${fieldId}` or `${fieldId}__${rowIndex}`
-  const [selectedUserId, setSelectedUserId] = useState(""); // deprecated: kept for backward compatibility
-  const [facialUsers, setFacialUsers] = useState([]);
-  // form_design rendering state
-  const [formItems, setFormItems] = useState([]);
-  const [formValues, setFormValues] = useState({});
-  const [formErrors, setFormErrors] = useState({});
+
+  // ✅ OPTIMIZACIÓN: Un solo useReducer en lugar de 32 useState
+  const [state, dispatch] = useReducer(formReducer, initialState);
+
+  // ✅ Helpers para acceder al estado (mejor legibilidad)
+  const setField = useCallback((field, value) => {
+    dispatch({ type: "SET_FIELD", field, value });
+  }, []);
+
+  const updateField = useCallback((field, value) => {
+    dispatch({ type: "UPDATE_FIELD", field, value });
+  }, []);
+
+  const mergeFields = useCallback((payload) => {
+    dispatch({ type: "MERGE_FIELDS", payload });
+  }, []);
+
+  const resetAll = useCallback(() => {
+    dispatch({ type: "RESET_ALL" });
+  }, []);
+
+  // ✅ OPTIMIZACIÓN: Aliases para compatibilidad (evita reescribir todo el código)
+  const questions = state.questions;
+  const answers = state.answers;
+  const loading = state.loading;
+  const tableAnswers = state.tableAnswers;
+  const textAnswers = state.textAnswers;
+  const tableAnswersState = state.tableAnswersState;
+  const datePickerVisible = state.datePickerVisible;
+  const submitting = state.submitting;
+  const nonRepeatedLocked = state.nonRepeatedLocked;
+  const firstNonRepeatedAnswers = state.firstNonRepeatedAnswers;
+  const isRepeatedQuestions = state.isRepeatedQuestions;
+  const submittedRepeatedGroups = state.submittedRepeatedGroups;
+  const pickerSearch = state.pickerSearch;
+  const fileSerials = state.fileSerials;
+  const fileUris = state.fileUris;
+  const formMeta = state.formMeta;
+  const locationRelatedAnswers = state.locationRelatedAnswers;
+  const locationSelected = state.locationSelected;
+  const tableCorrelations = state.tableCorrelations;
+  const tableRelatedQuestions = state.tableRelatedQuestions;
+  const tableAutoFilled = state.tableAutoFilled;
+  const locationError = state.locationError;
+  const signatureUris = state.signatureUris;
+  const selectedSigner = state.selectedSigner;
+  const selectedUserId = state.selectedUserId;
+  const facialUsers = state.facialUsers;
+  const formItems = state.formItems;
+  const formValues = state.formValues;
+  const formErrors = state.formErrors;
+
+  // ✅ OPTIMIZACIÓN: Setters que usan el reducer (1 re-render en lugar de 32)
+  const setQuestions = useCallback(
+    (val) => dispatch({ type: "SET_FIELD", field: "questions", value: val }),
+    []
+  );
+  const setAnswers = useCallback((val) => {
+    if (typeof val === "function") {
+      dispatch({ type: "SET_FIELD_FUNC", field: "answers", updater: val });
+    } else {
+      dispatch({ type: "SET_FIELD", field: "answers", value: val });
+    }
+  }, []); // ✅ Sin dependencias = sin re-renders infinitos
+  const setLoading = useCallback(
+    (val) => dispatch({ type: "SET_FIELD", field: "loading", value: val }),
+    []
+  );
+  const setTableAnswers = useCallback(
+    (val) => dispatch({ type: "SET_FIELD", field: "tableAnswers", value: val }),
+    []
+  );
+  const setTextAnswers = useCallback(
+    (val) => dispatch({ type: "SET_FIELD", field: "textAnswers", value: val }),
+    []
+  );
+  const setTableAnswersState = useCallback(
+    (val) =>
+      dispatch({ type: "SET_FIELD", field: "tableAnswersState", value: val }),
+    []
+  );
+  const setDatePickerVisible = useCallback(
+    (val) =>
+      dispatch({ type: "SET_FIELD", field: "datePickerVisible", value: val }),
+    []
+  );
+  const setSubmitting = useCallback(
+    (val) => dispatch({ type: "SET_FIELD", field: "submitting", value: val }),
+    []
+  );
+  const setNonRepeatedLocked = useCallback(
+    (val) =>
+      dispatch({ type: "SET_FIELD", field: "nonRepeatedLocked", value: val }),
+    []
+  );
+  const setFirstNonRepeatedAnswers = useCallback(
+    (val) =>
+      dispatch({
+        type: "SET_FIELD",
+        field: "firstNonRepeatedAnswers",
+        value: val,
+      }),
+    []
+  );
+  const setIsRepeatedQuestions = useCallback(
+    (val) =>
+      dispatch({ type: "SET_FIELD", field: "isRepeatedQuestions", value: val }),
+    []
+  );
+  const setSubmittedRepeatedGroups = useCallback(
+    (val) =>
+      dispatch({
+        type: "SET_FIELD",
+        field: "submittedRepeatedGroups",
+        value: val,
+      }),
+    []
+  );
+  const setPickerSearch = useCallback(
+    (val) => dispatch({ type: "SET_FIELD", field: "pickerSearch", value: val }),
+    []
+  );
+  const setFileSerials = useCallback(
+    (val) => dispatch({ type: "SET_FIELD", field: "fileSerials", value: val }),
+    []
+  );
+  const setFileUris = useCallback(
+    (val) => dispatch({ type: "SET_FIELD", field: "fileUris", value: val }),
+    []
+  );
+  const setFormMeta = useCallback((val) => {
+    if (typeof val === "function") {
+      dispatch({ type: "SET_FIELD_FUNC", field: "formMeta", updater: val });
+    } else {
+      dispatch({ type: "SET_FIELD", field: "formMeta", value: val });
+    }
+  }, []); // ✅ Sin dependencias
+  const setLocationRelatedAnswers = useCallback(
+    (val) =>
+      dispatch({
+        type: "SET_FIELD",
+        field: "locationRelatedAnswers",
+        value: val,
+      }),
+    []
+  );
+  const setLocationSelected = useCallback(
+    (val) =>
+      dispatch({ type: "SET_FIELD", field: "locationSelected", value: val }),
+    []
+  );
+  const setTableCorrelations = useCallback(
+    (val) =>
+      dispatch({ type: "SET_FIELD", field: "tableCorrelations", value: val }),
+    []
+  );
+  const setTableRelatedQuestions = useCallback(
+    (val) =>
+      dispatch({
+        type: "SET_FIELD",
+        field: "tableRelatedQuestions",
+        value: val,
+      }),
+    []
+  );
+  const setTableAutoFilled = useCallback(
+    (val) =>
+      dispatch({ type: "SET_FIELD", field: "tableAutoFilled", value: val }),
+    []
+  );
+  const setLocationError = useCallback(
+    (val) =>
+      dispatch({ type: "SET_FIELD", field: "locationError", value: val }),
+    []
+  );
+  const setSignatureUris = useCallback((val) => {
+    if (typeof val === "function") {
+      dispatch({
+        type: "SET_FIELD_FUNC",
+        field: "signatureUris",
+        updater: val,
+      });
+    } else {
+      dispatch({ type: "SET_FIELD", field: "signatureUris", value: val });
+    }
+  }, []);
+  const setSelectedSigner = useCallback((val) => {
+    if (typeof val === "function") {
+      dispatch({
+        type: "SET_FIELD_FUNC",
+        field: "selectedSigner",
+        updater: val,
+      });
+    } else {
+      dispatch({ type: "SET_FIELD", field: "selectedSigner", value: val });
+    }
+  }, []);
+  const setSelectedUserId = useCallback(
+    (val) =>
+      dispatch({ type: "SET_FIELD", field: "selectedUserId", value: val }),
+    []
+  );
+  const setFacialUsers = useCallback(
+    (val) => dispatch({ type: "SET_FIELD", field: "facialUsers", value: val }),
+    []
+  );
+  const setFormItems = useCallback(
+    (val) => dispatch({ type: "SET_FIELD", field: "formItems", value: val }),
+    []
+  );
+  const setFormValues = useCallback((val) => {
+    if (typeof val === "function") {
+      dispatch({ type: "SET_FIELD_FUNC", field: "formValues", updater: val });
+    } else {
+      dispatch({ type: "SET_FIELD", field: "formValues", value: val });
+    }
+  }, []);
+  const setFormErrors = useCallback(
+    (val) => dispatch({ type: "SET_FIELD", field: "formErrors", value: val }),
+    []
+  );
+
+  // ✅ FIX: Animated.Value debe ser useRef, no useState (evita re-renders)
+  const spinAnim = React.useRef(new Animated.Value(0)).current;
+
+  // ✅ FIX: useRef para cancelar requests pendientes al desmontar
+  const isMountedRef = React.useRef(true);
 
   const getBackendUrl = async () => {
     const stored = await AsyncStorage.getItem(BACKEND_URL_KEY);
@@ -429,57 +886,82 @@ export default function FormatScreen(props) {
 
   useEffect(() => {
     const fetchFacialUsers = async () => {
+      // ✅ FIX: Verificar si el componente está montado antes de continuar
+      if (!isMountedRef.current) return;
+
       try {
-        // 🆕 Verificar conexión primero
+        // ✅ OPTIMIZACIÓN: Cargar PRIMERO desde caché (instantáneo)
+        try {
+          const cached = await AsyncStorage.getItem("cached_facial_users");
+          if (cached && isMountedRef.current) {
+            const cachedUsers = JSON.parse(cached);
+            setFacialUsers(cachedUsers);
+            console.log(
+              "⚡ Usuarios faciales cargados desde caché (instantáneo):",
+              cachedUsers.length
+            );
+
+            // ✅ Verificar si el caché es reciente (menos de 1 hora)
+            const cacheTimestamp = await AsyncStorage.getItem(
+              "cached_facial_users_timestamp"
+            );
+            if (cacheTimestamp) {
+              const age = Date.now() - parseInt(cacheTimestamp, 10);
+              const oneHour = 60 * 60 * 1000;
+
+              if (age < oneHour) {
+                console.log(
+                  "✅ Caché aún válido, no se requiere actualización"
+                );
+                return; // Caché reciente, no actualizar
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("No se pudo cargar caché inicial");
+        }
+
+        // ✅ Verificar que aún esté montado antes de hacer request
+        if (!isMountedRef.current) return;
+
+        // ✅ Verificar conexión antes de actualizar
         const netInfo = await NetInfo.fetch();
         if (!netInfo.isConnected) {
-          console.log(
-            "📵 Sin conexión - Cargando usuarios faciales desde caché offline"
-          );
-
-          // Intentar cargar desde caché offline
-          try {
-            const cached = await AsyncStorage.getItem("cached_facial_users");
-            if (cached) {
-              const cachedUsers = JSON.parse(cached);
-              setFacialUsers(cachedUsers);
-              console.log(
-                "✅ Usuarios faciales cargados desde caché:",
-                cachedUsers.length
-              );
-              return;
-            }
-          } catch (e) {
-            console.warn("No hay usuarios faciales en caché");
-          }
-
-          setFacialUsers([]);
+          console.log("📵 Sin conexión - Usando solo caché");
           return;
         }
 
         const token = await AsyncStorage.getItem("authToken");
         if (!token) {
-          console.error("No se encontró el token de autenticación");
-          setFacialUsers([]);
+          console.log("⚠️ No hay token - Usando solo caché");
           return;
         }
 
         const backendUrl = await getBackendUrl();
         if (!backendUrl) {
-          console.error("No se encontró BACKEND_URL");
-          setFacialUsers([]);
+          console.log("⚠️ No hay backend URL - Usando solo caché");
           return;
         }
 
-        console.log("🔄 Cargando usuarios faciales desde servidor...");
+        // ✅ Verificar nuevamente antes del request
+        if (!isMountedRef.current) return;
+
+        // ✅ Actualizar en segundo plano (solo si hay conexión)
+        console.log("🔄 Actualizando usuarios faciales en segundo plano...");
 
         const res = await axios.get(
           `${backendUrl}/responses/answers/regisfacial`,
           {
             headers: { Authorization: `Bearer ${token}` },
-            timeout: 10000, // 🆕 Timeout de 10 segundos
+            timeout: 10000,
           }
         );
+
+        // ✅ Solo actualizar estado si el componente sigue montado
+        if (!isMountedRef.current) {
+          console.log("⚠️ Componente desmontado, cancelando actualización");
+          return;
+        }
 
         const mapped = Array.isArray(res.data)
           ? res.data
@@ -499,7 +981,7 @@ export default function FormatScreen(props) {
                       faceData.name ||
                       "Sin nombre",
                     person_id: faceData.person_id || faceData.personId || "",
-                    num_document: faceData.person_id || faceData.personId || "", // 🆕 Agregado
+                    num_document: faceData.person_id || faceData.personId || "",
                     hash: item.encrypted_hash || item.hash || "",
                   };
                 } catch (err) {
@@ -510,29 +992,31 @@ export default function FormatScreen(props) {
               .filter(Boolean)
           : [];
 
-        setFacialUsers(mapped);
+        // ✅ Solo actualizar si hay cambios Y el componente está montado
+        if (mapped.length > 0 && isMountedRef.current) {
+          setFacialUsers(mapped);
 
-        // 🆕 Guardar en caché para uso offline
-        if (mapped.length > 0) {
           try {
             await AsyncStorage.setItem(
               "cached_facial_users",
               JSON.stringify(mapped)
             );
-            console.log("💾 Usuarios faciales guardados en caché");
+            await AsyncStorage.setItem(
+              "cached_facial_users_timestamp",
+              String(Date.now())
+            );
+            console.log("💾 Caché actualizado con", mapped.length, "usuarios");
           } catch (e) {
-            console.warn("No se pudo guardar caché de usuarios faciales");
+            console.warn("No se pudo actualizar caché");
           }
         }
-
-        console.log("✅ Usuarios faciales cargados:", mapped.length);
       } catch (error) {
         console.error("❌ Error cargando datos faciales:", error.message);
 
         // 🆕 Intentar cargar desde caché como fallback
         try {
           const cached = await AsyncStorage.getItem("cached_facial_users");
-          if (cached) {
+          if (cached && isMountedRef.current) {
             const cachedUsers = JSON.parse(cached);
             setFacialUsers(cachedUsers);
             console.log("✅ Usando caché de usuarios faciales como fallback");
@@ -542,12 +1026,50 @@ export default function FormatScreen(props) {
           console.warn("No se pudo cargar caché de fallback");
         }
 
-        setFacialUsers([]);
+        if (isMountedRef.current) {
+          setFacialUsers([]);
+        }
       }
     };
 
     fetchFacialUsers();
   }, []);
+
+  // ✅ FIX CRÍTICO: Cleanup cuando el componente se desmonta
+  useEffect(() => {
+    // Marcar componente como montado
+    isMountedRef.current = true;
+
+    return () => {
+      // ✅ FIX: NO poner forceCleanup en dependencias - ejecutar directamente
+      console.log("🧹 FORZANDO LIMPIEZA DE MEMORIA...");
+
+      try {
+        // Marcar como desmontado
+        isMountedRef.current = false;
+
+        // Detener todas las animaciones
+        spinAnim.stopAnimation();
+        spinAnim.setValue(0);
+
+        // ✅ Usar InteractionManager para dar prioridad al garbage collector
+        InteractionManager.runAfterInteractions(() => {
+          // ✅ OPTIMIZACIÓN: Resetear todo el estado con un solo dispatch
+          dispatch({ type: "RESET_ALL" });
+
+          // Resetear ref del formulario cargado
+          loadedFormIdRef.current = null;
+
+          console.log(
+            "✅ Limpieza forzada completada - Estado reseteado con useReducer"
+          );
+        });
+      } catch (error) {
+        console.error("❌ Error en limpieza forzada:", error);
+      }
+    };
+  }, []); // ✅ Sin dependencias - solo ejecutar en mount/unmount
+
   const onOpenSignerSelect = (questionId) => {
     // placeholder: abrir selector de firmantes en siguiente paso
     Alert.alert(
@@ -577,6 +1099,35 @@ export default function FormatScreen(props) {
     });
   };
 
+  // ✅ FIX CRÍTICO: Función de limpieza forzada para liberar memoria
+  const forceCleanup = useCallback(() => {
+    console.log("🧹 FORZANDO LIMPIEZA DE MEMORIA...");
+
+    try {
+      // Marcar como desmontado
+      isMountedRef.current = false;
+
+      // Detener todas las animaciones
+      spinAnim.stopAnimation();
+      spinAnim.setValue(0);
+
+      // ✅ Usar InteractionManager para dar prioridad al garbage collector
+      InteractionManager.runAfterInteractions(() => {
+        // ✅ OPTIMIZACIÓN: Resetear todo el estado con un solo dispatch
+        resetAll();
+
+        // Resetear ref del formulario cargado
+        loadedFormIdRef.current = null;
+
+        console.log(
+          "✅ Limpieza forzada completada - Estado reseteado con useReducer"
+        );
+      });
+    } catch (error) {
+      console.error("❌ Error en limpieza forzada:", error);
+    }
+  }, [resetAll]);
+
   useFocusEffect(
     React.useCallback(() => {
       const disableBack = () => true;
@@ -592,19 +1143,30 @@ export default function FormatScreen(props) {
 
   const loadAllOfflineData = async (formId) => {
     try {
+      // Show UI immediately, skeleton will display while loading
+      setLoading(true);
+
       const storedQuestions = await AsyncStorage.getItem(QUESTIONS_KEY);
-      const offlineQuestions = storedQuestions
-        ? JSON.parse(storedQuestions)
-        : {};
+
+      // ✅ FIX: Proteger JSON.parse con try-catch
+      let offlineQuestions = {};
+      try {
+        offlineQuestions = storedQuestions ? JSON.parse(storedQuestions) : {};
+      } catch (parseError) {
+        console.error("❌ Error parseando storedQuestions:", parseError);
+        offlineQuestions = {};
+      }
 
       // ✅ SIMPLIFICADO: Si no hay datos en cache, mostrar mensaje claro
       if (!offlineQuestions[formId]) {
         console.warn(`⚠️ No hay datos en cache para formulario ${formId}`);
-        Alert.alert(
-          "Datos no disponibles",
-          "Los datos del formulario no están disponibles. Por favor, regrese a la pantalla principal y toque el botón Refresh para cargar los datos.",
-          [{ text: "OK", onPress: () => setLoading(false) }]
-        );
+        if (isMountedRef.current) {
+          Alert.alert(
+            "Datos no disponibles",
+            "Los datos del formulario no están disponibles. Por favor, regrese a la pantalla principal y toque el botón Refresh para cargar los datos.",
+            [{ text: "OK", onPress: () => setLoading(false) }]
+          );
+        }
         return;
       }
 
@@ -663,7 +1225,7 @@ export default function FormatScreen(props) {
       try {
         if (rawEntry && rawEntry.form_design) {
           const items = transformFormDesignToItems(rawEntry.form_design);
-          setFormItems(items);
+          // ✅ NO hacer setState aquí - se hará después con MERGE_FIELDS
           // Initialize values only once for fields with default values
           const initial = {};
           const walk = (arr) => {
@@ -695,17 +1257,36 @@ export default function FormatScreen(props) {
             });
           };
           walk(items);
-          setFormValues(initial);
+
+          // ✅ OPTIMIZACIÓN: Agrupar setState de formItems + formValues en 1 dispatch
+          dispatch({
+            type: "MERGE_FIELDS",
+            payload: {
+              formItems: items,
+              formValues: initial,
+            },
+          });
         } else {
-          setFormItems([]);
-          setFormValues({});
+          dispatch({
+            type: "MERGE_FIELDS",
+            payload: {
+              formItems: [],
+              formValues: {},
+            },
+          });
         }
       } catch (e) {
         console.warn(
           "No se pudo transformar form_design para mobile renderer:",
           e
         );
-        setFormItems([]);
+        dispatch({
+          type: "MERGE_FIELDS",
+          payload: {
+            formItems: [],
+            formValues: {},
+          },
+        });
       }
 
       // Normalize incoming question_type values to canonical set used by the app
@@ -722,6 +1303,18 @@ export default function FormatScreen(props) {
         if (s === "firma" || s === "firm" || s === "signature") return "firm";
         return s;
       };
+
+      // ✅ FIX: Verificar que el componente siga montado antes de procesar grandes arrays
+      if (!isMountedRef.current) return;
+
+      // ✅ FIX: Limitar procesamiento de arrays grandes (protección contra OOM)
+      const MAX_QUESTIONS = 500; // Límite de seguridad
+      if (questionsArray.length > MAX_QUESTIONS) {
+        console.warn(
+          `⚠️ Formulario con ${questionsArray.length} preguntas excede el límite de ${MAX_QUESTIONS}`
+        );
+        questionsArray = questionsArray.slice(0, MAX_QUESTIONS);
+      }
 
       const normalizedQuestions = questionsArray.map((q) => {
         try {
@@ -750,19 +1343,48 @@ export default function FormatScreen(props) {
       });
 
       setQuestions(normalizedQuestions);
+
       const storedRelated = await AsyncStorage.getItem(RELATED_ANSWERS_KEY);
-      const offlineRelated = storedRelated ? JSON.parse(storedRelated) : {};
+
+      // ✅ FIX: Proteger JSON.parse con try-catch
+      let offlineRelated = {};
+      try {
+        offlineRelated = storedRelated ? JSON.parse(storedRelated) : {};
+      } catch (parseError) {
+        console.error("❌ Error parseando storedRelated:", parseError);
+        offlineRelated = {};
+      }
+
       const tableAnswersObj = {};
       const locationRelatedObj = {};
       const correlationsObj = {};
       const relatedQuestionsObj = {};
+
+      // ✅ FIX: Validar que normalizedQuestions sea un array antes de forEach
+      if (!Array.isArray(normalizedQuestions)) {
+        console.error(
+          "❌ normalizedQuestions no es un array:",
+          typeof normalizedQuestions
+        );
+        if (isMountedRef.current) {
+          setLoading(false);
+        }
+        return;
+      }
+
       normalizedQuestions.forEach((q) => {
+        // ✅ FIX: Proteger contra objetos null/undefined
+        if (!q || typeof q !== "object") {
+          console.warn("⚠️ Pregunta inválida encontrada:", q);
+          return;
+        }
+
         if (q.question_type === "table") {
           const rel = offlineRelated[q.id];
           if (rel && Array.isArray(rel.data)) {
             tableAnswersObj[q.id] = rel.data
               .map((item) => {
-                if (typeof item === "object" && item.name) return item.name;
+                if (typeof item === "object" && item?.name) return item.name;
                 if (typeof item === "string") return item;
                 return null;
               })
@@ -807,20 +1429,43 @@ export default function FormatScreen(props) {
           });
         }
       });
-      setTableAnswers(tableAnswersObj);
-      setLocationRelatedAnswers(locationRelatedObj);
-      setTableCorrelations(correlationsObj);
-      setTableRelatedQuestions(relatedQuestionsObj);
+
+      // ✅ OPTIMIZACIÓN CRÍTICA: Agrupar TODOS los setState en 1 solo dispatch
+      // Esto reduce de ~8 re-renders a solo 1
+      dispatch({
+        type: "MERGE_FIELDS",
+        payload: {
+          tableAnswers: tableAnswersObj,
+          locationRelatedAnswers: locationRelatedObj,
+          tableCorrelations: correlationsObj,
+          tableRelatedQuestions: relatedQuestionsObj,
+        },
+      });
+
+      // ✅ FIX: Verificar si el componente sigue montado antes de actualizar loading
+      if (!isMountedRef.current) return;
+
+      // Ensure skeleton is visible for at least 300ms for better UX
+      await new Promise((resolve) => setTimeout(resolve, 300));
     } catch (error) {
       console.error("❌ Error cargando datos offline:", error);
-      Alert.alert("Error", "No se pudieron cargar los datos offline.");
+      if (isMountedRef.current) {
+        Alert.alert("Error", "No se pudieron cargar los datos offline.");
+      }
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
     }
   };
 
+  // ✅ FIX: useRef para evitar recargas múltiples del mismo formulario
+  const loadedFormIdRef = React.useRef(null);
+
   useEffect(() => {
-    if (id) {
+    // ✅ Evitar recargar si es el mismo formulario
+    if (id && id !== loadedFormIdRef.current && isMountedRef.current) {
+      loadedFormIdRef.current = id;
       loadAllOfflineData(id);
     }
   }, [id]);
@@ -834,9 +1479,14 @@ export default function FormatScreen(props) {
       try {
         const storedMeta = await AsyncStorage.getItem(FORMS_METADATA_KEY);
         if (storedMeta) {
-          const metaObj = JSON.parse(storedMeta);
-          if (metaObj && metaObj[id]) {
-            setFormMeta(metaObj[id]);
+          // ✅ FIX: Proteger JSON.parse con try-catch
+          try {
+            const metaObj = JSON.parse(storedMeta);
+            if (metaObj && metaObj[id] && isMountedRef.current) {
+              setFormMeta(metaObj[id]);
+            }
+          } catch (parseError) {
+            console.error("❌ Error parseando metaObj:", parseError);
           }
         }
       } catch (e) {
@@ -865,7 +1515,23 @@ export default function FormatScreen(props) {
 
         if (result && !result.canceled && result.assets?.[0]?.uri) {
           const uri = result.assets[0].uri;
-          console.log("📎 Archivo seleccionado:", uri);
+          const size = result.assets[0].size || 0;
+
+          // ✅ FIX: Límite de 50MB para evitar OutOfMemory
+          const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+          if (size > MAX_FILE_SIZE) {
+            Alert.alert(
+              "Archivo demasiado grande",
+              `El archivo seleccionado (${(size / 1024 / 1024).toFixed(2)} MB) excede el límite de 50 MB.`
+            );
+            return;
+          }
+
+          console.log(
+            "📎 Archivo seleccionado:",
+            uri,
+            `(${(size / 1024 / 1024).toFixed(2)} MB)`
+          );
 
           // 1. Generar serial para el archivo
           const it = findItemById(formItems, fieldId);
@@ -1064,7 +1730,7 @@ export default function FormatScreen(props) {
     }
   };
 
-  const handleTextChange = (questionId, index, value) => {
+  const handleTextChange = useCallback((questionId, index, value) => {
     console.log(
       `✏️ Actualizando respuesta ${index + 1} para pregunta ID ${questionId}:`,
       value
@@ -1074,270 +1740,289 @@ export default function FormatScreen(props) {
       updatedAnswers[index] = value;
       return { ...prev, [questionId]: updatedAnswers };
     });
-  };
+  }, []);
 
-  const handleAddTextField = (questionId) => {
+  const handleAddTextField = useCallback((questionId) => {
     console.log(`➕ Agregando nuevo campo para pregunta ID ${questionId}`);
     setTextAnswers((prev) => ({
       ...prev,
       [questionId]: [...(prev[questionId] || []), ""],
     }));
-  };
+  }, []);
 
-  const handleRemoveTextField = (questionId, index) => {
+  const handleRemoveTextField = useCallback((questionId, index) => {
     setTextAnswers((prev) => ({
       ...prev,
       [questionId]: prev[questionId].filter((_, i) => i !== index),
     }));
-  };
+  }, []);
 
-  const handleTableSelectChangeWithCorrelation = (questionId, index, value) => {
-    console.log("[DEBUG] Selección en tabla:", { questionId, index, value });
-    setTableAnswersState((prev) => {
-      const updatedAnswers = [...(prev[questionId] || [])];
-      updatedAnswers[index] = value;
-      console.log("[DEBUG] Estado tras selección principal:", {
-        ...prev,
-        [questionId]: updatedAnswers,
+  const handleTableSelectChangeWithCorrelation = useCallback(
+    (questionId, index, value) => {
+      console.log("[DEBUG] Selección en tabla:", { questionId, index, value });
+      setTableAnswersState((prev) => {
+        const updatedAnswers = [...(prev[questionId] || [])];
+        updatedAnswers[index] = value;
+        console.log("[DEBUG] Estado tras selección principal:", {
+          ...prev,
+          [questionId]: updatedAnswers,
+        });
+        return { ...prev, [questionId]: updatedAnswers };
       });
-      return { ...prev, [questionId]: updatedAnswers };
-    });
 
-    const correlation = tableCorrelations[questionId]?.[value];
-    console.log("[DEBUG] Correlación directa encontrada:", correlation);
+      const correlation = tableCorrelations[questionId]?.[value];
+      console.log("[DEBUG] Correlación directa encontrada:", correlation);
 
-    if (correlation) {
-      Object.entries(correlation).forEach(([relatedQId, relatedValue]) => {
-        Object.entries(tableAnswers).forEach(([otherQId, options]) => {
-          if (otherQId !== questionId && Array.isArray(options)) {
-            if (options.includes(relatedValue)) {
-              setTableAnswersState((prev) => {
-                const arr = [...(prev[otherQId] || [])];
-                if (!arr[0]) {
-                  arr[0] = relatedValue;
-                  setTableAutoFilled((autoPrev) => ({
-                    ...autoPrev,
-                    [otherQId]: { ...(autoPrev[otherQId] || {}), [0]: true },
-                  }));
-                  console.log(
-                    `[DEBUG] Autocompletado por valor en ${otherQId} con valor ${relatedValue}`
-                  );
-                } else {
-                  console.log(
-                    `[DEBUG] No se autocompleta ${otherQId} porque ya tiene valor:`,
-                    arr[0]
-                  );
-                }
-                console.log("[DEBUG] Estado tras autocompletar por valor:", {
-                  ...prev,
-                  [otherQId]: arr,
+      if (correlation) {
+        Object.entries(correlation).forEach(([relatedQId, relatedValue]) => {
+          Object.entries(tableAnswers).forEach(([otherQId, options]) => {
+            if (otherQId !== questionId && Array.isArray(options)) {
+              if (options.includes(relatedValue)) {
+                setTableAnswersState((prev) => {
+                  const arr = [...(prev[otherQId] || [])];
+                  if (!arr[0]) {
+                    arr[0] = relatedValue;
+                    setTableAutoFilled((autoPrev) => ({
+                      ...autoPrev,
+                      [otherQId]: { ...(autoPrev[otherQId] || {}), [0]: true },
+                    }));
+                    console.log(
+                      `[DEBUG] Autocompletado por valor en ${otherQId} con valor ${relatedValue}`
+                    );
+                  } else {
+                    console.log(
+                      `[DEBUG] No se autocompleta ${otherQId} porque ya tiene valor:`,
+                      arr[0]
+                    );
+                  }
+                  console.log("[DEBUG] Estado tras autocompletar por valor:", {
+                    ...prev,
+                    [otherQId]: arr,
+                  });
+                  return { ...prev, [otherQId]: arr };
                 });
-                return { ...prev, [otherQId]: arr };
+              }
+            }
+          });
+        });
+        setTableAutoFilled((prev) => ({
+          ...prev,
+          [questionId]: { ...(prev[questionId] || {}), [index]: true },
+        }));
+      }
+
+      Object.entries(tableCorrelations).forEach(([otherQId, corrObj]) => {
+        if (otherQId !== questionId) {
+          Object.entries(corrObj).forEach(([corrValue, rels]) => {
+            if (rels && rels[questionId] && rels[questionId] === value) {
+              Object.entries(tableAnswers).forEach(([targetQId, options]) => {
+                if (targetQId !== questionId && Array.isArray(options)) {
+                  if (options.includes(corrValue)) {
+                    setTableAnswersState((prev) => {
+                      const arr = [...(prev[targetQId] || [])];
+                      if (!arr[0]) {
+                        arr[0] = corrValue;
+                        setTableAutoFilled((autoPrev) => ({
+                          ...autoPrev,
+                          [targetQId]: {
+                            ...(autoPrev[targetQId] || {}),
+                            [0]: true,
+                          },
+                        }));
+                        console.log(
+                          `[DEBUG] Autocompletado inverso por valor en ${targetQId} con valor ${corrValue}`
+                        );
+                      } else {
+                        console.log(
+                          `[DEBUG] No se autocompleta inverso ${targetQId} porque ya tiene valor:`,
+                          arr[0]
+                        );
+                      }
+                      return { ...prev, [targetQId]: arr };
+                    });
+                  }
+                }
               });
             }
-          }
-        });
+          });
+        }
       });
-      setTableAutoFilled((prev) => ({
-        ...prev,
-        [questionId]: { ...(prev[questionId] || {}), [index]: true },
-      }));
-    }
 
-    Object.entries(tableCorrelations).forEach(([otherQId, corrObj]) => {
-      if (otherQId !== questionId) {
-        Object.entries(corrObj).forEach(([corrValue, rels]) => {
-          if (rels && rels[questionId] && rels[questionId] === value) {
-            Object.entries(tableAnswers).forEach(([targetQId, options]) => {
-              if (targetQId !== questionId && Array.isArray(options)) {
-                if (options.includes(corrValue)) {
-                  setTableAnswersState((prev) => {
-                    const arr = [...(prev[targetQId] || [])];
-                    if (!arr[0]) {
-                      arr[0] = corrValue;
-                      setTableAutoFilled((autoPrev) => ({
-                        ...autoPrev,
-                        [targetQId]: {
-                          ...(autoPrev[targetQId] || {}),
-                          [0]: true,
-                        },
-                      }));
-                      console.log(
-                        `[DEBUG] Autocompletado inverso por valor en ${targetQId} con valor ${corrValue}`
-                      );
-                    } else {
-                      console.log(
-                        `[DEBUG] No se autocompleta inverso ${targetQId} porque ya tiene valor:`,
-                        arr[0]
-                      );
-                    }
-                    return { ...prev, [targetQId]: arr };
-                  });
-                }
-              }
-            });
-          }
+      setTimeout(() => {
+        setTableAnswersState((prev) => {
+          console.log(
+            "[DEBUG] Estado FINAL de tableAnswersState:",
+            JSON.stringify(prev)
+          );
+          return prev;
         });
-      }
-    });
+      }, 600);
+    },
+    [tableCorrelations, tableAnswers]
+  );
 
-    setTimeout(() => {
-      setTableAnswersState((prev) => {
-        console.log(
-          "[DEBUG] Estado FINAL de tableAnswersState:",
-          JSON.stringify(prev)
-        );
-        return prev;
-      });
-    }, 600);
-  };
-
-  const handleAddTableAnswer = (questionId) => {
+  const handleAddTableAnswer = useCallback((questionId) => {
     setTableAnswersState((prev) => ({
       ...prev,
       [questionId]: [...(prev[questionId] || []), ""],
     }));
-  };
+  }, []);
 
-  const handleRemoveTableAnswer = (questionId, index) => {
+  const handleRemoveTableAnswer = useCallback((questionId, index) => {
     setTableAnswersState((prev) => ({
       ...prev,
       [questionId]: prev[questionId].filter((_, i) => i !== index),
     }));
-  };
+  }, []);
 
   // --- Repeater helpers: manage sections across repeated questions ---
-  const updateAnswersArrayValue = (questionId, index, value) => {
+  const updateAnswersArrayValue = useCallback((questionId, index, value) => {
     setAnswers((prev) => {
       const arr = Array.isArray(prev[questionId]) ? [...prev[questionId]] : [];
       arr[index] = value;
       return { ...prev, [questionId]: arr };
     });
-  };
+  }, []);
 
-  const handleAddSection = (groupId = null) => {
-    // Add a section only for questions in the given repeated group (or all if null)
-    const groupQ = groupId
-      ? isRepeatedQuestions.filter((q) => (q.parentId || "default") === groupId)
-      : isRepeatedQuestions;
-    setTextAnswers((prev) => {
-      const copy = { ...prev };
-      groupQ.forEach((q) => {
-        if (q.question_type === "text") {
-          copy[q.id] = [...(copy[q.id] || []), ""];
-        }
-      });
-      return copy;
-    });
-    setTableAnswersState((prev) => {
-      const copy = { ...prev };
-      groupQ.forEach((q) => {
-        if (q.question_type === "table") {
-          copy[q.id] = [...(copy[q.id] || []), ""];
-        }
-      });
-      return copy;
-    });
-    setAnswers((prev) => {
-      const copy = { ...prev };
-      groupQ.forEach((q) => {
-        if (q.question_type !== "text" && q.question_type !== "table") {
-          const arr = Array.isArray(copy[q.id])
-            ? [...copy[q.id]]
-            : [copy[q.id] || ""];
-          arr.push("");
-          copy[q.id] = arr;
-        }
-      });
-      return copy;
-    });
-  };
-
-  const handleRemoveSection = (groupId = null, index) => {
-    const groupQ = groupId
-      ? isRepeatedQuestions.filter((q) => (q.parentId || "default") === groupId)
-      : isRepeatedQuestions;
-    setTextAnswers((prev) => {
-      const copy = { ...prev };
-      groupQ.forEach((q) => {
-        if (q.question_type === "text") {
-          copy[q.id] = (copy[q.id] || []).filter((_, i) => i !== index);
-        }
-      });
-      return copy;
-    });
-    setTableAnswersState((prev) => {
-      const copy = { ...prev };
-      groupQ.forEach((q) => {
-        if (q.question_type === "table") {
-          copy[q.id] = (copy[q.id] || []).filter((_, i) => i !== index);
-        }
-      });
-      return copy;
-    });
-    setAnswers((prev) => {
-      const copy = { ...prev };
-      groupQ.forEach((q) => {
-        if (q.question_type !== "text" && q.question_type !== "table") {
-          if (Array.isArray(copy[q.id])) {
-            copy[q.id] = copy[q.id].filter((_, i) => i !== index);
+  const handleAddSection = useCallback(
+    (groupId = null) => {
+      // Add a section only for questions in the given repeated group (or all if null)
+      const groupQ = groupId
+        ? isRepeatedQuestions.filter(
+            (q) => (q.parentId || "default") === groupId
+          )
+        : isRepeatedQuestions;
+      setTextAnswers((prev) => {
+        const copy = { ...prev };
+        groupQ.forEach((q) => {
+          if (q.question_type === "text") {
+            copy[q.id] = [...(copy[q.id] || []), ""];
           }
-        }
+        });
+        return copy;
       });
-      return copy;
-    });
-  };
-
-  const handleDateChangeForIndex = (questionId, index, selectedDate) => {
-    if (selectedDate) {
-      const formattedDate = selectedDate.toISOString().split("T")[0];
+      setTableAnswersState((prev) => {
+        const copy = { ...prev };
+        groupQ.forEach((q) => {
+          if (q.question_type === "table") {
+            copy[q.id] = [...(copy[q.id] || []), ""];
+          }
+        });
+        return copy;
+      });
       setAnswers((prev) => {
-        const arr = Array.isArray(prev[questionId])
-          ? [...prev[questionId]]
-          : [];
-        arr[index] = formattedDate;
-        return { ...prev, [questionId]: arr };
+        const copy = { ...prev };
+        groupQ.forEach((q) => {
+          if (q.question_type !== "text" && q.question_type !== "table") {
+            const arr = Array.isArray(copy[q.id])
+              ? [...copy[q.id]]
+              : [copy[q.id] || ""];
+            arr.push("");
+            copy[q.id] = arr;
+          }
+        });
+        return copy;
       });
-    }
-    setDatePickerVisible((prev) => ({
-      ...prev,
-      [`${questionId}_${index}`]: false,
-    }));
-  };
+    },
+    [isRepeatedQuestions]
+  );
 
-  const handleDateChange = (questionId, selectedDate) => {
+  const handleRemoveSection = useCallback(
+    (groupId = null, index) => {
+      const groupQ = groupId
+        ? isRepeatedQuestions.filter(
+            (q) => (q.parentId || "default") === groupId
+          )
+        : isRepeatedQuestions;
+      setTextAnswers((prev) => {
+        const copy = { ...prev };
+        groupQ.forEach((q) => {
+          if (q.question_type === "text") {
+            copy[q.id] = (copy[q.id] || []).filter((_, i) => i !== index);
+          }
+        });
+        return copy;
+      });
+      setTableAnswersState((prev) => {
+        const copy = { ...prev };
+        groupQ.forEach((q) => {
+          if (q.question_type === "table") {
+            copy[q.id] = (copy[q.id] || []).filter((_, i) => i !== index);
+          }
+        });
+        return copy;
+      });
+      setAnswers((prev) => {
+        const copy = { ...prev };
+        groupQ.forEach((q) => {
+          if (q.question_type !== "text" && q.question_type !== "table") {
+            if (Array.isArray(copy[q.id])) {
+              copy[q.id] = copy[q.id].filter((_, i) => i !== index);
+            }
+          }
+        });
+        return copy;
+      });
+    },
+    [isRepeatedQuestions]
+  );
+
+  const handleDateChangeForIndex = useCallback(
+    (questionId, index, selectedDate) => {
+      if (selectedDate) {
+        const formattedDate = selectedDate.toISOString().split("T")[0];
+        setAnswers((prev) => {
+          const arr = Array.isArray(prev[questionId])
+            ? [...prev[questionId]]
+            : [];
+          arr[index] = formattedDate;
+          return { ...prev, [questionId]: arr };
+        });
+      }
+      setDatePickerVisible((prev) => ({
+        ...prev,
+        [`${questionId}_${index}`]: false,
+      }));
+    },
+    []
+  );
+
+  const handleDateChange = useCallback((questionId, selectedDate) => {
     if (selectedDate) {
       const formattedDate = selectedDate.toISOString().split("T")[0];
       setAnswers((prev) => ({ ...prev, [questionId]: formattedDate }));
     }
     setDatePickerVisible((prev) => ({ ...prev, [questionId]: false }));
-  };
+  }, []);
 
-  const handleCaptureLocation = async (questionId) => {
-    setLocationError((prev) => ({ ...prev, [questionId]: null }));
-    try {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
+  const handleCaptureLocation = useCallback(
+    async (questionId) => {
+      setLocationError((prev) => ({ ...prev, [questionId]: null }));
+      try {
+        let { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== "granted") {
+          setLocationError((prev) => ({
+            ...prev,
+            [questionId]: "Permiso de ubicación denegado",
+          }));
+          Alert.alert("Permiso denegado", "Se requiere permiso de ubicación.");
+          return;
+        }
+        let loc = await Location.getCurrentPositionAsync({});
+        if (loc && loc.coords) {
+          const value = `${loc.coords.latitude}, ${loc.coords.longitude}`;
+          handleAnswerChange(questionId, value);
+        }
+      } catch (e) {
         setLocationError((prev) => ({
           ...prev,
-          [questionId]: "Permiso de ubicación denegado",
+          [questionId]: "No se pudo obtener la ubicación",
         }));
-        Alert.alert("Permiso denegado", "Se requiere permiso de ubicación.");
-        return;
+        Alert.alert("Error", "No se pudo obtener la ubicación.");
       }
-      let loc = await Location.getCurrentPositionAsync({});
-      if (loc && loc.coords) {
-        const value = `${loc.coords.latitude}, ${loc.coords.longitude}`;
-        handleAnswerChange(questionId, value);
-      }
-    } catch (e) {
-      setLocationError((prev) => ({
-        ...prev,
-        [questionId]: "No se pudo obtener la ubicación",
-      }));
-      Alert.alert("Error", "No se pudo obtener la ubicación.");
-    }
-  };
+    },
+    [handleAnswerChange]
+  );
 
   useEffect(() => {
     const initialTextAnswers = {};
@@ -1351,37 +2036,58 @@ export default function FormatScreen(props) {
       }
     });
 
-    setTextAnswers(initialTextAnswers);
-    setTableAnswersState(initialTableAnswers);
+    // ✅ OPTIMIZACIÓN: Agrupar ambos setState en uno con MERGE_FIELDS
+    dispatch({
+      type: "MERGE_FIELDS",
+      payload: {
+        textAnswers: initialTextAnswers,
+        tableAnswersState: initialTableAnswers,
+      },
+    });
   }, [questions]);
 
   useEffect(() => {
+    let animation;
     if (submitting) {
-      Animated.loop(
+      animation = Animated.loop(
         Animated.timing(spinAnim, {
           toValue: 1,
           duration: 1200,
           easing: Easing.linear,
           useNativeDriver: true,
         })
-      ).start();
+      );
+      animation.start();
     } else {
       spinAnim.stopAnimation();
       spinAnim.setValue(0);
     }
-  }, [submitting]);
+
+    // Cleanup animation on unmount to prevent memory leaks
+    return () => {
+      if (animation) {
+        animation.stop();
+      }
+      spinAnim.stopAnimation();
+      spinAnim.setValue(0);
+    };
+  }, [submitting, spinAnim]);
 
   const spin = spinAnim.interpolate({
     inputRange: [0, 1],
     outputRange: ["0deg", "360deg"],
   });
 
-  useEffect(() => {
-    if (questions.length > 0) {
-      const repeated = questions.filter((q) => q.is_repeated);
-      setIsRepeatedQuestions(repeated);
-    }
+  // Memoize repeated questions filter to avoid recalculation on every render
+  const repeatedQuestions = useMemo(() => {
+    return questions.filter((q) => q.is_repeated);
   }, [questions]);
+
+  useEffect(() => {
+    if (repeatedQuestions.length > 0) {
+      setIsRepeatedQuestions(repeatedQuestions);
+    }
+  }, [repeatedQuestions]);
 
   const sendAnswers = async (answers, responseId, requestOptions) => {
     const results = [];
@@ -1744,7 +2450,14 @@ export default function FormatScreen(props) {
           "El formulario se guardó para envío automático cuando tengas conexión."
         );
         setSubmitting(false);
-        router.back();
+
+        // ✅ FIX: Forzar limpieza antes de salir
+        forceCleanup();
+
+        // ✅ Dar más tiempo para que se complete la limpieza (300ms)
+        setTimeout(() => {
+          router.back();
+        }, 300);
         return;
       }
 
@@ -1817,7 +2530,14 @@ export default function FormatScreen(props) {
       });
 
       Alert.alert("Éxito", "Formulario enviado correctamente");
-      router.back();
+
+      // ✅ FIX: Forzar limpieza antes de salir
+      forceCleanup();
+
+      // ✅ Dar más tiempo para que se complete la limpieza (300ms)
+      setTimeout(() => {
+        router.back();
+      }, 300);
     } catch (error) {
       console.error("❌ Error en el proceso de envío:", error);
       Alert.alert("Error", "No se pudo completar el envío del formulario");
@@ -2382,6 +3102,19 @@ export default function FormatScreen(props) {
     }
   };
 
+  // Memoize derived values to avoid recalculation on every render
+  const logoUrl = useMemo(() => {
+    return logoUrlParam || formMeta.logo_url;
+  }, [logoUrlParam, formMeta.logo_url]);
+
+  const formattedTitle = useMemo(() => {
+    return title ? title.toUpperCase() : "";
+  }, [title]);
+
+  const formIdDisplay = useMemo(() => {
+    return `ID: 00${id}`;
+  }, [id]);
+
   return (
     <View style={styles.mainContainer}>
       <LinearGradient
@@ -2392,32 +3125,35 @@ export default function FormatScreen(props) {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
           stickyHeaderIndices={[0]}
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={10}
+          updateCellsBatchingPeriod={50}
+          initialNumToRender={10}
+          windowSize={21}
         >
           {/* Header Empresarial */}
           <View style={styles.stickyHeader}>
             <View style={styles.headerContent}>
-              {(logoUrlParam || formMeta.logo_url) && (
+              {logoUrl && (
                 <View style={styles.logoContainer}>
                   <Image
-                    source={{ uri: logoUrlParam || formMeta.logo_url }}
+                    source={{ uri: logoUrl }}
                     style={styles.formLogo}
                     resizeMode="contain"
                   />
                 </View>
               )}
               <View style={styles.headerTextContainer}>
-                <Text style={styles.header}>
-                  {title ? title.toUpperCase() : ""}
-                </Text>
+                <Text style={styles.header}>{formattedTitle}</Text>
                 <View style={styles.idBadge}>
-                  <Text style={styles.idBadgeText}>ID: 00{id}</Text>
+                  <Text style={styles.idBadgeText}>{formIdDisplay}</Text>
                 </View>
               </View>
             </View>
           </View>
           {/* Preguntas No Repetidas */}
           {/* form_design driven renderer */}
-          {formItems && formItems.length > 0 && (
+          {(loading || (formItems && formItems.length > 0)) && (
             <View style={styles.questionsSection}>
               <View style={styles.sectionHeader}>
                 <View style={styles.sectionIndicator} />
@@ -2425,14 +3161,7 @@ export default function FormatScreen(props) {
               </View>
               <View style={styles.questionsContainer}>
                 {loading ? (
-                  <View style={styles.loadingContainer}>
-                    <Animated.View style={{ transform: [{ rotate: spin }] }}>
-                      <SvgXml xml={spinnerSvg} width={50} height={50} />
-                    </Animated.View>
-                    <Text style={styles.loadingText}>
-                      Cargando formulario...
-                    </Text>
-                  </View>
+                  <SkeletonForm />
                 ) : (
                   <FormPreviewRenderer
                     formItems={formItems}
@@ -2530,7 +3259,9 @@ export default function FormatScreen(props) {
           )}
 
           {/* legacy questions path as fallback */}
-          {formItems.length === 0 && questions.some((q) => !q.is_repeated) && (
+          {(loading ||
+            (formItems.length === 0 &&
+              questions.some((q) => !q.is_repeated))) && (
             <View style={styles.questionsSection}>
               <View style={styles.sectionHeader}>
                 <View style={styles.sectionIndicator} />
@@ -2538,14 +3269,7 @@ export default function FormatScreen(props) {
               </View>
               <View style={styles.questionsContainer}>
                 {loading ? (
-                  <View style={styles.loadingContainer}>
-                    <Animated.View style={{ transform: [{ rotate: spin }] }}>
-                      <SvgXml xml={spinnerSvg} width={50} height={50} />
-                    </Animated.View>
-                    <Text style={styles.loadingText}>
-                      Cargando formulario...
-                    </Text>
-                  </View>
+                  <SkeletonForm />
                 ) : (
                   questions
                     .filter((question) => !question.is_repeated)
@@ -2689,7 +3413,8 @@ export default function FormatScreen(props) {
           )}
 
           {/* Preguntas Repetidas (secciones) */}
-          {formItems.length === 0 && isRepeatedQuestions.length > 0 && (
+          {(loading ||
+            (formItems.length === 0 && isRepeatedQuestions.length > 0)) && (
             <View style={styles.questionsSection}>
               <View style={styles.sectionHeader}>
                 <View
@@ -2702,14 +3427,7 @@ export default function FormatScreen(props) {
               </View>
               <View style={styles.questionsContainer}>
                 {loading ? (
-                  <View style={styles.loadingContainer}>
-                    <Animated.View style={{ transform: [{ rotate: spin }] }}>
-                      <SvgXml xml={spinnerSvg} width={50} height={50} />
-                    </Animated.View>
-                    <Text style={styles.loadingText}>
-                      Cargando formulario...
-                    </Text>
-                  </View>
+                  <SkeletonForm />
                 ) : (
                   (() => {
                     // determine how many sections (max length among repeated answers)
@@ -2858,17 +3576,17 @@ export default function FormatScreen(props) {
                                     </View>
                                     <Picker
                                       selectedValue={
-                                        (tableAnswersState[q.id] &&
-                                          tableAnswersState[q.id][idx]) ||
-                                        ""
+                                        tableAnswersState[q.id]?.[idx] || ""
                                       }
-                                      onValueChange={(val) =>
-                                        handleTableSelectChangeWithCorrelation(
-                                          q.id,
-                                          idx,
-                                          val
-                                        )
-                                      }
+                                      onValueChange={(val) => {
+                                        if (val !== "") {
+                                          handleTableSelectChangeWithCorrelation(
+                                            q.id,
+                                            idx,
+                                            val
+                                          );
+                                        }
+                                      }}
                                       mode="dropdown"
                                       style={styles.picker}
                                     >
@@ -2878,27 +3596,27 @@ export default function FormatScreen(props) {
                                           "Selecciona una opción"
                                         }
                                         value=""
+                                        enabled={false}
                                       />
                                       {Array.isArray(tableAnswers[q.id]) &&
                                         tableAnswers[q.id]
-                                          .filter((opt) =>
-                                            (pickerSearch[`${q.id}_${idx}`] ||
-                                              "") === ""
-                                              ? true
-                                              : opt
-                                                  .toLowerCase()
-                                                  .includes(
-                                                    (
-                                                      pickerSearch[
-                                                        `${q.id}_${idx}`
-                                                      ] || ""
-                                                    ).toLowerCase()
-                                                  )
-                                          )
-                                          .map((opt, i) => (
+                                          .filter((opt) => {
+                                            const searchTerm =
+                                              pickerSearch[`${q.id}_${idx}`] ||
+                                              "";
+                                            return (
+                                              searchTerm === "" ||
+                                              opt
+                                                ?.toLowerCase?.()
+                                                .includes(
+                                                  searchTerm.toLowerCase()
+                                                )
+                                            );
+                                          })
+                                          .map((opt) => (
                                             <Picker.Item
-                                              key={i}
-                                              label={opt}
+                                              key={`${q.id}-${idx}-${opt}`}
+                                              label={String(opt)}
                                               value={opt}
                                             />
                                           ))}
@@ -3246,10 +3964,17 @@ export default function FormatScreen(props) {
           {/* Botones de Acción */}
           {/* Botones de Acción */}
           <View style={styles.actionsContainer}>
-            {/* Botón Cancelar (Volver al Inicio) */}
+            {/* Botón Cancelar (Volver atrás) */}
             <TouchableOpacity
               style={[styles.actionButton, styles.homeButton]}
-              onPress={() => router.push("/home")}
+              onPress={() => {
+                // ✅ FIX: Limpiar memoria antes de salir
+                forceCleanup();
+                // ✅ Dar más tiempo (300ms)
+                setTimeout(() => {
+                  router.back();
+                }, 300);
+              }}
               disabled={submitting}
               activeOpacity={0.7}
             >

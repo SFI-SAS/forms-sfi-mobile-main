@@ -1,4 +1,10 @@
-import React, { useEffect, useState } from "react";
+import React, {
+  useEffect,
+  useState,
+  useRef,
+  useMemo,
+  useCallback,
+} from "react";
 import {
   View,
   Text,
@@ -6,22 +12,37 @@ import {
   ScrollView,
   Dimensions,
   TouchableOpacity,
-  ActivityIndicator,
   Animated,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import { MaterialIcons } from "@expo/vector-icons";
 import Svg, { Circle, G, Text as SvgText } from "react-native-svg";
+import { useRouter } from "expo-router";
 
 const { width, height } = Dimensions.get("window");
 
-// Componente de gráfico circular (Pie Chart)
-const PieChart = ({ data, size = 160 }) => {
-  const radius = size / 2 - 10;
-  const circumference = 2 * Math.PI * radius;
+// Memoize skeleton component
+const SkeletonListItem = React.memo(() => (
+  <View style={styles.skeletonListItem}>
+    <View style={styles.skeletonTitle} />
+    <View style={styles.skeletonSubtitle} />
+    <View style={styles.skeletonDate} />
+  </View>
+));
 
-  let currentAngle = -90; // Comenzar desde arriba
+// Memoize PieChart component
+const PieChart = React.memo(({ data, size = 160 }) => {
+  const radius = size / 2 - 15;
+  const circumference = 2 * Math.PI * radius;
+  const svgSize = size + 30;
+
+  let currentAngle = -90;
+
+  const total = useMemo(
+    () => data.reduce((sum, d) => sum + d.value, 0),
+    [data]
+  );
 
   return (
     <View
@@ -29,45 +50,47 @@ const PieChart = ({ data, size = 160 }) => {
         alignItems: "center",
         justifyContent: "center",
         paddingVertical: 8,
+        width: "100%",
       }}
     >
       <Svg
-        style={{ alignItems: "center", justifyContent: "center" }}
-        width={200}
-        height={200}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+        width={svgSize}
+        height={svgSize}
       >
-        <G rotation={0} origin={`${size / 2}, ${size / 2}`}>
+        <G rotation={0} origin={`${svgSize / 2}, ${svgSize / 2}`}>
           {data.map((item, index) => {
-            const percentage =
-              item.value / data.reduce((sum, d) => sum + d.value, 0);
+            const percentage = item.value / total;
             const angle = percentage * 360;
-            const strokeDashoffset = circumference * (1 - percentage);
 
             const startAngle = currentAngle;
             currentAngle += angle;
 
             return (
               <Circle
-                key={index}
-                cx={size / 2}
-                cy={size / 2}
+                key={`${item.name}-${index}`}
+                cx={svgSize / 2}
+                cy={svgSize / 2}
                 r={radius}
                 stroke={item.color}
-                strokeWidth={30}
+                strokeWidth={25}
                 fill="transparent"
                 strokeDasharray={`${circumference * percentage} ${circumference}`}
                 strokeDashoffset={0}
                 rotation={startAngle}
-                origin={`${size / 2}, ${size / 2}`}
+                origin={`${svgSize / 2}, ${svgSize / 2}`}
               />
             );
           })}
         </G>
-        {/* Centro del círculo */}
-        <Circle cx={size / 2} cy={size / 2} r={radius - 35} fill="#fff" />
+        <Circle cx={svgSize / 2} cy={svgSize / 2} r={radius - 30} fill="#fff" />
         <SvgText
-          x={size / 2}
-          y={size / 2 - 5}
+          x={svgSize / 2}
+          y={svgSize / 2 - 5}
           textAnchor="middle"
           fontSize="16"
           fontWeight="bold"
@@ -77,18 +100,17 @@ const PieChart = ({ data, size = 160 }) => {
           Total
         </SvgText>
         <SvgText
-          x={size / 2}
-          y={size / 2 + 12}
+          x={svgSize / 2}
+          y={svgSize / 2 + 12}
           textAnchor="middle"
           fontSize="14"
           fill="#666"
           dy="8"
         >
-          {data.reduce((sum, d) => sum + d.value, 0)}
+          {total}
         </SvgText>
       </Svg>
 
-      {/* Leyenda */}
       <View
         style={{
           marginTop: 12,
@@ -101,7 +123,7 @@ const PieChart = ({ data, size = 160 }) => {
       >
         {data.map((item, index) => (
           <View
-            key={index}
+            key={`legend-${item.name}-${index}`}
             style={{
               flexDirection: "row",
               alignItems: "center",
@@ -126,17 +148,17 @@ const PieChart = ({ data, size = 160 }) => {
       </View>
     </View>
   );
-};
+});
 
-// Componente de gráfico de barras horizontal
-const HorizontalBarChart = ({ data, maxValue }) => {
+// Memoize BarChart component
+const HorizontalBarChart = React.memo(({ data, maxValue }) => {
   return (
     <View style={{ paddingVertical: 4 }}>
       {data.map((item, index) => {
         const percentage = maxValue > 0 ? (item.value / maxValue) * 100 : 0;
 
         return (
-          <View key={index} style={{ marginBottom: 10 }}>
+          <View key={`bar-${item.name}-${index}`} style={{ marginBottom: 10 }}>
             <View
               style={{
                 flexDirection: "row",
@@ -173,6 +195,13 @@ const HorizontalBarChart = ({ data, maxValue }) => {
       })}
     </View>
   );
+});
+
+const COLORS = {
+  completed: "#10B981",
+  assigned: "#3B82F6",
+  pending: "#F59E0B",
+  approval: "#8B5CF6",
 };
 
 const getBackendUrl = async () => {
@@ -181,43 +210,83 @@ const getBackendUrl = async () => {
 };
 
 export default function Dashboard() {
+  const router = useRouter();
   const [formsCompleted, setFormsCompleted] = useState([]);
   const [formsAssigned, setFormsAssigned] = useState([]);
-  const [formsPending, setFormsPending] = useState([]);
   const [formsToApprove, setFormsToApprove] = useState([]);
   const [myFormsApprovalStatus, setMyFormsApprovalStatus] = useState([]);
   const [userInfo, setUserInfo] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const COLORS = {
-    completed: "#10B981",
-    assigned: "#3B82F6",
-    pending: "#F59E0B",
-    approval: "#8B5CF6",
-  };
+  
+  // ✅ OPTIMIZACIÓN: Calcular formsPending con useMemo en lugar de useEffect + useState
+  const formsPending = useMemo(() => {
+    const completedIds = new Set(formsCompleted.map((f) => f.id));
+    return formsAssigned.filter((f) => !completedIds.has(f.id));
+  }, [formsCompleted, formsAssigned]);
 
-  // Calcular porcentaje de completion
-  const completionRate =
-    formsAssigned.length > 0
-      ? Math.round((formsCompleted.length / formsAssigned.length) * 100)
-      : 0;
+  // Animated values
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const scaleAnim = useRef(new Animated.Value(0.9)).current;
 
-  // Filtrar aprobaciones pendientes
-  const pendingApprovals = formsToApprove.filter(
-    (form) => form.your_approval_status?.status === "pendiente"
+  // Memoize calculated values
+  const completionRate = useMemo(
+    () =>
+      formsAssigned.length > 0
+        ? Math.round((formsCompleted.length / formsAssigned.length) * 100)
+        : 0,
+    [formsCompleted.length, formsAssigned.length]
   );
 
-  const formatDate = (dateString) => {
+  const pendingApprovals = useMemo(
+    () =>
+      formsToApprove.filter(
+        (form) => form.your_approval_status?.status === "pendiente"
+      ),
+    [formsToApprove]
+  );
+
+  // Memoize formatDate function
+  const formatDate = useCallback((dateString) => {
     return new Date(dateString).toLocaleDateString("es-ES", {
       year: "numeric",
       month: "short",
       day: "numeric",
     });
-  };
+  }, []);
+
+  // Memoize navigation handler
+  const handleNavigateToForm = useCallback(
+    (form) => {
+      router.push({
+        pathname: "/format-screen",
+        params: {
+          id: form.id,
+          created_at: form.created_at,
+          title: form.title,
+        },
+      });
+    },
+    [router]
+  );
 
   useEffect(() => {
     const loadData = async () => {
-      setLoading(true);
+      // Start animations immediately
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+        Animated.spring(scaleAnim, {
+          toValue: 1,
+          friction: 8,
+          tension: 40,
+          useNativeDriver: true,
+        }),
+      ]).start();
+
       try {
         const token = await AsyncStorage.getItem("authToken");
         if (!token) {
@@ -227,12 +296,19 @@ export default function Dashboard() {
 
         const backendUrl = await getBackendUrl();
 
+        // ✅ OPTIMIZACIÓN: Cargar todos los datos primero, luego hacer 1 solo setState batch
+        let userInfoData = null;
+        let completedForms = [];
+        let assignedForms = [];
+        let approvalForms = [];
+        let approvalStatusData = [];
+
         // Cargar info de usuario
         try {
           const userInfoStored =
             await AsyncStorage.getItem("user_info_offline");
           if (userInfoStored) {
-            setUserInfo(JSON.parse(userInfoStored));
+            userInfoData = JSON.parse(userInfoStored);
           }
         } catch (e) {
           console.warn("Error cargando user info:", e);
@@ -248,7 +324,7 @@ export default function Dashboard() {
           );
           if (response.ok) {
             const data = await response.json();
-            setFormsCompleted(data || []);
+            completedForms = data || [];
           }
         } catch (err) {
           console.error("Error obteniendo formularios completados:", err);
@@ -264,7 +340,7 @@ export default function Dashboard() {
           );
           if (response.ok) {
             const data = await response.json();
-            setFormsAssigned(data || []);
+            assignedForms = data || [];
           }
         } catch (err) {
           console.error("Error obteniendo formularios asignados:", err);
@@ -280,7 +356,7 @@ export default function Dashboard() {
           );
           if (response.ok) {
             const data = await response.json();
-            setFormsToApprove(data || []);
+            approvalForms = data || [];
           }
         } catch (err) {
           console.error("Error obteniendo formularios por aprobar:", err);
@@ -288,17 +364,7 @@ export default function Dashboard() {
 
         // Obtener estado de aprobación de mis formularios
         try {
-          const completedResponse = await fetch(
-            `${backendUrl}/forms/users/completed_forms`,
-            {
-              headers: { Authorization: `Bearer ${token}` },
-            }
-          );
-
-          if (completedResponse.ok) {
-            const completedForms = await completedResponse.json();
-            const approvalStatusData = [];
-
+          if (completedForms.length > 0) {
             for (const form of completedForms) {
               try {
                 const responseData = await fetch(
@@ -331,37 +397,27 @@ export default function Dashboard() {
                 );
               }
             }
-
-            setMyFormsApprovalStatus(approvalStatusData);
           }
         } catch (err) {
           console.error("Error obteniendo estado de aprobaciones:", err);
         }
+
+        // ✅ BATCHING: Actualizar todos los estados de una vez usando React 18 automatic batching
+        // React 18 agrupa automáticamente los setState dentro de async functions
+        setUserInfo(userInfoData);
+        setFormsCompleted(completedForms);
+        setFormsAssigned(assignedForms);
+        setFormsToApprove(approvalForms);
+        setMyFormsApprovalStatus(approvalStatusData);
+        setLoading(false);
       } catch (error) {
         console.error("Error cargando datos del dashboard:", error);
-      } finally {
         setLoading(false);
       }
     };
 
     loadData();
   }, []);
-
-  // Calcular formularios pendientes
-  useEffect(() => {
-    const completedIds = new Set(formsCompleted.map((f) => f.id));
-    const pending = formsAssigned.filter((f) => !completedIds.has(f.id));
-    setFormsPending(pending);
-  }, [formsCompleted, formsAssigned]);
-
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#12A0AF" />
-        <Text style={styles.loadingText}>Cargando estadísticas...</Text>
-      </View>
-    );
-  }
 
   return (
     <LinearGradient
@@ -373,7 +429,15 @@ export default function Dashboard() {
         contentContainerStyle={styles.contentContainer}
       >
         {/* Header */}
-        <View style={styles.header}>
+        <Animated.View
+          style={[
+            styles.header,
+            {
+              opacity: fadeAnim,
+              transform: [{ scale: scaleAnim }],
+            },
+          ]}
+        >
           <View style={styles.headerContent}>
             <MaterialIcons name="dashboard" size={24} color="#12A0AF" />
             <View style={styles.headerText}>
@@ -389,10 +453,18 @@ export default function Dashboard() {
               <Text style={styles.userType}>{userInfo.user_type}</Text>
             </View>
           )}
-        </View>
+        </Animated.View>
 
         {/* Stats Cards - Uno encima del otro */}
-        <View style={styles.statsColumn}>
+        <Animated.View
+          style={[
+            styles.statsColumn,
+            {
+              opacity: fadeAnim,
+              transform: [{ scale: scaleAnim }],
+            },
+          ]}
+        >
           {/* Completados */}
           <View
             style={[styles.statCard, { borderLeftColor: COLORS.completed }]}
@@ -406,7 +478,11 @@ export default function Dashboard() {
             </View>
             <View style={styles.statContent}>
               <Text style={styles.statLabel}>Completados</Text>
-              <Text style={styles.statValue}>{formsCompleted.length}</Text>
+              {loading ? (
+                <View style={styles.skeletonText} />
+              ) : (
+                <Text style={styles.statValue}>{formsCompleted.length}</Text>
+              )}
             </View>
           </View>
 
@@ -421,7 +497,11 @@ export default function Dashboard() {
             </View>
             <View style={styles.statContent}>
               <Text style={styles.statLabel}>Total Asignados</Text>
-              <Text style={styles.statValue}>{formsAssigned.length}</Text>
+              {loading ? (
+                <View style={styles.skeletonText} />
+              ) : (
+                <Text style={styles.statValue}>{formsAssigned.length}</Text>
+              )}
             </View>
           </View>
 
@@ -436,7 +516,11 @@ export default function Dashboard() {
             </View>
             <View style={styles.statContent}>
               <Text style={styles.statLabel}>Pendientes</Text>
-              <Text style={styles.statValue}>{formsPending.length}</Text>
+              {loading ? (
+                <View style={styles.skeletonText} />
+              ) : (
+                <Text style={styles.statValue}>{formsPending.length}</Text>
+              )}
             </View>
           </View>
 
@@ -451,7 +535,11 @@ export default function Dashboard() {
             </View>
             <View style={styles.statContent}>
               <Text style={styles.statLabel}>Por Aprobar</Text>
-              <Text style={styles.statValue}>{pendingApprovals.length}</Text>
+              {loading ? (
+                <View style={styles.skeletonText} />
+              ) : (
+                <Text style={styles.statValue}>{pendingApprovals.length}</Text>
+              )}
             </View>
           </View>
 
@@ -470,14 +558,18 @@ export default function Dashboard() {
                 }}
               >
                 <Text style={styles.statLabel}>Completion</Text>
-                <Text style={styles.statValue}>{completionRate}%</Text>
+                {loading ? (
+                  <View style={styles.skeletonText} />
+                ) : (
+                  <Text style={styles.statValue}>{completionRate}%</Text>
+                )}
               </View>
               <View style={styles.progressBar}>
-                <View
+                <Animated.View
                   style={[
                     styles.progressFill,
                     {
-                      width: `${completionRate}%`,
+                      width: loading ? "0%" : `${completionRate}%`,
                       backgroundColor: COLORS.completed,
                     },
                   ]}
@@ -485,7 +577,7 @@ export default function Dashboard() {
               </View>
             </View>
           </View>
-        </View>
+        </Animated.View>
 
         {/* Sección de Gráficos */}
         <View style={styles.chartsSection}>
@@ -495,26 +587,34 @@ export default function Dashboard() {
               <MaterialIcons name="pie-chart" size={14} color="#12A0AF" />
               <Text style={styles.chartTitle}>Distribución</Text>
             </View>
-            <PieChart
-              size={Math.min(width * 0.35, 130)}
-              data={[
-                {
-                  name: "Completados",
-                  value: formsCompleted.length,
-                  color: COLORS.completed,
-                },
-                {
-                  name: "Pendientes",
-                  value: formsPending.length,
-                  color: COLORS.pending,
-                },
-                {
-                  name: "Por Aprobar",
-                  value: pendingApprovals.length,
-                  color: COLORS.approval,
-                },
-              ].filter((item) => item.value > 0)}
-            />
+            <View
+              style={{
+                alignItems: "center",
+                justifyContent: "center",
+                width: "100%",
+              }}
+            >
+              <PieChart
+                size={Math.min(width * 0.5, 180)}
+                data={[
+                  {
+                    name: "Completados",
+                    value: formsCompleted.length,
+                    color: COLORS.completed,
+                  },
+                  {
+                    name: "Pendientes",
+                    value: formsPending.length,
+                    color: COLORS.pending,
+                  },
+                  {
+                    name: "Por Aprobar",
+                    value: pendingApprovals.length,
+                    color: COLORS.approval,
+                  },
+                ].filter((item) => item.value > 0)}
+              />
+            </View>
           </View>
 
           {/* Gráfico de Barras */}
@@ -557,7 +657,14 @@ export default function Dashboard() {
         </View>
 
         {/* Formularios Completados */}
-        <View style={styles.section}>
+        <Animated.View
+          style={[
+            styles.section,
+            {
+              opacity: fadeAnim,
+            },
+          ]}
+        >
           <View
             style={[
               styles.sectionHeader,
@@ -570,22 +677,44 @@ export default function Dashboard() {
             </Text>
           </View>
           <View style={styles.sectionContent}>
-            {formsCompleted.length > 0 ? (
-              formsCompleted.slice(0, 3).map((form) => (
-                <View key={form.id} style={styles.listItem}>
-                  <View style={styles.listItemContent}>
-                    <Text style={styles.listItemTitle} numberOfLines={1}>
-                      {form.title}
-                    </Text>
-                    <Text style={styles.listItemSubtitle} numberOfLines={1}>
-                      {form.description}
-                    </Text>
-                    <Text style={styles.listItemDate}>
-                      {formatDate(form.created_at)}
-                    </Text>
-                  </View>
-                </View>
-              ))
+            {loading ? (
+              <>
+                <SkeletonListItem />
+                <SkeletonListItem />
+                <SkeletonListItem />
+              </>
+            ) : formsCompleted.length > 0 ? (
+              <ScrollView
+                style={styles.listScrollView}
+                nestedScrollEnabled={true}
+                showsVerticalScrollIndicator={true}
+              >
+                {formsCompleted.map((form) => (
+                  <TouchableOpacity
+                    key={form.id}
+                    style={styles.listItem}
+                    onPress={() => handleNavigateToForm(form)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.listItemContent}>
+                      <Text style={styles.listItemTitle} numberOfLines={1}>
+                        {form.title}
+                      </Text>
+                      <Text style={styles.listItemSubtitle} numberOfLines={1}>
+                        {form.description}
+                      </Text>
+                      <Text style={styles.listItemDate}>
+                        {formatDate(form.created_at)}
+                      </Text>
+                    </View>
+                    <MaterialIcons
+                      name="chevron-right"
+                      size={20}
+                      color="#999"
+                    />
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
             ) : (
               <View style={styles.emptyState}>
                 <MaterialIcons name="inbox" size={28} color="#ccc" />
@@ -595,10 +724,17 @@ export default function Dashboard() {
               </View>
             )}
           </View>
-        </View>
+        </Animated.View>
 
         {/* Formularios Pendientes */}
-        <View style={styles.section}>
+        <Animated.View
+          style={[
+            styles.section,
+            {
+              opacity: fadeAnim,
+            },
+          ]}
+        >
           <View
             style={[styles.sectionHeader, { backgroundColor: COLORS.pending }]}
           >
@@ -608,22 +744,44 @@ export default function Dashboard() {
             </Text>
           </View>
           <View style={styles.sectionContent}>
-            {formsPending.length > 0 ? (
-              formsPending.slice(0, 3).map((form) => (
-                <View key={form.id} style={styles.listItem}>
-                  <View style={styles.listItemContent}>
-                    <Text style={styles.listItemTitle} numberOfLines={1}>
-                      {form.title}
-                    </Text>
-                    <Text style={styles.listItemSubtitle} numberOfLines={1}>
-                      {form.description}
-                    </Text>
-                    <Text style={styles.listItemDate}>
-                      {formatDate(form.created_at)}
-                    </Text>
-                  </View>
-                </View>
-              ))
+            {loading ? (
+              <>
+                <SkeletonListItem />
+                <SkeletonListItem />
+                <SkeletonListItem />
+              </>
+            ) : formsPending.length > 0 ? (
+              <ScrollView
+                style={styles.listScrollView}
+                nestedScrollEnabled={true}
+                showsVerticalScrollIndicator={true}
+              >
+                {formsPending.map((form) => (
+                  <TouchableOpacity
+                    key={form.id}
+                    style={styles.listItem}
+                    onPress={() => handleNavigateToForm(form)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.listItemContent}>
+                      <Text style={styles.listItemTitle} numberOfLines={1}>
+                        {form.title}
+                      </Text>
+                      <Text style={styles.listItemSubtitle} numberOfLines={1}>
+                        {form.description}
+                      </Text>
+                      <Text style={styles.listItemDate}>
+                        {formatDate(form.created_at)}
+                      </Text>
+                    </View>
+                    <MaterialIcons
+                      name="chevron-right"
+                      size={20}
+                      color="#999"
+                    />
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
             ) : (
               <View style={styles.emptyState}>
                 <MaterialIcons name="done-all" size={28} color="#10B981" />
@@ -633,10 +791,17 @@ export default function Dashboard() {
               </View>
             )}
           </View>
-        </View>
+        </Animated.View>
 
         {/* Formularios Por Aprobar */}
-        <View style={styles.section}>
+        <Animated.View
+          style={[
+            styles.section,
+            {
+              opacity: fadeAnim,
+            },
+          ]}
+        >
           <View
             style={[styles.sectionHeader, { backgroundColor: COLORS.approval }]}
           >
@@ -646,25 +811,48 @@ export default function Dashboard() {
             </Text>
           </View>
           <View style={styles.sectionContent}>
-            {pendingApprovals.length > 0 ? (
-              pendingApprovals.slice(0, 3).map((form) => (
-                <View
-                  key={`${form.form_id}-${form.response_id}`}
-                  style={styles.listItem}
-                >
-                  <View style={styles.listItemContent}>
-                    <Text style={styles.listItemTitle} numberOfLines={1}>
-                      {form.form_title}
-                    </Text>
-                    <Text style={styles.listItemSubtitle} numberOfLines={1}>
-                      Por: {form.submitted_by.name}
-                    </Text>
-                    <Text style={styles.listItemDate}>
-                      {formatDate(form.submitted_at)}
-                    </Text>
-                  </View>
-                </View>
-              ))
+            {loading ? (
+              <>
+                <SkeletonListItem />
+                <SkeletonListItem />
+                <SkeletonListItem />
+              </>
+            ) : pendingApprovals.length > 0 ? (
+              <ScrollView
+                style={styles.listScrollView}
+                nestedScrollEnabled={true}
+                showsVerticalScrollIndicator={true}
+              >
+                {pendingApprovals.map((form) => (
+                  <TouchableOpacity
+                    key={`${form.form_id}-${form.response_id}`}
+                    style={styles.listItem}
+                    onPress={() =>
+                      router.push(
+                        `/approval-detail?form_id=${form.form_id}&response_id=${form.response_id}`
+                      )
+                    }
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.listItemContent}>
+                      <Text style={styles.listItemTitle} numberOfLines={1}>
+                        {form.form_title}
+                      </Text>
+                      <Text style={styles.listItemSubtitle} numberOfLines={1}>
+                        Por: {form.submitted_by.name}
+                      </Text>
+                      <Text style={styles.listItemDate}>
+                        {formatDate(form.submitted_at)}
+                      </Text>
+                    </View>
+                    <MaterialIcons
+                      name="chevron-right"
+                      size={20}
+                      color="#999"
+                    />
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
             ) : (
               <View style={styles.emptyState}>
                 <MaterialIcons name="inbox" size={28} color="#ccc" />
@@ -674,7 +862,7 @@ export default function Dashboard() {
               </View>
             )}
           </View>
-        </View>
+        </Animated.View>
       </ScrollView>
     </LinearGradient>
   );
@@ -868,8 +1056,12 @@ const styles = StyleSheet.create({
   sectionContent: {
     padding: 8,
   },
+  listScrollView: {
+    maxHeight: 300,
+  },
   listItem: {
     flexDirection: "row",
+    alignItems: "center",
     padding: 8,
     borderBottomWidth: 1,
     borderBottomColor: "#f0f0f0",
@@ -891,6 +1083,37 @@ const styles = StyleSheet.create({
   listItemDate: {
     fontSize: 8,
     color: "#999",
+  },
+  skeletonText: {
+    width: 40,
+    height: 18,
+    backgroundColor: "#e0e0e0",
+    borderRadius: 4,
+  },
+  skeletonListItem: {
+    padding: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f0f0f0",
+  },
+  skeletonTitle: {
+    width: "80%",
+    height: 11,
+    backgroundColor: "#e0e0e0",
+    borderRadius: 4,
+    marginBottom: 6,
+  },
+  skeletonSubtitle: {
+    width: "60%",
+    height: 9,
+    backgroundColor: "#e0e0e0",
+    borderRadius: 4,
+    marginBottom: 6,
+  },
+  skeletonDate: {
+    width: "40%",
+    height: 8,
+    backgroundColor: "#e0e0e0",
+    borderRadius: 4,
   },
   emptyState: {
     alignItems: "center",
