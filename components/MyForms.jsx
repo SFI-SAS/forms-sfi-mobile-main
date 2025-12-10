@@ -46,6 +46,12 @@ export default function MyForms() {
   const inactivityTimer = useRef(null);
   const router = useRouter();
 
+  // 🔥 PAGINACIÓN
+  const [currentPage, setCurrentPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const PAGE_SIZE = 15;
+
   useFocusEffect(
     React.useCallback(() => {
       const disableBack = () => true;
@@ -119,14 +125,20 @@ export default function MyForms() {
     handleViewForms();
   }, []);
 
-  const handleViewForms = async () => {
-    setLoading(true);
+  const handleViewForms = async (page = 1, append = false) => {
+    if (!append) {
+      setLoading(true);
+      setCurrentPage(1);
+      setHasMore(true);
+    }
+
     try {
       const accessToken = await AsyncStorage.getItem("authToken");
 
       if (!accessToken) {
         console.log("🔒 No hay token disponible en MyForms");
         setLoading(false);
+        setLoadingMore(false);
         return;
       }
 
@@ -136,10 +148,12 @@ export default function MyForms() {
       const offlineDataRaw = await AsyncStorage.getItem(MY_FORMS_OFFLINE_KEY);
       let offlineData = offlineDataRaw ? JSON.parse(offlineDataRaw) : null;
 
-      if (!accessToken && offlineData) {
+      // Si es offline y no estamos agregando, usar caché
+      if (!accessToken && offlineData && !append) {
         setForms(offlineData.formsList || []);
         setResponsesByForm(offlineData.grouped || {});
         setLoading(false);
+        setLoadingMore(false);
         return;
       }
 
@@ -148,8 +162,10 @@ export default function MyForms() {
         try {
           const backendUrl = await getBackendUrl();
 
-          // ✅ OPTIMIZADO: Una sola consulta para obtener TODAS las respuestas
-          console.log("🌐 Obteniendo todas las respuestas del usuario...");
+          // ✅ OPTIMIZADO: Carga paginada
+          console.log(
+            `🌐 Obteniendo respuestas página ${page} (${PAGE_SIZE} items)...`
+          );
           const responsesRes = await fetch(
             `${backendUrl}/responses/get_responses/all`,
             {
@@ -163,25 +179,38 @@ export default function MyForms() {
           }
 
           const allResponsesData = await responsesRes.json();
-          console.log("✅ Respuestas completas obtenidas:", allResponsesData);
+          console.log("✅ Respuestas completas obtenidas");
 
           if (!allResponsesData || !Array.isArray(allResponsesData.forms)) {
             throw new Error("No se pudieron cargar las respuestas.");
           }
 
-          // ✅ PROCESAR datos del endpoint optimizado
-          grouped = {};
-          formsList = [];
+          // ✅ PROCESAR datos con paginación simulada
+          const startIndex = (page - 1) * PAGE_SIZE;
+          const endIndex = startIndex + PAGE_SIZE;
+          const paginatedForms = allResponsesData.forms.slice(
+            startIndex,
+            endIndex
+          );
 
-          for (const formData of allResponsesData.forms) {
+          // Determinar si hay más datos
+          const hasMoreData = endIndex < allResponsesData.forms.length;
+          setHasMore(hasMoreData);
+
+          grouped = append ? { ...responsesByForm } : {};
+          formsList = append ? [...forms] : [];
+
+          for (const formData of paginatedForms) {
             if (formData.response_count > 0) {
-              // Agregar formulario a la lista
-              formsList.push({
-                id: formData.form_id,
-                form_title: formData.form_title || "Sin título",
-                form_description: formData.form_description || "",
-                submitted_by: formData.responses[0]?.submitted_by || {},
-              });
+              // Agregar formulario a la lista si no existe
+              if (!formsList.find((f) => f.id === formData.form_id)) {
+                formsList.push({
+                  id: formData.form_id,
+                  form_title: formData.form_title || "Sin título",
+                  form_description: formData.form_description || "",
+                  submitted_by: formData.responses[0]?.submitted_by || {},
+                });
+              }
 
               // Organizar respuestas por form_id
               grouped[formData.form_id] = formData.responses;
@@ -191,15 +220,15 @@ export default function MyForms() {
           setResponsesByForm(grouped);
           setForms(formsList);
 
-          // ✅ GUARDAR datos completos en cache
-          await AsyncStorage.setItem(
-            MY_FORMS_OFFLINE_KEY,
-            JSON.stringify({ formsList, grouped })
-          );
-          console.log("✅ Cache actualizado con datos optimizados:", {
-            formsList,
-            grouped,
-          });
+          // ✅ GUARDAR solo primera página en cache
+          if (page === 1) {
+            await AsyncStorage.setItem(
+              MY_FORMS_OFFLINE_KEY,
+              JSON.stringify({ formsList, grouped })
+            );
+            console.log("✅ Cache actualizado");
+          }
+
           onlineOk = true;
         } catch (err) {
           console.error("❌ Error obteniendo respuestas:", err);
@@ -208,7 +237,7 @@ export default function MyForms() {
       }
 
       // ✅ FALLBACK a cache offline si la consulta online falla
-      if (!onlineOk && offlineData) {
+      if (!onlineOk && offlineData && !append) {
         setForms(offlineData.formsList || []);
         setResponsesByForm(offlineData.grouped || {});
       }
@@ -218,13 +247,26 @@ export default function MyForms() {
       const isAuthError = await handleAuthError(error);
 
       if (!isAuthError) {
-        setForms([]);
-        setResponsesByForm({});
+        if (!append) {
+          setForms([]);
+          setResponsesByForm({});
+        }
         Alert.alert("Error", "Unable to load submitted forms.");
       }
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
+  };
+
+  // 🔥 SCROLL INFINITO: Cargar más formularios
+  const loadMoreForms = async () => {
+    if (!hasMore || loadingMore || loading) return;
+
+    setLoadingMore(true);
+    const nextPage = currentPage + 1;
+    setCurrentPage(nextPage);
+    await handleViewForms(nextPage, true);
   };
 
   const toggleExpand = (formId) => {
@@ -427,6 +469,19 @@ export default function MyForms() {
             style={styles.scrollView}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
+            onScroll={({ nativeEvent }) => {
+              const { layoutMeasurement, contentOffset, contentSize } =
+                nativeEvent;
+              const paddingToBottom = 50;
+              const isCloseToBottom =
+                layoutMeasurement.height + contentOffset.y >=
+                contentSize.height - paddingToBottom;
+
+              if (isCloseToBottom && hasMore && !loadingMore) {
+                loadMoreForms();
+              }
+            }}
+            scrollEventThrottle={400}
           >
             {forms.map((form, index) => (
               <View key={form.id} style={styles.formCard}>
@@ -688,6 +743,22 @@ export default function MyForms() {
                 )}
               </View>
             ))}
+
+            {/* Indicador de carga al final */}
+            {loadingMore && (
+              <View style={{ paddingVertical: 20, alignItems: "center" }}>
+                <ActivityIndicator size="large" color="#108C9B" />
+                <Text style={styles.loadingText}>Loading more...</Text>
+              </View>
+            )}
+
+            {!hasMore && forms.length > 0 && (
+              <View style={{ paddingVertical: 20, alignItems: "center" }}>
+                <Text style={{ color: "#666", fontSize: 14 }}>
+                  All forms loaded
+                </Text>
+              </View>
+            )}
           </ScrollView>
         )}
       </View>

@@ -23,6 +23,13 @@ import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { SvgXml } from "react-native-svg";
 import { getMultipleItems } from "../utils/asyncStorageHelper";
+import { initCacheManager } from "../utils/cacheManager";
+import {
+  login,
+  validateToken,
+  logout,
+  isLoggedOut as checkIsLoggedOut,
+} from "../services/auth";
 
 const { width, height } = Dimensions.get("window");
 
@@ -92,98 +99,33 @@ export function Main() {
   );
 
   useEffect(() => {
-    const checkToken = async () => {
+    const initializeApp = async () => {
       try {
-        // ✅ Optimización: Cargar authToken y isLoggedOut en paralelo
-        const storageData = await getMultipleItems([
-          "authToken",
-          "isLoggedOut",
-        ]);
-        const savedToken = storageData["authToken"];
-        const isLoggedOut = storageData["isLoggedOut"];
+        console.log("🚀 Inicializando aplicación...");
 
-        if (savedToken && isLoggedOut !== "true") {
-          const backendUrlToUse = await getBackendUrl();
-          let responseUser;
-          let isOnline = false;
-          try {
-            isOnline = await NetInfo.fetch().then((state) => state.isConnected);
-            if (!isOnline) {
-              return;
-            }
-            responseUser = await fetch(
-              `${backendUrlToUse}/auth/validate-token`,
-              {
-                method: "GET",
-                headers: { Authorization: `Bearer ${savedToken}` },
-              }
-            );
-          } catch (err) {
-            if (isOnline) {
-              setBackendUrlSet(false);
-              setShowBackendModal(true);
-              setBackendErrorMsg(
-                "No se pudo conectar al backend. Por favor revisa la URL o tu conexión."
-              );
-              setShowBackendError(true);
-            }
-            return;
-          }
+        // 1. Inicializar Cache Manager
+        await initCacheManager();
 
-          if (!responseUser.ok) {
-            const errorUserText = await responseUser.text();
-            if (
-              (await NetInfo.fetch()).isConnected &&
-              (errorUserText.includes("Failed to fetch") ||
-                errorUserText.includes("Network request failed") ||
-                errorUserText.includes("ENOTFOUND") ||
-                errorUserText.includes("timeout") ||
-                errorUserText.includes("NetworkError") ||
-                errorUserText.includes("offline"))
-            ) {
-              setBackendUrlSet(false);
-              setShowBackendModal(true);
-              setBackendErrorMsg(
-                "No se pudo conectar al backend. Por favor revisa la URL o tu conexión."
-              );
-              setShowBackendError(true);
-              return;
-            }
-            throw new Error(errorUserText);
-          }
+        // 2. Verificar si el usuario cerró sesión manualmente
+        const loggedOut = await checkIsLoggedOut();
+        if (loggedOut) {
+          console.log("🚪 Usuario cerró sesión previamente");
+          return;
+        }
 
-          const userData = await responseUser.json();
-          setUserData(userData);
-          router.push({
-            pathname: "/home",
-            params: { name: userData.name, email: userData.email },
-          });
+        // 4. Validar token existente
+        console.log("🔍 Validando token...");
+        const validation = await validateToken();
+
+        if (validation.valid) {
+          console.log("✅ Token válido - navegando a Home");
+          router.replace("/home");
         } else {
-          await AsyncStorage.removeItem("authToken");
-          await AsyncStorage.setItem("isLoggedOut", "true");
+          console.log(`❌ Token inválido: ${validation.reason}`);
+          // Token inválido o expirado - mostrar login
         }
       } catch (error) {
-        NetInfo.fetch().then((state) => {
-          if (
-            state.isConnected &&
-            ((error.message &&
-              (error.message.includes("Failed to fetch") ||
-                error.message.includes("Network request failed") ||
-                error.message.includes("ENOTFOUND") ||
-                error.message.includes("timeout") ||
-                error.message.includes("NetworkError") ||
-                error.message.includes("offline"))) ||
-              (typeof error === "string" && error.includes("offline")))
-          ) {
-            setBackendUrlSet(false);
-            setShowBackendModal(true);
-            setBackendErrorMsg(
-              "No se pudo conectar al backend. Por favor revisa la URL o tu conexión."
-            );
-            setShowBackendError(true);
-          }
-        });
-        console.error("❌ Error obteniendo el token:", error);
+        console.error("❌ Error inicializando app:", error);
       }
     };
 
@@ -195,7 +137,7 @@ export function Main() {
     NetInfo.fetch().then((state) => setIsOffline(!state.isConnected));
     const unsubscribe = NetInfo.addEventListener(handleNetworkChange);
 
-    checkToken();
+    initializeApp();
     return () => unsubscribe();
   }, [router, isOffline]);
 
@@ -219,161 +161,50 @@ export function Main() {
 
     setSigningIn(true);
     try {
-      if (isOffline) {
+      console.log("🔐 Iniciando login...");
+
+      // Usar el servicio de autenticación
+      const result = await login(username, password);
+
+      if (result.success) {
+        console.log("✅ Login exitoso");
+
+        // Guardar credenciales para modo offline
         const tokensRaw = await AsyncStorage.getItem(TOKENS_KEY);
         const tokens = tokensRaw ? JSON.parse(tokensRaw) : {};
-        const userEntry = tokens[username.toLowerCase()];
-        if (userEntry && userEntry.password === password && userEntry.token) {
-          Alert.alert("Offline Mode", "Logged in without connection.");
-          await AsyncStorage.setItem("isLoggedOut", "false");
-          await AsyncStorage.setItem("authToken", userEntry.token);
-          router.push("/home");
-          return;
+        tokens[username.toLowerCase()] = {
+          password,
+          token: result.token,
+        };
+        await AsyncStorage.setItem(TOKENS_KEY, JSON.stringify(tokens));
+
+        // Navegar a Home
+        router.push("/home");
+      } else {
+        console.error("❌ Login fallido:", result.error);
+
+        // Verificar si es problema de backend
+        if (
+          result.error.includes("URL del backend") ||
+          result.error.includes("conexión")
+        ) {
+          setBackendErrorMsg(result.error);
+          setShowBackendError(true);
         } else {
           setErrors({
             password:
-              "No saved token or credentials for this user. Please log in online at least once.",
+              result.error ||
+              "Incorrect username or password. Please try again.",
           });
-          setSigningIn(false);
-          return;
         }
       }
-
-      const backendUrlToUse = await getBackendUrl();
-
-      const params = encodeFormData({
-        grant_type: "password",
-        username: username,
-        password: password,
-        scope: "",
-        client_id: "",
-        client_secret: "",
-      });
-
-      let response;
-      try {
-        response = await fetch(`${backendUrlToUse}/auth/token`, {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: params,
-        });
-      } catch (fetchError) {
-        setBackendErrorMsg(
-          "Could not connect to the backend. Please check the URL or your connection."
-        );
-        setShowBackendError(true);
-        setSigningIn(false);
-        return;
-      }
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        if (
-          errorText.includes("Failed to fetch") ||
-          errorText.includes("Network request failed") ||
-          errorText.includes("ENOTFOUND") ||
-          errorText.includes("timeout") ||
-          errorText.includes("NetworkError")
-        ) {
-          setBackendErrorMsg(
-            "Could not connect to the backend. Please check the URL or your connection."
-          );
-          setShowBackendError(true);
-          setSigningIn(false);
-          return;
-        }
-        setErrors({
-          password: "Incorrect username or password. Please try again.",
-        });
-        setSigningIn(false);
-        return;
-      }
-
-      const text = await response.text();
-
-      if (text.trim().startsWith("<!DOCTYPE html>")) {
-        setErrors({
-          password: "Server connection error. Please try again later.",
-        });
-        setSigningIn(false);
-        return;
-      }
-
-      let json;
-      try {
-        json = JSON.parse(text);
-      } catch (parseError) {
-        setErrors({
-          password: "Server response is not valid JSON.",
-        });
-        setSigningIn(false);
-        return;
-      }
-
-      const token = json.access_token;
-
-      await AsyncStorage.setItem("authToken", token);
-      await AsyncStorage.setItem("isLoggedOut", "false");
-
-      const tokensRaw = await AsyncStorage.getItem(TOKENS_KEY);
-      const tokens = tokensRaw ? JSON.parse(tokensRaw) : {};
-      tokens[username.toLowerCase()] = {
-        password,
-        token,
-      };
-      await AsyncStorage.setItem(TOKENS_KEY, JSON.stringify(tokens));
-
-      let responseUser;
-      try {
-        responseUser = await fetch(`${backendUrlToUse}/auth/validate-token`, {
-          method: "GET",
-          headers: { Authorization: `Bearer ${token}` },
-        });
-      } catch (fetchError) {
-        setBackendErrorMsg(
-          "Could not connect to the backend. Please check the URL or your connection."
-        );
-        setShowBackendError(true);
-        setSigningIn(false);
-        return;
-      }
-
-      if (!responseUser.ok) {
-        setErrors({
-          password: "Could not validate user session. Please try again.",
-        });
-        setSigningIn(false);
-        return;
-      }
-
-      const userData = await responseUser.json();
-      setUserData(userData);
-      await AsyncStorage.setItem("isLoggedOut", "false");
-      const userInfoKey = `user_info_${username.toLowerCase()}`;
-      await AsyncStorage.setItem(
-        userInfoKey,
-        JSON.stringify({
-          ...userData,
-          username,
-          password,
-          token,
-        })
-      );
-
-      router.push({
-        pathname: "/home",
-        params: { name: userData.name, email: userData.email },
-      });
-
-      await AsyncStorage.setItem("username", username);
-      await AsyncStorage.setItem("password", password);
-
-      setSigningIn(false);
     } catch (error) {
-      setSigningIn(false);
+      console.error("❌ Error en handleLogin:", error);
       setErrors({
-        password: "Unexpected error. Please try again.",
+        password: "An unexpected error occurred. Please try again.",
       });
+    } finally {
+      setSigningIn(false);
     }
   };
 

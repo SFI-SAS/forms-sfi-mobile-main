@@ -19,6 +19,12 @@ import { LinearGradient } from "expo-linear-gradient";
 import { MaterialIcons } from "@expo/vector-icons";
 import Svg, { Circle, G, Text as SvgText } from "react-native-svg";
 import { useRouter } from "expo-router";
+import {
+  getCompletedFormsWithResponses,
+  getAssignedFormsSummary,
+  getFormsToApprove,
+  validateToken,
+} from "../services/api";
 
 const { width, height } = Dimensions.get("window");
 
@@ -204,11 +210,6 @@ const COLORS = {
   approval: "#8B5CF6",
 };
 
-const getBackendUrl = async () => {
-  const stored = await AsyncStorage.getItem("backend_url");
-  return stored || "";
-};
-
 export default function Dashboard() {
   const router = useRouter();
   const [formsCompleted, setFormsCompleted] = useState([]);
@@ -218,11 +219,20 @@ export default function Dashboard() {
   const [userInfo, setUserInfo] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  
-  // ✅ OPTIMIZACIÓN: Calcular formsPending con useMemo en lugar de useEffect + useState
+  // ✅ OPTIMIZACIÓN: Calcular formsPending de forma inteligente
   const formsPending = useMemo(() => {
-    const completedIds = new Set(formsCompleted.map((f) => f.id));
-    return formsAssigned.filter((f) => !completedIds.has(f.id));
+    // Obtener IDs de formularios completados (desde completed_forms_with_responses)
+    const completedFormIds = new Set();
+    if (Array.isArray(formsCompleted)) {
+      formsCompleted.forEach((item) => {
+        if (item.form && item.form.id) {
+          completedFormIds.add(item.form.id);
+        }
+      });
+    }
+
+    // Filtrar formularios asignados que NO estén completados
+    return formsAssigned.filter((f) => !completedFormIds.has(f.id));
   }, [formsCompleted, formsAssigned]);
 
   // Animated values
@@ -288,127 +298,76 @@ export default function Dashboard() {
       ]).start();
 
       try {
-        const token = await AsyncStorage.getItem("authToken");
-        if (!token) {
-          setLoading(false);
-          return;
-        }
+        console.log(
+          "📊 [Dashboard] Cargando estadísticas desde endpoints PC..."
+        );
 
-        const backendUrl = await getBackendUrl();
-
-        // ✅ OPTIMIZACIÓN: Cargar todos los datos primero, luego hacer 1 solo setState batch
+        // ✅ NUEVO: Validar token y obtener info de usuario
         let userInfoData = null;
-        let completedForms = [];
-        let assignedForms = [];
-        let approvalForms = [];
-        let approvalStatusData = [];
-
-        // Cargar info de usuario
         try {
+          const userResponse = await validateToken();
+          if (userResponse && userResponse.user) {
+            userInfoData = {
+              name: userResponse.user.name,
+              user_type: userResponse.user.user_type,
+              email: userResponse.user.email,
+            };
+            // Guardar en AsyncStorage para uso offline
+            await AsyncStorage.setItem(
+              "user_info_offline",
+              JSON.stringify(userInfoData)
+            );
+          }
+        } catch (err) {
+          console.warn("⚠️ Error validando token, usando datos offline:", err);
           const userInfoStored =
             await AsyncStorage.getItem("user_info_offline");
           if (userInfoStored) {
             userInfoData = JSON.parse(userInfoStored);
           }
-        } catch (e) {
-          console.warn("Error cargando user info:", e);
         }
 
-        // Obtener formularios completados
+        // ✅ NUEVO: Obtener formularios completados con respuestas (endpoint PC)
+        let completedForms = [];
         try {
-          const response = await fetch(
-            `${backendUrl}/forms/users/completed_forms`,
-            {
-              headers: { Authorization: `Bearer ${token}` },
-            }
+          const data = await getCompletedFormsWithResponses();
+          completedForms = data || [];
+          console.log(
+            `✅ [Dashboard] ${completedForms.length} formularios completados`
           );
-          if (response.ok) {
-            const data = await response.json();
-            completedForms = data || [];
-          }
         } catch (err) {
-          console.error("Error obteniendo formularios completados:", err);
+          console.error("❌ Error obteniendo formularios completados:", err);
         }
 
-        // Obtener formularios asignados
+        // ✅ NUEVO: Obtener formularios asignados (endpoint PC)
+        let assignedForms = [];
         try {
-          const response = await fetch(
-            `${backendUrl}/forms/users/form_by_user`,
-            {
-              headers: { Authorization: `Bearer ${token}` },
-            }
+          const data = await getAssignedFormsSummary();
+          assignedForms = data || [];
+          console.log(
+            `✅ [Dashboard] ${assignedForms.length} formularios asignados`
           );
-          if (response.ok) {
-            const data = await response.json();
-            assignedForms = data || [];
-          }
         } catch (err) {
-          console.error("Error obteniendo formularios asignados:", err);
+          console.error("❌ Error obteniendo formularios asignados:", err);
         }
 
-        // Obtener formularios por aprobar
+        // ✅ NUEVO: Obtener formularios por aprobar (endpoint PC)
+        let approvalForms = [];
         try {
-          const response = await fetch(
-            `${backendUrl}/forms/user/assigned-forms-with-responses`,
-            {
-              headers: { Authorization: `Bearer ${token}` },
-            }
+          const data = await getFormsToApprove();
+          approvalForms = data || [];
+          console.log(
+            `✅ [Dashboard] ${approvalForms.length} formularios por aprobar`
           );
-          if (response.ok) {
-            const data = await response.json();
-            approvalForms = data || [];
-          }
         } catch (err) {
-          console.error("Error obteniendo formularios por aprobar:", err);
+          console.error("❌ Error obteniendo formularios por aprobar:", err);
         }
 
-        // Obtener estado de aprobación de mis formularios
-        try {
-          if (completedForms.length > 0) {
-            for (const form of completedForms) {
-              try {
-                const responseData = await fetch(
-                  `${backendUrl}/forms/responses/?form_id=${form.id}`,
-                  {
-                    headers: { Authorization: `Bearer ${token}` },
-                  }
-                );
-
-                if (responseData.ok) {
-                  const responses = await responseData.json();
-                  if (responses && responses.length > 0) {
-                    const latestResponse = responses[responses.length - 1];
-                    approvalStatusData.push({
-                      form_id: form.id,
-                      form_title: form.title,
-                      form_description: form.description,
-                      response_id: latestResponse.response_id,
-                      submitted_at: latestResponse.submitted_at,
-                      approval_status: latestResponse.approval_status,
-                      message: latestResponse.message,
-                      approvals: latestResponse.approvals || [],
-                    });
-                  }
-                }
-              } catch (err) {
-                console.error(
-                  `Error obteniendo respuestas para formulario ${form.id}:`,
-                  err
-                );
-              }
-            }
-          }
-        } catch (err) {
-          console.error("Error obteniendo estado de aprobaciones:", err);
-        }
-
-        // ✅ BATCHING: Actualizar todos los estados de una vez usando React 18 automatic batching
-        // React 18 agrupa automáticamente los setState dentro de async functions
+        // ✅ BATCH UPDATE: Un solo setState para evitar re-renders múltiples
         setUserInfo(userInfoData);
         setFormsCompleted(completedForms);
         setFormsAssigned(assignedForms);
         setFormsToApprove(approvalForms);
-        setMyFormsApprovalStatus(approvalStatusData);
         setLoading(false);
       } catch (error) {
         console.error("Error cargando datos del dashboard:", error);
@@ -689,31 +648,35 @@ export default function Dashboard() {
                 nestedScrollEnabled={true}
                 showsVerticalScrollIndicator={true}
               >
-                {formsCompleted.map((form) => (
-                  <TouchableOpacity
-                    key={form.id}
-                    style={styles.listItem}
-                    onPress={() => handleNavigateToForm(form)}
-                    activeOpacity={0.7}
-                  >
-                    <View style={styles.listItemContent}>
-                      <Text style={styles.listItemTitle} numberOfLines={1}>
-                        {form.title}
-                      </Text>
-                      <Text style={styles.listItemSubtitle} numberOfLines={1}>
-                        {form.description}
-                      </Text>
-                      <Text style={styles.listItemDate}>
-                        {formatDate(form.created_at)}
-                      </Text>
-                    </View>
-                    <MaterialIcons
-                      name="chevron-right"
-                      size={20}
-                      color="#999"
-                    />
-                  </TouchableOpacity>
-                ))}
+                {formsCompleted.map((item) => {
+                  // ✅ Nueva estructura: { form: {...}, responses: [...] }
+                  const form = item.form || item;
+                  return (
+                    <TouchableOpacity
+                      key={form.id}
+                      style={styles.listItem}
+                      onPress={() => handleNavigateToForm(form)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.listItemContent}>
+                        <Text style={styles.listItemTitle} numberOfLines={1}>
+                          {form.title}
+                        </Text>
+                        <Text style={styles.listItemSubtitle} numberOfLines={1}>
+                          {form.description}
+                        </Text>
+                        <Text style={styles.listItemDate}>
+                          {formatDate(form.created_at)}
+                        </Text>
+                      </View>
+                      <MaterialIcons
+                        name="chevron-right"
+                        size={20}
+                        color="#999"
+                      />
+                    </TouchableOpacity>
+                  );
+                })}
               </ScrollView>
             ) : (
               <View style={styles.emptyState}>

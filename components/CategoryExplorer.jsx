@@ -18,6 +18,7 @@ import {
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
+import NetInfo from "@react-native-community/netinfo";
 
 const { width, height } = Dimensions.get("window");
 
@@ -71,6 +72,7 @@ export default function CategoryExplorer({ onSelectForm, refreshTrigger }) {
   const [formsCache, setFormsCache] = useState({});
   const [categoriesTimestamp, setCategoriesTimestamp] = useState({});
   const [formsTimestamp, setFormsTimestamp] = useState({});
+  const [isOnline, setIsOnline] = useState(true);
 
   // ✅ NUEVO: Estados para control de carga y prevención de bucles
   const [isLoadingCategories, setIsLoadingCategories] = useState(false);
@@ -78,6 +80,16 @@ export default function CategoryExplorer({ onSelectForm, refreshTrigger }) {
   const [lastLoadedCategory, setLastLoadedCategory] = useState(null);
   const [cacheLoaded, setCacheLoaded] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
+
+  // ✅ DETECTAR CONECTIVIDAD
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      const connected = state.isConnected;
+      setIsOnline(connected);
+      console.log(connected ? "🌐 ONLINE" : "📴 OFFLINE");
+    });
+    return () => unsubscribe();
+  }, []);
 
   // ✅ NUEVO: Referencias para mantener estado de scroll y navegación
   const scrollViewRef = useRef(null);
@@ -91,9 +103,23 @@ export default function CategoryExplorer({ onSelectForm, refreshTrigger }) {
   });
   const hasRestoredState = useRef(false); // ✅ NUEVO: Evitar múltiples restauraciones
 
-  // Cargar cache al inicio - SOLO UNA VEZ
+  // ✅ DETECTAR CONECTIVIDAD
   useEffect(() => {
-    if (!cacheLoaded) {
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      const connected = state.isConnected;
+      setIsOnline(connected);
+      if (connected) {
+        console.log("🌐 [CategoryExplorer] ONLINE - Consultando endpoints");
+      } else {
+        console.log("📴 [CategoryExplorer] OFFLINE - Usando AsyncStorage");
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Cargar cache al inicio - SOLO cuando esté OFFLINE
+  useEffect(() => {
+    if (!cacheLoaded && !isOnline) {
       loadCacheFromStorage()
         .then(() => {
           setCacheLoaded(true);
@@ -341,20 +367,18 @@ export default function CategoryExplorer({ onSelectForm, refreshTrigger }) {
 
     const cacheKey = parentId === null ? "root" : parentId.toString();
 
-    // ✅ SI HAY CACHE: Usarlo siempre (precargado desde Home)
-    if (!forceRefresh && categoriesCache[cacheKey]) {
-      console.log(`📋 Usando cache de categorías (${cacheKey})`);
+    // ✅ SI ESTÁ OFFLINE: Usar caché
+    if (!isOnline && categoriesCache[cacheKey]) {
+      console.log(`📴 [OFFLINE] Usando caché de categorías (${cacheKey})`);
       setCategories(categoriesCache[cacheKey]);
       return;
     }
 
-    // ✅ SI NO HAY CACHE Y NO ES REFRESH: Esperar a que Home precargue
-    // (pero permitir que se intente cargar una vez)
-    if (!forceRefresh) {
+    // ✅ SI ESTÁ ONLINE: Siempre consultar endpoint
+    if (isOnline) {
       console.log(
-        `⚠️ Cache no disponible para (${cacheKey}), cargando desde backend...`
+        `🌐 [ONLINE] Consultando categorías desde endpoint: ${cacheKey}`
       );
-      // No retornar, continuar para cargar desde backend
     }
 
     // ✅ ACTIVAR LOCK
@@ -396,21 +420,26 @@ export default function CategoryExplorer({ onSelectForm, refreshTrigger }) {
       }
 
       const now = Date.now();
-      console.log(`✅ ${data.length} categorías cargadas (${cacheKey})`);
+      console.log(
+        `✅ ${data.length} categorías cargadas desde endpoint (${cacheKey})`
+      );
 
       setCategories(data);
 
-      // ✅ ACTUALIZAR CACHE - SIN BLOQUEAR UI
+      // ✅ ACTUALIZAR CACHE para uso offline futuro
       try {
         const newCache = { ...categoriesCache, [cacheKey]: data };
         const newTimestamp = { ...categoriesTimestamp, [cacheKey]: now };
         setCategoriesCache(newCache);
         setCategoriesTimestamp(newTimestamp);
 
-        // ✅ Guardar en background con debounce (no bloquea)
+        // ✅ Guardar en AsyncStorage como respaldo para modo offline
         saveCacheToStorage(newCache, formsCache, newTimestamp, formsTimestamp);
+        console.log(
+          `💾 Respaldo guardado en AsyncStorage para uso offline (${cacheKey})`
+        );
       } catch (cacheErr) {
-        console.warn("⚠️ Error actualizando cache memoria:", cacheErr.message);
+        console.warn("⚠️ Error guardando respaldo:", cacheErr.message);
       }
     } catch (error) {
       console.error("❌ Error cargando categorías:", error);
@@ -439,20 +468,17 @@ export default function CategoryExplorer({ onSelectForm, refreshTrigger }) {
     const cacheKey =
       categoryId === null ? "root" : `${categoryId}_${includeSubcategories}`;
 
-    // ✅ SI HAY CACHE: Usarlo siempre (precargado desde Home)
-    if (!forceRefresh && formsCache[cacheKey]) {
-      console.log(`📋 Usando cache de formularios (${cacheKey})`);
+    // ✅ SI ESTÁ OFFLINE: Usar caché
+    if (!isOnline && formsCache[cacheKey]) {
+      console.log(`📴 [OFFLINE] Usando cache de formularios (${cacheKey})`);
       setCurrentForms(formsCache[cacheKey]);
       return;
     }
 
-    // ✅ SI NO HAY CACHE Y NO ES REFRESH: Intentar cargar desde backend
-    if (!forceRefresh) {
-      console.log(
-        `⚠️ Cache no disponible para (${cacheKey}), cargando desde backend...`
-      );
-      // No retornar, continuar para cargar desde backend
-    }
+    // ✅ SI ESTÁ ONLINE: Siempre consultar endpoint
+    console.log(
+      `🌐 [ONLINE] Consultando formularios desde endpoint: ${cacheKey}`
+    );
 
     // ✅ ACTIVAR LOCK
     setIsLoadingForms(true);
@@ -492,26 +518,31 @@ export default function CategoryExplorer({ onSelectForm, refreshTrigger }) {
       }
 
       const now = Date.now();
-      console.log(`✅ ${data.length} formularios cargados (${cacheKey})`);
+      console.log(
+        `✅ ${data.length} formularios cargados desde endpoint (${cacheKey})`
+      );
 
       setCurrentForms(data);
 
-      // ✅ ACTUALIZAR CACHE - SIN BLOQUEAR UI
+      // ✅ ACTUALIZAR CACHE para uso offline futuro
       try {
         const newCache = { ...formsCache, [cacheKey]: data };
         const newTimestamp = { ...formsTimestamp, [cacheKey]: now };
         setFormsCache(newCache);
         setFormsTimestamp(newTimestamp);
 
-        // ✅ Guardar en background con debounce (no bloquea)
+        // ✅ Guardar en AsyncStorage como respaldo para modo offline
         saveCacheToStorage(
           categoriesCache,
           newCache,
           categoriesTimestamp,
           newTimestamp
         );
+        console.log(
+          `💾 Respaldo guardado en AsyncStorage para uso offline (${cacheKey})`
+        );
       } catch (cacheErr) {
-        console.warn("⚠️ Error actualizando cache memoria:", cacheErr.message);
+        console.warn("⚠️ Error guardando respaldo:", cacheErr.message);
       }
     } catch (error) {
       console.error("❌ Error cargando formularios:", error);

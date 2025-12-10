@@ -12,6 +12,7 @@ import {
   ScrollView,
 } from "react-native";
 import { captureError } from "../utils/errorLogger";
+import crashlyticsService from "../services/crashlytics";
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -36,6 +37,17 @@ class ErrorBoundary extends React.Component {
     // Registrar el error en el sistema de logs
     console.error("🔥 ErrorBoundary capturó un error:", error);
     console.error("📋 Información adicional:", errorInfo);
+
+    // ✅ Enviar a Crashlytics PRIMERO
+    try {
+      crashlyticsService.setAttribute(
+        "componentStack",
+        errorInfo.componentStack?.substring(0, 100) || "N/A"
+      );
+      crashlyticsService.recordError(error, "React ErrorBoundary");
+    } catch (e) {
+      console.error("Error enviando a Crashlytics:", e);
+    }
 
     // Guardar error en logs INMEDIATAMENTE sin await
     captureError(error, {

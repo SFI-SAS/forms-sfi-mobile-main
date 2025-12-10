@@ -4,7 +4,7 @@ import { createStackNavigator } from "@react-navigation/stack";
 
 import { Main } from "./components/Main";
 import Home from "./components/Home";
-import FormatScreen from "./components/FormatScreen";
+import FormatScreen from "./components/FormatScreen.tsx";
 import MyForms from "./components/MyForms";
 import PendingForms from "./components/PendingForms";
 
@@ -12,6 +12,7 @@ import PendingForms from "./components/PendingForms";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { initializeLogger } from "./utils/errorLogger";
 import { initializeErrorHandlers } from "./utils/globalErrorHandler";
+import crashlyticsService from "./services/crashlytics";
 
 const Stack = createStackNavigator();
 
@@ -22,6 +23,9 @@ export default function App() {
       try {
         console.log("🚀 Inicializando sistema de errores...");
 
+        // ✅ Inicializar Firebase Crashlytics
+        await crashlyticsService.initialize();
+
         // Inicializar logger
         await initializeLogger();
 
@@ -31,6 +35,7 @@ export default function App() {
         console.log("✅ Sistema de errores inicializado correctamente");
       } catch (error) {
         console.error("❌ Error inicializando sistema de errores:", error);
+        crashlyticsService.recordError(error, "App.js - initializeErrorSystem");
       }
     };
 

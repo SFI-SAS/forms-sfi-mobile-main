@@ -513,19 +513,47 @@ const FirmField = ({
         const script = document.createElement('script');
         script.src = 'https://reconocimiento-facial-safe.service.saferut.com/index.js';
         script.async = true;
+        script.crossOrigin = 'anonymous';
         
         script.onload = () => {
             console.log('✅ Script SFI Facial cargado');
             sendMessage('script-loaded');
+            window.scriptLoaded = true;
             initSFIFacial();
         };
         
         script.onerror = (error) => {
             console.error('❌ Error cargando SFI Facial:', error);
-            sendMessage('script-error', { error: error.message });
+            sendMessage('script-error', { error: error?.message || 'Error desconocido' });
+            window.scriptLoadError = true;
+            
+            // Reintentar con configuración diferente
+            console.log('🔄 Reintentando carga de script...');
+            const retryScript = document.createElement('script');
+            retryScript.src = 'https://reconocimiento-facial-safe.service.saferut.com/index.js';
+            retryScript.type = 'module';
+            retryScript.onload = () => {
+                console.log('✅ Script cargado en segundo intento');
+                window.scriptLoaded = true;
+                initSFIFacial();
+            };
+            retryScript.onerror = () => {
+                console.error('❌ Error en segundo intento también');
+                sendMessage('script-failed', { error: 'No se pudo cargar el componente después de reintentos' });
+            };
+            document.head.appendChild(retryScript);
         };
 
         document.head.appendChild(script);
+        
+        // Timeout de 10 segundos para cargar el script
+        setTimeout(() => {
+            if (!window.scriptLoaded && !window.scriptLoadError) {
+                console.warn('⚠️ Timeout cargando script, intentando inicializar de todos modos...');
+                sendMessage('script-timeout');
+                initSFIFacial();
+            }
+        }, 10000);
 
         function initSFIFacial() {
             const container = document.getElementById('container');
@@ -778,7 +806,7 @@ const FirmField = ({
                     source={{
                       html: getWebViewHTML(),
                       baseUrl:
-                        "https://reconocimiento-facial-safe.service.saferut.com/index.js",
+                        "https://reconocimiento-facial-safe.service.saferut.com/",
                     }}
                     originWhitelist={["*"]}
                     javaScriptEnabled={true}
@@ -787,7 +815,12 @@ const FirmField = ({
                     allowsInlineMediaPlayback={true}
                     mixedContentMode="always"
                     allowUniversalAccessFromFileURLs={true}
+                    allowFileAccessFromFileURLs={true}
                     startInLoadingState={true}
+                    cacheEnabled={false}
+                    thirdPartyCookiesEnabled={true}
+                    sharedCookiesEnabled={true}
+                    mediaCapturePermissionGrantType="grant"
                     onMessage={handleWebViewMessage}
                     onError={(e) => {
                       console.error("WebView error:", e.nativeEvent || e);

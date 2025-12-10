@@ -4,6 +4,7 @@
  */
 
 import { captureFatalError, logError, logWarn } from "./errorLogger";
+import crashlyticsService from "../services/crashlytics";
 
 let isHandlerInstalled = false;
 let originalHandler = null;
@@ -27,6 +28,15 @@ export const installGlobalErrorHandler = () => {
     global.ErrorUtils.setGlobalHandler(async (error, isFatal) => {
       console.error("🔥 GLOBAL ERROR CAPTURADO:", error);
       console.error("💀 Es Fatal:", isFatal);
+
+      // ✅ Enviar a Crashlytics INMEDIATAMENTE
+      try {
+        crashlyticsService.setAttribute("isFatal", isFatal ? "true" : "false");
+        crashlyticsService.setAttribute("errorType", "Global JS Error");
+        crashlyticsService.recordError(error, "GlobalErrorHandler");
+      } catch (e) {
+        console.error("Error enviando a Crashlytics:", e);
+      }
 
       // Guardar INMEDIATAMENTE - no usar await
       captureFatalError(error, {
@@ -80,6 +90,9 @@ export const installPromiseRejectionHandler = () => {
   originalPromise.prototype.catch = function (onRejected) {
     return originalCatch.call(this, async (error) => {
       try {
+        // ✅ Enviar a Crashlytics
+        crashlyticsService.recordError(error, "Promise Rejection");
+
         // Log unhandled promise rejection
         await logError("Unhandled Promise Rejection", {
           error: error?.message || String(error),
