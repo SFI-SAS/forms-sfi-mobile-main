@@ -1,14 +1,25 @@
 /**
  * Firebase Crashlytics Service
  * Maneja el registro de errores y crashes de la aplicación
+ * Migrado a React Native Firebase Modular API (v22+)
  */
 
-import crashlytics from "@react-native-firebase/crashlytics";
+import {
+  getCrashlytics,
+  setCrashlyticsCollectionEnabled,
+  log,
+  recordError,
+  crash,
+  setUserId,
+  setAttribute,
+} from "@react-native-firebase/crashlytics";
+import { getApp } from "@react-native-firebase/app";
 import { Platform } from "react-native";
 
 class CrashlyticsService {
   constructor() {
     this.enabled = false;
+    this.crashlytics = null;
     this.initialize();
   }
 
@@ -17,12 +28,16 @@ class CrashlyticsService {
    */
   async initialize() {
     try {
+      // Obtener la app de Firebase y la instancia de Crashlytics
+      const app = getApp();
+      this.crashlytics = getCrashlytics(app);
+
       // Habilitar Crashlytics en todos los entornos (dev y prod)
-      await crashlytics().setCrashlyticsCollectionEnabled(true);
+      await setCrashlyticsCollectionEnabled(this.crashlytics, true);
 
       this.enabled = true;
 
-      console.log("✅ Firebase Crashlytics habilitado");
+      console.log("✅ Firebase Crashlytics habilitado (Modular API)");
 
       // Log inicial
       this.log("App iniciada", {
@@ -42,10 +57,10 @@ class CrashlyticsService {
    * @param {object} attributes - Atributos adicionales (opcional)
    */
   log(message, attributes = {}) {
-    if (!this.enabled) return;
+    if (!this.enabled || !this.crashlytics) return;
 
     try {
-      crashlytics().log(`${message} ${JSON.stringify(attributes)}`);
+      log(this.crashlytics, `${message} ${JSON.stringify(attributes)}`);
     } catch (error) {
       console.error("Error logging to Crashlytics:", error);
     }
@@ -57,7 +72,7 @@ class CrashlyticsService {
    * @param {string} context - Contexto donde ocurrió el error
    */
   recordError(error, context = "Unknown") {
-    if (!this.enabled) {
+    if (!this.enabled || !this.crashlytics) {
       console.error(`[${context}]`, error);
       return;
     }
@@ -67,11 +82,11 @@ class CrashlyticsService {
       const errorObj = typeof error === "string" ? new Error(error) : error;
 
       // Agregar contexto
-      crashlytics().setAttribute("error_context", context);
-      crashlytics().setAttribute("timestamp", new Date().toISOString());
+      setAttribute(this.crashlytics, "error_context", context);
+      setAttribute(this.crashlytics, "timestamp", new Date().toISOString());
 
       // Registrar el error NO fatal
-      crashlytics().recordError(errorObj);
+      recordError(this.crashlytics, errorObj);
 
       console.error(`[Crashlytics] Error registrado en ${context}:`, error);
     } catch (e) {
@@ -83,13 +98,13 @@ class CrashlyticsService {
    * Fuerza un crash (SOLO PARA TESTING)
    */
   forceCrash() {
-    if (!this.enabled) {
+    if (!this.enabled || !this.crashlytics) {
       console.warn("Crashlytics no habilitado, no se puede forzar crash");
       return;
     }
 
     console.warn("⚠️ Forzando crash para testing...");
-    crashlytics().crash();
+    crash(this.crashlytics);
   }
 
   /**
@@ -97,10 +112,10 @@ class CrashlyticsService {
    * @param {string} userId
    */
   setUserId(userId) {
-    if (!this.enabled) return;
+    if (!this.enabled || !this.crashlytics) return;
 
     try {
-      crashlytics().setUserId(userId.toString());
+      setUserId(this.crashlytics, userId.toString());
       this.log("Usuario autenticado", { userId });
     } catch (error) {
       console.error("Error setting user ID:", error);
@@ -113,10 +128,10 @@ class CrashlyticsService {
    * @param {string} value
    */
   setAttribute(key, value) {
-    if (!this.enabled) return;
+    if (!this.enabled || !this.crashlytics) return;
 
     try {
-      crashlytics().setAttribute(key, value.toString());
+      setAttribute(this.crashlytics, key, value.toString());
     } catch (error) {
       console.error("Error setting attribute:", error);
     }
@@ -127,11 +142,11 @@ class CrashlyticsService {
    * @param {object} attributes - Objeto con pares key-value
    */
   setAttributes(attributes) {
-    if (!this.enabled) return;
+    if (!this.enabled || !this.crashlytics) return;
 
     try {
       Object.entries(attributes).forEach(([key, value]) => {
-        crashlytics().setAttribute(key, String(value));
+        setAttribute(this.crashlytics, key, String(value));
       });
     } catch (error) {
       console.error("Error setting attributes:", error);

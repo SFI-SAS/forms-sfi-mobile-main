@@ -5,24 +5,20 @@ import {
   TouchableOpacity,
   Modal,
   StyleSheet,
-  ScrollView,
   ActivityIndicator,
   Alert,
-  Platform,
-  PermissionsAndroid,
+  Linking,
+  ScrollView,
 } from "react-native";
+import { WebView } from "react-native-webview";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
-import { Picker } from "@react-native-picker/picker";
-import { WebView } from "react-native-webview";
+import useNetInfo from "../hooks/useNetInfo";
+import { getBackendUrl, getAuthToken } from "../services/auth";
 
-// 🆕 NUEVA KEY para guardar firmas offline
 const OFFLINE_SIGNATURES_KEY = "offline_signatures_cache";
+const REGISTERED_USERS_KEY = "registered_facial_users_cache";
 
-/**
- * Componente de Firma Digital para React Native
- * Con soporte de firma offline automática
- */
 const FirmField = ({
   label = "Firma Digital",
   options = [],
@@ -38,828 +34,1224 @@ const FirmField = ({
   apiUrl = "https://api-facialsafe.service.saferut.com",
   autoCloseDelay = 10000,
 }) => {
-  // Estados principales
+  const isOnline = useNetInfo();
+  const webViewRef = useRef(null);
+
+  // Estados
   const [showModal, setShowModal] = useState(false);
-  const [isScriptLoaded, setIsScriptLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [isSigning, setIsSigning] = useState(false);
-  const signingRef = useRef(false);
+  const [loadingUsers, setLoadingUsers] = useState(false);
   const [firmData, setFirmData] = useState(null);
-  const [firmError, setFirmError] = useState(null);
-  const [processStatus, setProcessStatus] = useState("");
-  const [autoCloseTimeoutId, setAutoCloseTimeoutId] = useState(null);
-  const [countdown, setCountdown] = useState(0);
-  const [authStatus, setAuthStatus] = useState("idle");
-  const [authMessage, setAuthMessage] = useState("");
   const [firmCompleted, setFirmCompleted] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState(value || "");
+  const [firmError, setFirmError] = useState(null); // 🆕 Estado de error
+  // Estados de autenticación (según versión web)
+  const [authStatus, setAuthStatus] = useState(""); // 'idle' | 'loading' | 'success' | 'error' | 'network-error' | 'validation-failed' | 'timeout'
+  const [authMessage, setAuthMessage] = useState("");
+  const [processStatus, setProcessStatus] = useState("");
+  const [registeredUsers, setRegisteredUsers] = useState([]);
+  const [webViewHtml, setWebViewHtml] = useState(null);
+  const [showUserPickerModal, setShowUserPickerModal] = useState(false); // Modal para seleccionar usuario
+  const [selectedUser, setSelectedUser] = useState(null); // ✅ Estado del usuario seleccionado completo
 
-  // 🆕 Nuevo estado para saber si estamos offline
-  const [isOffline, setIsOffline] = useState(false);
-
-  const PENDING_SIGNATURES_KEY = "pending_signatures";
-
-  // Obtener datos del usuario seleccionado
-  const selectedUser = options.find((user) => user.id === value);
-
-  // 🆕 Detectar estado de conexión
+  // Listener para deep links (retorno desde navegador externo)
   useEffect(() => {
-    const unsubscribe = NetInfo.addEventListener((state) => {
-      const offline = !state.isConnected;
-      setIsOffline(offline);
-      console.log("📶 Estado de conexión:", offline ? "OFFLINE" : "ONLINE");
-    });
+    const handleDeepLink = ({ url }) => {
+      console.log("🔗 Deep link recibido:", url);
 
-    return () => unsubscribe();
-  }, []);
+      if (url && url.includes("formssfi://firma-callback")) {
+        try {
+          const urlObj = new URL(url);
+          const success = urlObj.searchParams.get("success");
+          const data = urlObj.searchParams.get("data");
+          const error = urlObj.searchParams.get("error");
 
-  // 🆕 Cargar firma offline al seleccionar usuario (SOLO SI ESTÁ OFFLINE)
-  useEffect(() => {
-    const loadOfflineSignature = async () => {
-      if (!value || !isOffline) {
-        // Si no hay usuario seleccionado O estamos online, no cargar firma offline
-        return;
-      }
+          console.log("📦 Parámetros:", {
+            success,
+            hasData: !!data,
+            hasError: !!error,
+          });
 
-      try {
-        const stored = await AsyncStorage.getItem(OFFLINE_SIGNATURES_KEY);
-        if (!stored) return;
-
-        const offlineSignatures = JSON.parse(stored);
-        const userSignature = offlineSignatures[value];
-
-        if (userSignature) {
-          console.log("✅ Cargando firma offline para usuario:", value);
-
-          setFirmData(userSignature);
-          setFirmCompleted(true);
-          setAuthStatus("success");
-          setAuthMessage("Firma cargada desde caché offline");
-
-          // Notificar al padre
-          const completeFirmData = { firmData: userSignature };
-          try {
-            onFirmSuccess?.(completeFirmData);
-            onValueChange?.(completeFirmData);
-          } catch (e) {
-            console.warn("Error notificando firma offline:", e);
+          if (success === "true" && data) {
+            const signatureData = JSON.parse(decodeURIComponent(data));
+            console.log("✅ Firma desde navegador:", {
+              person_id: signatureData.person_id,
+              hasQR: !!signatureData.qr_code || !!signatureData.qr_link,
+            });
+            handleSignSuccess(signatureData);
+          } else if (error) {
+            handleSignError(decodeURIComponent(error));
           }
+        } catch (e) {
+          console.error("❌ Error procesando deep link:", e);
+          Alert.alert(
+            "Error",
+            "No se pudo procesar la respuesta: " + e.message
+          );
         }
-      } catch (e) {
-        console.error("❌ Error cargando firma offline:", e);
       }
     };
 
-    loadOfflineSignature();
-  }, [value, isOffline]);
+    const subscription = Linking.addEventListener("url", handleDeepLink);
 
-  // Resetear estado al cambiar usuario
+    Linking.getInitialURL().then((url) => {
+      if (url) handleDeepLink({ url });
+    });
+
+    return () => subscription.remove();
+  }, []);
+
+  // Cargar usuarios registrados
   useEffect(() => {
-    // Solo resetear si estamos ONLINE
-    // Si estamos offline, dejamos que se cargue la firma guardada
-    if (!isOffline) {
-      setFirmCompleted(false);
-      setFirmData(null);
-      setFirmError(null);
-      setAuthStatus("idle");
+    loadRegisteredUsers();
+  }, []);
+
+  // ✅ Sincronizar selectedUser cuando cambie selectedUserId o la lista de usuarios
+  useEffect(() => {
+    if (selectedUserId) {
+      const allUsers = [...options, ...registeredUsers];
+      const user = allUsers.find((opt) => opt?.id === selectedUserId);
+      if (user) {
+        setSelectedUser(user);
+        console.log("👤 [FirmField] Usuario sincronizado:", user.name, user.id);
+      }
     }
-  }, [value, isOffline]);
+  }, [selectedUserId, options, registeredUsers]);
 
-  /**
-   * 🆕 Guardar firma en caché offline
-   */
-  const saveSignatureOffline = async (userId, signatureData) => {
+  const loadRegisteredUsers = async () => {
+    setLoadingUsers(true);
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    console.log("🔍 [FirmField] Iniciando carga de usuarios faciales");
+
+    // Verificar conexión real con NetInfo
     try {
-      const stored = await AsyncStorage.getItem(OFFLINE_SIGNATURES_KEY);
-      const offlineSignatures = stored ? JSON.parse(stored) : {};
+      const netState = await NetInfo.fetch();
+      const realConnection =
+        netState.isConnected && netState.isInternetReachable !== false;
+      console.log(
+        `📡 [FirmField] Estado de conexión (hook): ${isOnline ? "ONLINE" : "OFFLINE"}`
+      );
+      console.log(
+        `📡 [FirmField] Estado real (NetInfo): ${realConnection ? "ONLINE ✅" : "OFFLINE ❌"}`
+      );
+      console.log(
+        `📡 [FirmField] Detalles: isConnected=${netState.isConnected}, isInternetReachable=${netState.isInternetReachable}, type=${netState.type}`
+      );
+    } catch (e) {
+      console.warn(
+        "⚠️ [FirmField] No se pudo verificar estado de conexión:",
+        e.message
+      );
+    }
 
-      offlineSignatures[userId] = signatureData;
-
-      await AsyncStorage.setItem(
-        OFFLINE_SIGNATURES_KEY,
-        JSON.stringify(offlineSignatures)
+    try {
+      // 🆕 SIEMPRE intentar consultar el endpoint PRIMERO (sin depender de isOnline)
+      console.log(
+        "🌐 [FirmField] Intentando consultar endpoint /responses/answers/regisfacial..."
       );
 
-      console.log("💾 Firma guardada offline para usuario:", userId);
-    } catch (e) {
-      console.error("❌ Error guardando firma offline:", e);
+      const backendUrl = await getBackendUrl();
+      const token = await getAuthToken();
+
+      console.log(`🔗 [FirmField] Backend URL: ${backendUrl}`);
+      console.log(`🔑 [FirmField] Token presente: ${token ? "Sí" : "No"}`);
+
+      const response = await fetch(
+        `${backendUrl}/responses/answers/regisfacial`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      console.log(
+        `📊 [FirmField] Respuesta del endpoint: ${response.status} ${response.statusText}`
+      );
+
+      if (response.ok) {
+        const rawData = await response.json();
+        console.log(
+          `📦 [FirmField] Datos crudos recibidos:`,
+          JSON.stringify(rawData, null, 2)
+        );
+
+        // Adaptar estructura de datos del endpoint
+        let users = [];
+
+        // Los datos vienen en formato: { answer_text: "{...faceData...}", encrypted_hash: "..." }
+        if (Array.isArray(rawData)) {
+          console.log(
+            `🔍 [FirmField] Estructura del primer usuario:`,
+            Object.keys(rawData[0] || {})
+          );
+
+          users = rawData
+            .map((user, index) => {
+              try {
+                // El answer_text es un JSON stringificado con faceData
+                const answerData = JSON.parse(user.answer_text || "{}");
+                const faceData = answerData.faceData || {};
+
+                if (index === 0) {
+                  console.log(
+                    `🔍 [FirmField] FaceData parseado del primer usuario:`,
+                    faceData
+                  );
+                }
+
+                // Validaciones básicas
+                if (!faceData.person_id) {
+                  console.warn(`⚠️ [FirmField] Usuario ${index} sin person_id`);
+                  return null;
+                }
+
+                const confidence = faceData.confidence_score || 0;
+                const hasFaceImages =
+                  Array.isArray(faceData.face_images) &&
+                  faceData.face_images.length > 0;
+                const faceImagesCount = hasFaceImages
+                  ? faceData.face_images.length
+                  : 0;
+
+                console.log(
+                  `📋 [FirmField] Usuario: ${faceData.personName} (${faceData.person_id}) - Face images: ${faceImagesCount} - Success: ${faceData.success}`
+                );
+
+                return {
+                  id: faceData.person_id,
+                  name:
+                    faceData.personName || faceData.person_name || "Sin nombre",
+                  num_document: faceData.person_id,
+                  // Datos adicionales
+                  email: faceData.person_email || "",
+                  confidence_score: confidence,
+                  encrypted_hash: user.encrypted_hash || "",
+                  face_images_count: faceImagesCount,
+                  has_face_images: hasFaceImages,
+                };
+              } catch (e) {
+                console.error(
+                  `❌ [FirmField] Error parseando usuario ${index}:`,
+                  e.message
+                );
+                return null;
+              }
+            })
+            .filter((user) => user !== null); // Filtrar solo usuarios con error de parsing
+        }
+
+        console.log(
+          `✅ [FirmField] ${users.length} usuarios REGISTRADOS procesados desde API (de ${rawData.length} totales)`
+        );
+        console.log(
+          `👥 [FirmField] Usuarios disponibles:`,
+          users.map(
+            (u) =>
+              `${u.name} (${u.num_document}) [${u.face_images_count} imágenes, ${u.has_face_images ? "REGISTRADO" : "INTENTO DE REGISTRO"}]`
+          )
+        );
+
+        setRegisteredUsers(users);
+
+        // Guardar en caché para uso offline
+        await AsyncStorage.setItem(REGISTERED_USERS_KEY, JSON.stringify(users));
+        console.log(`💾 [FirmField] Usuarios guardados en caché`);
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        return; // Salir, ya tenemos los datos frescos
+      } else {
+        console.warn(
+          `⚠️ [FirmField] Error en respuesta del endpoint: ${response.status}`
+        );
+        const errorText = await response.text();
+        console.warn(`⚠️ [FirmField] Detalle del error: ${errorText}`);
+      }
+    } catch (error) {
+      console.error(
+        "❌ [FirmField] Error al consultar endpoint:",
+        error.message
+      );
+      console.error("❌ [FirmField] Stack:", error.stack);
+    }
+
+    // 📦 FALLBACK: Usar caché solo si falló el endpoint
+    try {
+      console.log("📦 [FirmField] Intentando cargar desde caché...");
+      const cached = await AsyncStorage.getItem(REGISTERED_USERS_KEY);
+
+      if (cached) {
+        const users = JSON.parse(cached);
+        console.log(
+          `📋 [FirmField] ${users.length} usuarios cargados desde caché`
+        );
+        console.log(
+          `👥 [FirmField] Usuarios (caché):`,
+          users.map((u) => `${u.name} (${u.num_document})`)
+        );
+        setRegisteredUsers(users);
+      } else {
+        console.log("⚠️ [FirmField] No hay usuarios en caché");
+        setRegisteredUsers([]);
+      }
+    } catch (cacheError) {
+      console.error("❌ [FirmField] Error cargando caché:", cacheError);
+      setRegisteredUsers([]);
+    } finally {
+      setLoadingUsers(false);
+      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     }
   };
 
-  /**
-   * Resetear todos los estados
-   */
-  const resetStates = () => {
+  // Manejar mensajes del WebView
+  const handleWebViewMessage = (event) => {
+    try {
+      const data = event.nativeEvent.data;
+      console.log("📨 Mensaje del WebView:", data);
+
+      // Intentar parsear como JSON primero (para actualizaciones de estado)
+      try {
+        const jsonData = JSON.parse(data);
+        if (jsonData.type === "log") {
+          // Log desde WebView
+          console.log("🌐 [WebView]:", jsonData.message);
+          return;
+        }
+        if (jsonData.type === "status") {
+          // Actualizar estado del proceso
+          console.log("📊 Actualización de estado:", jsonData.message);
+          setProcessStatus(jsonData.message);
+          if (jsonData.status) {
+            setAuthStatus(jsonData.status);
+          }
+          return;
+        }
+      } catch (e) {
+        // No es JSON, continuar con el proceso normal
+      }
+
+      if (data.startsWith("formssfi://firma-callback")) {
+        const url = new URL(data);
+        const success = url.searchParams.get("success");
+        const dataParam = url.searchParams.get("data");
+        const errorParam = url.searchParams.get("error");
+
+        if (success === "true" && dataParam) {
+          const signatureData = JSON.parse(decodeURIComponent(dataParam));
+          handleSignSuccess(signatureData);
+        } else if (errorParam) {
+          handleSignError(decodeURIComponent(errorParam));
+        }
+      }
+    } catch (error) {
+      console.error("❌ Error procesando mensaje:", error);
+    }
+  };
+
+  // Manejar éxito de firma (según versión web)
+  const handleSignSuccess = async (data) => {
+    try {
+      console.log("✅ Firma exitosa recibida:", data);
+
+      // Extraer firmData si viene en ese formato
+      const firmDataObj = data.firmData || data;
+
+      // Estructura en formato esperado: { firmData: { success, person_id, person_name, qr_url } }
+      const firmResult = {
+        firmData: {
+          success: true, // 🆕 Siempre true en caso de éxito
+          person_id:
+            firmDataObj.person_id ||
+            selectedUser?.num_document ||
+            selectedUser?.id ||
+            "",
+          person_name: firmDataObj.person_name || selectedUser?.name || "",
+          qr_url:
+            firmDataObj.qr_url ||
+            firmDataObj.qrUrl ||
+            firmDataObj.qr_link ||
+            firmDataObj.qrLink ||
+            "",
+        },
+      };
+
+      // Datos adicionales para caché interno
+      const fullData = {
+        ...firmResult.firmData,
+        document_id: data.document_id || documentHash || "",
+        signature_image: data.signature_image || "",
+        face_image: data.face_image || "",
+        confidence_score: data.confidence_score || 0,
+        liveness_score: data.liveness_score || 0,
+        qr_code: data.qr_code || data.qrCode || "",
+        validation_result: data.validation_result || "validated",
+        validation_id: data.validation_id || "",
+        timestamp: data.timestamp || new Date().toISOString(),
+        captureMethod: data.captureMethod || "sfi-facial",
+      };
+
+      console.log("📦 Formato guardado:", JSON.stringify(firmResult));
+
+      // 🆕 Actualizar estados según versión web
+      setFirmData(firmResult);
+      setFirmCompleted(true);
+      setFirmError(null); // Limpiar error
+      setAuthStatus("success");
+      setAuthMessage("Autenticación y firma completadas exitosamente");
+      setProcessStatus("🎉 Firma completada exitosamente");
+      setShowModal(false);
+      setIsLoading(false);
+
+      // ✅ Guardar en caché SOLO si el usuario vino del modo offline O como respaldo
+      // NO guardar offline cuando la firma se hizo online (ya está en servidor)
+      if (data.wasOffline) {
+        console.log(
+          "💾 Firma proveniente de modo offline, guardando en caché..."
+        );
+        try {
+          const existing = await AsyncStorage.getItem(OFFLINE_SIGNATURES_KEY);
+          let signatures = existing ? JSON.parse(existing) : [];
+
+          const personId = firmResult.firmData.person_id;
+          signatures = signatures.filter((sig) => sig.person_id !== personId);
+
+          const signatureToSave = {
+            ...fullData,
+            signature_image: fullData.signature_image
+              ? fullData.signature_image.substring(0, 30000)
+              : "",
+            face_image: fullData.face_image
+              ? fullData.face_image.substring(0, 30000)
+              : "",
+            qr_code: fullData.qr_code
+              ? fullData.qr_code.substring(0, 10000)
+              : "",
+            savedAt: new Date().toISOString(),
+            isCompressed: true,
+          };
+
+          signatures.push(signatureToSave);
+          await AsyncStorage.setItem(
+            OFFLINE_SIGNATURES_KEY,
+            JSON.stringify(signatures)
+          );
+          console.log(
+            `💾 Firma offline guardada en caché para: ${firmResult.firmData.person_name}`
+          );
+        } catch (err) {
+          console.error("❌ Error guardando offline:", err);
+        }
+      } else {
+        console.log(
+          "✅ Firma realizada ONLINE, no se guarda en AsyncStorage (ya está en servidor)"
+        );
+      }
+
+      if (firmResult.firmData.qr_url) {
+        Alert.alert(
+          "✅ Validación Completa",
+          `Firma validada con éxito.\n\n` +
+            `Usuario: ${firmResult.firmData.person_name}\n` +
+            `Documento: ${firmResult.firmData.person_id}\n\n` +
+            `✅ QR URL generado`
+        );
+      }
+
+      // Enviar en formato esperado al formulario
+      const firmResultString = JSON.stringify(firmResult);
+      console.log("📤 [FirmField] Enviando firma al formulario:");
+      console.log("   - Formato:", JSON.stringify(firmResult, null, 2));
+      console.log("   - Campos firmData:", Object.keys(firmResult.firmData));
+      console.log("   - person_id:", firmResult.firmData.person_id);
+      console.log("   - person_name:", firmResult.firmData.person_name);
+      console.log("   - success:", firmResult.firmData.success);
+      console.log(
+        "   - qr_url:",
+        firmResult.firmData.qr_url ? "✅ Presente" : "❌ Ausente"
+      );
+      console.log("   - Como STRING para formulario:", firmResultString);
+
+      // ✅ Usar onChange (callback principal del FormRenderer)
+      if (onChange) onChange(firmResultString);
+      if (onValueChange) onValueChange(firmResultString);
+      if (onFirmSuccess) onFirmSuccess(firmResult);
+    } catch (error) {
+      console.error("❌ Error en handleSignSuccess:", error);
+    }
+  };
+
+  // Manejar error de firma (según versión web - mensajes genéricos)
+  const handleSignError = (errorMsg) => {
+    console.error("❌ Error en firma:", errorMsg);
+
+    // 🆕 Mensaje genérico según versión web
+    let userMessage = "Usuario no encontrado o problemas con la autenticación";
+
+    // Mensaje más específico si el usuario intentó registrarse pero no completó el proceso
+    const userInfo =
+      selectedUser?.has_face_images === false
+        ? `\n\nEl usuario ${selectedUser?.name} (${selectedUser?.num_document}) debe completar primero su registro facial en el sistema antes de poder firmar.`
+        : "";
+
+    setAuthStatus("error");
+    setAuthMessage(userMessage + userInfo);
+    setProcessStatus("💥 Error: Usuario no registrado en sistema facial");
+    setShowModal(false);
+    setIsLoading(false);
+
+    Alert.alert("❌ Error en la Firma", userMessage + userInfo, [
+      { text: "Entendido", style: "cancel" },
+    ]);
+
+    if (onFirmError) onFirmError(new Error(userMessage));
+  };
+
+  // Abrir modal de firma (con reseteo de estados según versión web)
+  const handleOpenFirm = async () => {
+    if (!selectedUserId) {
+      Alert.alert(
+        "Selecciona un usuario",
+        "Debes seleccionar quién va a firmar"
+      );
+      return;
+    }
+
+    if (!selectedUser) {
+      Alert.alert("Error", "Usuario no encontrado");
+      return;
+    }
+
+    // 🆕 RESETEAR estados al iniciar (según versión web)
     setFirmData(null);
     setFirmError(null);
     setAuthStatus("idle");
     setAuthMessage("");
-    setProcessStatus("");
-    setIsLoading(false);
-    setCountdown(0);
-  };
+    setProcessStatus("Iniciando proceso de firma...");
 
-  /**
-   * Solicitar permisos de cámara en Android
-   */
-  const requestCameraPermissions = async () => {
-    if (Platform.OS === "android") {
-      try {
-        const result = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.CAMERA,
-          {
-            title: "Permiso de cámara",
-            message:
-              "Se requiere acceso a la cámara para el reconocimiento facial",
-            buttonNeutral: "Preguntar después",
-            buttonNegative: "Cancelar",
-            buttonPositive: "Aceptar",
-          }
-        );
-        return result === PermissionsAndroid.RESULTS.GRANTED;
-      } catch (e) {
-        console.error("Error pidiendo permiso de cámara:", e);
-        return false;
-      }
-    }
-    return true;
-  };
-
-  /**
-   * Iniciar proceso de firma
-   */
-  const handleFirmar = async () => {
-    if (signingRef.current) return;
-
-    if (!selectedUser) {
-      setFirmError("Debe seleccionar un usuario antes de firmar");
-      Alert.alert("Error", "Debe seleccionar un usuario antes de firmar");
-      return;
-    }
-
-    if (!documentHash) {
-      setFirmError("No se ha proporcionado el hash del documento a firmar");
-      Alert.alert(
-        "Error",
-        "No se ha proporcionado el hash del documento a firmar"
-      );
-      return;
-    }
-
-    // 🆕 Si estamos OFFLINE y ya hay firma guardada, usarla automáticamente
-    if (isOffline && firmCompleted && firmData) {
-      Alert.alert(
-        "Modo Offline",
-        "Se usará la firma guardada previamente para este usuario.",
-        [{ text: "OK" }]
-      );
-      return;
-    }
-
-    const permsOk = await requestCameraPermissions();
-    if (!permsOk) {
-      Alert.alert(
-        "Permisos necesarios",
-        "Se requiere permiso de cámara para el reconocimiento facial."
-      );
-      return;
-    }
-
-    signingRef.current = true;
-    setIsSigning(true);
-    setIsLoading(true);
-
+    // ✅ Verificar conexión REAL antes de decidir modo offline
+    let realConnectionState = isOnline;
     try {
-      setProcessStatus("Abriendo componente de firma...");
-      setIsScriptLoaded(false);
-      setShowModal(true);
-    } catch (e) {
-      console.error("Error abriendo componente de firma:", e);
-      onFirmError?.(e);
-      Alert.alert("Error", "No se pudo abrir el componente de firma.");
-    } finally {
-      signingRef.current = false;
-      setIsSigning(false);
-      setIsLoading(false);
-      setProcessStatus("");
-    }
-  };
-
-  /**
-   * Cerrar modal
-   */
-  const handleCloseModal = () => {
-    if (autoCloseTimeoutId) {
-      clearTimeout(autoCloseTimeoutId);
-      setAutoCloseTimeoutId(null);
-    }
-    setShowModal(false);
-    resetStates();
-    console.log("🔒 Modal cerrado");
-  };
-
-  /**
-   * Manejar mensajes desde el WebView
-   */
-  const handleWebViewMessage = async (event) => {
-    try {
-      const raw = event?.nativeEvent?.data;
-      if (!raw) return;
-      const msg = JSON.parse(raw);
-      const { type, ...payload } = msg;
-
-      console.log("📥 Mensaje desde WebView:", type, payload);
-
-      if (type === "script-loaded") {
-        setIsScriptLoaded(true);
-        setProcessStatus("Componente de firma listo");
-        return;
-      }
-
-      if (type === "script-error") {
-        setFirmError(payload.error || "Error cargando script");
-        setAuthStatus("error");
-        setProcessStatus("");
-        onFirmError?.(payload);
-        return;
-      }
-
-      if (type === "sign-start") {
-        setProcessStatus("Iniciando flujo de firma...");
-        setAuthStatus("loading");
-        return;
-      }
-
-      if (type === "sign-success" || type === "sign-response") {
-        handleSignSuccess(payload);
-        return;
-      }
-
-      if (type === "liveness-progress") {
-        setProcessStatus(`Liveness: ${payload.progress || ""}`);
-        return;
-      }
-
-      if (
-        type === "sign-error" ||
-        type === "sign-network-error" ||
-        type === "sign-timeout-error" ||
-        type === "sign-validation-failed"
-      ) {
-        setFirmError(payload || "Error en el proceso de firma");
-        setAuthStatus("error");
-        setProcessStatus("");
-        onFirmError?.(payload);
-        return;
-      }
-    } catch (e) {
-      console.warn("⚠️ handleWebViewMessage parse error:", e, event);
-    }
-  };
-
-  const handleSignSuccess = async (data = {}) => {
-    try {
+      const netState = await NetInfo.fetch();
+      realConnectionState =
+        netState.isConnected && netState.isInternetReachable !== false;
+      console.log(`📡 [FirmField] Verificación de conexión para firma:`);
+      console.log(`   - Hook isOnline: ${isOnline}`);
+      console.log(`   - NetInfo real: ${realConnectionState}`);
       console.log(
-        "📥 Datos completos recibidos desde SFI Facial (firma):",
-        data
+        `   - Detalles: isConnected=${netState.isConnected}, isInternetReachable=${netState.isInternetReachable}`
       );
-
-      setFirmData(data);
-      setFirmError(null);
-      setIsLoading(false);
-      setProcessStatus("🎉 Firma completada exitosamente");
-      setAuthStatus("success");
-      setAuthMessage("Autenticación y firma completadas exitosamente");
-      setFirmCompleted(true);
-
-      const filteredFirmData = {
-        success: true,
-        person_id: data.person_id || data.personId || data.person_id,
-        person_name: data.person_name || data.personName || data.name,
-        qr_url: data.qr_url || data.qrUrl || data.qr || null,
-        raw: data,
-      };
-
-      const completeFirmData = { firmData: filteredFirmData };
-
-      console.log(
-        "📦 Datos filtrados que se pasarán al padre:",
-        completeFirmData
+    } catch (e) {
+      console.warn(
+        "⚠️ [FirmField] Error verificando conexión, usando hook:",
+        e.message
       );
+    }
 
-      // 🆕 Guardar firma offline para uso futuro
-      if (value) {
-        await saveSignatureOffline(value, filteredFirmData);
-      }
+    // ⚠️ Modo OFFLINE - Solo usar AsyncStorage si NO hay conexión
+    if (!realConnectionState) {
+      console.log("📡 [FirmField] SIN CONEXIÓN - Modo offline activado");
 
       try {
-        onFirmSuccess?.(completeFirmData);
-      } catch (e) {
-        console.warn("onFirmSuccess falló:", e);
-      }
-
-      try {
-        onValueChange?.(completeFirmData);
-      } catch (e) {
-        console.warn("onValueChange falló:", e);
-      }
-
-      // Encolar para sincronización
-      (async () => {
-        try {
-          const stored = await AsyncStorage.getItem(PENDING_SIGNATURES_KEY);
-          const arr = stored ? JSON.parse(stored) : [];
-          arr.push({
-            payload: completeFirmData,
-            person_id: filteredFirmData.person_id,
-            document_hash: documentHash || null,
-            savedAt: Date.now(),
-          });
-          await AsyncStorage.setItem(
-            PENDING_SIGNATURES_KEY,
-            JSON.stringify(arr)
+        const cached = await AsyncStorage.getItem(OFFLINE_SIGNATURES_KEY);
+        if (cached) {
+          const signatures = JSON.parse(cached);
+          const userId = selectedUser.num_document || selectedUser.id;
+          const userSignatures = signatures.filter(
+            (sig) => sig.person_id === userId
           );
-        } catch (e) {
-          console.warn("No se pudo encolar firma en AsyncStorage:", e);
+
+          if (userSignatures.length > 0) {
+            const lastSignature = userSignatures.sort(
+              (a, b) => new Date(b.timestamp) - new Date(a.timestamp)
+            )[0];
+
+            const qrInfo = lastSignature.qr_link
+              ? "\n✅ QR Link: Disponible"
+              : lastSignature.qr_code
+                ? "\n✅ QR Code: Generado"
+                : "";
+
+            Alert.alert(
+              "📡 Modo Offline",
+              `Se usará la última firma de ${selectedUser.name}.\n\n` +
+                `📅 Fecha: ${new Date(lastSignature.timestamp).toLocaleString()}\n` +
+                `🎯 Confianza: ${(lastSignature.confidence_score * 100).toFixed(1)}%` +
+                qrInfo +
+                `\n\n⚠️ Imágenes comprimidas`,
+              [
+                {
+                  text: "Usar Firma",
+                  onPress: () =>
+                    handleSignSuccess({ ...lastSignature, wasOffline: true }),
+                },
+                { text: "Cancelar", style: "cancel" },
+              ]
+            );
+            return;
+          }
         }
-      })();
 
-      setTimeout(() => {
-        setShowModal(false);
-        resetStates();
-      }, 300);
-    } catch (e) {
-      console.error("Error procesando firma exitosa:", e);
-      onFirmError?.(e);
+        Alert.alert(
+          "❌ Sin Firma Offline",
+          `No hay firma guardada para ${selectedUser.name}.\n\nNecesitas conexión a internet.`
+        );
+        return;
+      } catch (error) {
+        console.error("❌ Error cargando firma offline:", error);
+        return;
+      }
     }
+
+    // ✅ Modo ONLINE - Cargar componente directo con API real (como versión web)
+    console.log("🌐 [FirmField] CON CONEXIÓN - Modo online activado");
+    console.log("🖊️ [FirmField] Iniciando proceso de firma con API:", {
+      personId: selectedUser.id, // Usar ID exactamente como en la web
+      personName: selectedUser.name,
+      documentHash,
+      apiUrl,
+    });
+
+    loadFirmComponent();
   };
 
-  /**
-   * Obtener configuración visual según el estado de autenticación
-   */
-  const getAuthStatusDisplay = () => {
-    switch (authStatus) {
-      case "success":
-        return {
-          message: "🎉 Autenticación Exitosa",
-          subMessage: authMessage,
-          bgColor: "#D1FAE5",
-          borderColor: "#A7F3D0",
-          textColor: "#065F46",
-          icon: "🎉",
-        };
-      case "error":
-      case "network-error":
-      case "validation-failed":
-      case "timeout":
-        return {
-          message: "❌ Autenticación Fallida",
-          subMessage:
-            authMessage ||
-            "Usuario no encontrado o problemas con la autenticación",
-          bgColor: "#FEE2E2",
-          borderColor: "#FECACA",
-          textColor: "#991B1B",
-          icon: "❌",
-        };
-      case "loading":
-        return {
-          message: "🔄 Autenticando...",
-          subMessage: authMessage || "Verificando identidad...",
-          bgColor: "#DBEAFE",
-          borderColor: "#BFDBFE",
-          textColor: "#1E40AF",
-          icon: "🔄",
-        };
-      default:
-        return null;
-    }
-  };
+  // Cargar componente SFI Facial (como versión web)
+  const loadFirmComponent = async () => {
+    try {
+      // 🎯 Usar exactamente los mismos campos que la versión web
+      const personId = selectedUser.id || ""; // IMPORTANTE: usar .id no .num_document
+      const personName = selectedUser.name || "Usuario";
+      const docId = documentHash || "documento-" + Date.now();
 
-  const authDisplay = getAuthStatusDisplay();
+      console.log(
+        "📤 [FirmField] Datos que se enviarán al componente sfi-facial:",
+        {
+          personId,
+          personName,
+          docId,
+          apiUrl,
+        }
+      );
 
-  /**
-   * HTML para el WebView con integración SFI Facial
-   */
-  const getWebViewHTML = () => {
-    return `
-<!DOCTYPE html>
-<html>
+      // 🆕 Actualizar estado de carga
+      setIsLoading(true);
+      setAuthStatus("loading");
+      setAuthMessage("Iniciando proceso de autenticación...");
+      setShowModal(true);
+
+      // HTML que carga y configura el componente SFI Facial
+
+      const htmlPage = `<!DOCTYPE html>
+<html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Firma Digital</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: #F7FAFC;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            padding: 20px;
-        }
-        #container {
-            width: 100%;
-            max-width: 500px;
-        }
-        .loading {
-            text-align: center;
-            padding: 40px 20px;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }
-        .spinner {
-            border: 4px solid #E2E8F0;
-            border-top: 4px solid #0F8593;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 16px;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        .loading-text {
-            color: #4A5568;
-            font-size: 14px;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Firma Digital</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+      font-family: -apple-system, sans-serif;
+      padding: 10px;
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    }
+    h2 { color: #667eea; margin-bottom: 15px; text-align: center; }
+    .info { background: #f0f4ff; padding: 12px; border-radius: 8px; margin-bottom: 15px; font-size: 14px; }
+    .info strong { color: #667eea; }
+    sfi-facial { display: block; width: 100%; min-height: 450px; }
+    .loading { text-align: center; padding: 20px; color: #666; }
+    .debug { background: #fef3cd; padding: 10px; margin-top: 10px; border-radius: 6px; font-size: 12px; }
+  </style>
 </head>
 <body>
-    <div id="container">
-        <div class="loading">
-            <div class="spinner"></div>
-            <div class="loading-text">Cargando librería SFI Facial...</div>
-        </div>
+  <div class="container">
+    <h2>🔐 Firma Digital Biométrica</h2>
+    <div class="info">
+      <strong>Usuario:</strong> ${personName}<br>
+      <strong>Documento:</strong> ${personId}<br>
+      <strong>ID:</strong> ${docId}
     </div>
-
-    <script>
-        function sendMessage(type, data = {}) {
-            const message = JSON.stringify({ type, ...data });
-            if (window.ReactNativeWebView) {
-                window.ReactNativeWebView.postMessage(message);
-            }
-            console.log('📤 Enviando mensaje a RN:', message);
+    <div id="loading" class="loading">⏳ Cargando componente...</div>
+    <sfi-facial id="facial" mode="sign" api-url="${apiUrl}" 
+      person-id="${personId}" person-name="${personName}" document-hash="${docId}">
+    </sfi-facial>
+    <div id="debug" class="debug"></div>
+  </div>
+  
+  <script>
+    // Mostrar que el HTML cargó
+    document.getElementById('debug').innerHTML = '📄 HTML cargado<br>';
+    console.log('📄 HTML cargado');
+  </script>
+  
+  <script src="https://cdn.jsdelivr.net/npm/eventemitter3@5.0.1/index.min.js" 
+          onload="console.log('✅ EventEmitter cargado'); document.getElementById('debug').innerHTML += '✅ EventEmitter cargado<br>';"
+          onerror="console.log('❌ Error EventEmitter'); document.getElementById('debug').innerHTML += '❌ Error EventEmitter<br>';"></script>
+  <script src="https://reconocimiento-facial-safe.service.saferut.com/index.js"
+          onload="console.log('✅ SFI Facial cargado'); document.getElementById('debug').innerHTML += '✅ SFI Facial cargado<br>';"
+          onerror="console.log('❌ Error SFI Facial'); document.getElementById('debug').innerHTML += '❌ Error SFI Facial<br>';"></script>
+  
+  <script>
+    function log(msg) {
+      const debug = document.getElementById('debug');
+      if (debug) {
+        debug.style.display = 'block';
+        debug.innerHTML += new Date().toLocaleTimeString() + ': ' + msg + '<br>';
+      }
+      console.log(msg);
+      
+      // Enviar logs a React Native también
+      try {
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'log', message: msg }));
         }
-
-        const script = document.createElement('script');
-        script.src = 'https://reconocimiento-facial-safe.service.saferut.com/index.js';
-        script.async = true;
-        script.crossOrigin = 'anonymous';
+      } catch(e) {}
+    }
+    
+    // Log inicial
+    log('🚀 Iniciando scripts...');
+    
+    if (typeof EventEmitter === 'undefined') {
+      log('❌ EventEmitter no cargado');
+    } else {
+      log('✅ EventEmitter OK');
+    }
+    
+    setTimeout(() => {
+      const facial = document.getElementById('facial');
+      const loading = document.getElementById('loading');
+      
+      if (!facial) {
+        log('❌ Componente no encontrado');
+        return;
+      }
+      
+      log('✅ Componente listo');
+      loading.style.display = 'none';
+      
+      // 🆕 Eventos adicionales de validación (según versión web)
+      facial.addEventListener('sign-start', (e) => {
+        log('🚀 Iniciando autenticación biométrica...');
+        // Enviar actualización de estado al WebView
+        const update = JSON.stringify({ type: 'status', status: 'loading', message: 'Iniciando autenticación biométrica...' });
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(update);
+        }
+      });
+      
+      facial.addEventListener('liveness-start', (e) => {
+        log('👤 Iniciando verificación de vida...');
+        const update = JSON.stringify({ type: 'status', status: 'loading', message: 'Verificando que eres una persona real...' });
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(update);
+        }
+      });
+      
+      facial.addEventListener('liveness-progress', (e) => {
+        const data = e.detail;
+        log('👤 Progreso: ' + data.instruction);
+        const update = JSON.stringify({ type: 'status', status: 'loading', message: data.instruction });
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(update);
+        }
+      });
+      
+      facial.addEventListener('sign-validation-start', (e) => {
+        log('🔍 Validando identidad...');
+        const update = JSON.stringify({ type: 'status', status: 'loading', message: 'Validando identidad...' });
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(update);
+        }
+      });
+      
+      facial.addEventListener('liveness-complete', (e) => {
+        log('✅ Verificación de vida completada');
+        const update = JSON.stringify({ type: 'status', status: 'loading', message: 'Verificación de vida completada' });
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(update);
+        }
+      });
+      
+      facial.addEventListener('sign-validation-result', (e) => {
+        const data = e.detail;
+        log('🔍 sign-validation-result completo: ' + JSON.stringify(data, null, 2));
         
-        script.onload = () => {
-            console.log('✅ Script SFI Facial cargado');
-            sendMessage('script-loaded');
-            window.scriptLoaded = true;
-            initSFIFacial();
+        if (data.success) {
+          log('✅ Autenticación exitosa: ' + Math.round(data.confidence * 100) + '% confianza');
+          log('✅ Person ID validado: ' + data.person_id);
+          const update = JSON.stringify({ type: 'status', status: 'success', message: 'Autenticación exitosa: ' + Math.round(data.confidence * 100) + '% confianza' });
+          if (window.ReactNativeWebView) {
+            window.ReactNativeWebView.postMessage(update);
+          }
+        } else {
+          log('❌ Autenticación fallida: ' + data.message);
+          log('❌ Detalles del fallo: ' + JSON.stringify(data));
+          log('❌ Person ID enviado: ${personId}');
+          const update = JSON.stringify({ type: 'status', status: 'error', message: 'Usuario no encontrado o problemas con la autenticación' });
+          if (window.ReactNativeWebView) {
+            window.ReactNativeWebView.postMessage(update);
+          }
+        }
+      });
+      
+      facial.addEventListener('sign-request-start', (e) => {
+        log('📤 Generando firma digital...');
+        const update = JSON.stringify({ type: 'status', status: 'loading', message: 'Generando firma digital...' });
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(update);
+        }
+      });
+      
+      facial.addEventListener('sign-request-progress', (e) => {
+        const data = e.detail;
+        const msg = data.status === 'uploading' ? 'Enviando datos...' : 'Procesando firma...';
+        log('📊 ' + msg);
+        const update = JSON.stringify({ type: 'status', status: 'loading', message: msg });
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(update);
+        }
+      });
+      
+      facial.addEventListener('sign-success', (e) => {
+        log('✅ sign-success - Firma completada exitosamente');
+        const eventData = e.detail || {};
+        
+        log('🔍 EventData completo recibido: ' + JSON.stringify(eventData, null, 2));
+        
+        // 🎯 Formato según versión web: { firmData: { success, person_id, person_name, qr_url } }
+        const firmData = {
+          success: true,
+          person_id: eventData.person_id || '${personId}',
+          person_name: eventData.person_name || '${personName}',
+          qr_url: eventData.qr_url || eventData.qrUrl || eventData.qr_link || eventData.qrLink || '',
         };
         
-        script.onerror = (error) => {
-            console.error('❌ Error cargando SFI Facial:', error);
-            sendMessage('script-error', { error: error?.message || 'Error desconocido' });
-            window.scriptLoadError = true;
-            
-            // Reintentar con configuración diferente
-            console.log('🔄 Reintentando carga de script...');
-            const retryScript = document.createElement('script');
-            retryScript.src = 'https://reconocimiento-facial-safe.service.saferut.com/index.js';
-            retryScript.type = 'module';
-            retryScript.onload = () => {
-                console.log('✅ Script cargado en segundo intento');
-                window.scriptLoaded = true;
-                initSFIFacial();
-            };
-            retryScript.onerror = () => {
-                console.error('❌ Error en segundo intento también');
-                sendMessage('script-failed', { error: 'No se pudo cargar el componente después de reintentos' });
-            };
-            document.head.appendChild(retryScript);
+        // Datos completos internos (para caché)
+        const fullData = {
+          firmData: firmData,
+          // Datos adicionales para uso interno
+          document_id: eventData.document_id || '${docId}',
+          signature_image: eventData.signature_image || '',
+          face_image: eventData.face_image || '',
+          confidence_score: eventData.confidence_score || 0,
+          liveness_score: eventData.liveness_score || 0,
+          qr_code: eventData.qr_code || eventData.qrCode || '',
+          validation_result: eventData.validation_result || 'validated',
+          validation_id: eventData.validation_id || '',
+          timestamp: new Date().toISOString(),
+          captureMethod: 'sfi-facial-web',
+          ...eventData
         };
-
-        document.head.appendChild(script);
         
-        // Timeout de 10 segundos para cargar el script
-        setTimeout(() => {
-            if (!window.scriptLoaded && !window.scriptLoadError) {
-                console.warn('⚠️ Timeout cargando script, intentando inicializar de todos modos...');
-                sendMessage('script-timeout');
-                initSFIFacial();
-            }
-        }, 10000);
-
-        function initSFIFacial() {
-            const container = document.getElementById('container');
-            container.innerHTML = '';
-
-            const sfiFacialElement = document.createElement('sfi-facial');
-            sfiFacialElement.id = 'sfiFacialSign';
-            sfiFacialElement.setAttribute('mode', 'sign');
-            sfiFacialElement.setAttribute('api-url', '${apiUrl}');
-            sfiFacialElement.setAttribute('api-timeout', '120000');
-            sfiFacialElement.setAttribute('person-id', '${selectedUser?.id || ""}');
-            sfiFacialElement.setAttribute('person-name', '${selectedUser?.name || ""}');
-            sfiFacialElement.setAttribute('document-hash', '${documentHash}');
-
-            sfiFacialElement.setAttribute('button-bg-color', 'linear-gradient(135deg, #0F8593 0%, #0A6370 100%)');
-            sfiFacialElement.setAttribute('button-text-color', '#ffffff');
-            sfiFacialElement.setAttribute('button-border-radius', '12px');
-            sfiFacialElement.setAttribute('button-font-size', '16px');
-            sfiFacialElement.setAttribute('button-padding', '14px 28px');
-            sfiFacialElement.setAttribute('button-box-shadow', '0 4px 12px rgba(15, 133, 147, 0.3)');
-            sfiFacialElement.setAttribute('button-hover-transform', 'scale(1.05)');
-            sfiFacialElement.setAttribute('button-hover-box-shadow', '0 6px 16px rgba(15, 133, 147, 0.4)');
-
-            container.appendChild(sfiFacialElement);
-
-            const events = [
-                'liveness-progress', 'sign-start', 'sign-validation-start',
-                'sign-validation-progress', 'sign-request-start', 'sign-request-progress',
-                'sign-validation-result', 'sign-response', 'sign-success', 'sign-error',
-                'sign-timeout-error', 'sign-network-error', 'sign-validation-failed',
-                'component-ready', 'camera-ready', 'liveness-start', 'liveness-complete',
-                'face-detected', 'gesture-detected'
-            ];
-
-            events.forEach(eventName => {
-                sfiFacialElement.addEventListener(eventName, (event) => {
-                    console.log(\`📡 Evento: \${eventName}\`, event.detail);
-                    sendMessage(eventName, event.detail);
-                });
-            });
-
-            setTimeout(() => {
-                if (typeof sfiFacialElement.start === 'function') {
-                    sfiFacialElement.start();
-                    console.log('✅ Método start() ejecutado');
-                }
-            }, 1000);
-
-            setTimeout(() => {
-                const shadowButton = sfiFacialElement.shadowRoot?.querySelector('button');
-                const normalButton = sfiFacialElement.querySelector('button');
-                
-                if (shadowButton && shadowButton.offsetWidth > 0) {
-                    shadowButton.click();
-                    console.log('🎯 Click en shadow button');
-                } else if (normalButton && normalButton.offsetWidth > 0) {
-                    normalButton.click();
-                    console.log('🎯 Click en normal button');
-                }
-            }, 2500);
+        log('📦 FirmData formateado: ' + JSON.stringify(firmData));
+        log('📦 FullData completo: ' + JSON.stringify(fullData));
+        
+        const data = encodeURIComponent(JSON.stringify(fullData));
+        const deepLink = 'formssfi://firma-callback?success=true&data=' + data;
+        
+        if (window.ReactNativeWebView) {
+          log('📱 Enviando a WebView');
+          window.ReactNativeWebView.postMessage(deepLink);
+        } else {
+          log('🌐 Redirigiendo');
+          window.location.href = deepLink;
         }
-    </script>
+      });
+      
+      // 🆕 Eventos de error específicos (según versión web)
+      facial.addEventListener('sign-timeout-error', (e) => {
+        log('⏱️ Tiempo de espera agotado');
+        const error = encodeURIComponent('Usuario no encontrado o problemas con la autenticación');
+        const deepLink = 'formssfi://firma-callback?success=false&error=' + error;
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(deepLink);
+        } else {
+          window.location.href = deepLink;
+        }
+      });
+      
+      facial.addEventListener('sign-network-error', (e) => {
+        log('🌐 Error de red');
+        const error = encodeURIComponent('Usuario no encontrado o problemas con la autenticación');
+        const deepLink = 'formssfi://firma-callback?success=false&error=' + error;
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(deepLink);
+        } else {
+          window.location.href = deepLink;
+        }
+      });
+      
+      facial.addEventListener('sign-validation-failed', (e) => {
+        log('🚫 Validación insuficiente');
+        const error = encodeURIComponent('Usuario no encontrado o problemas con la autenticación');
+        const deepLink = 'formssfi://firma-callback?success=false&error=' + error;
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(deepLink);
+        } else {
+          window.location.href = deepLink;
+        }
+      });
+      
+      facial.addEventListener('sign-error', (e) => {
+        log('❌ sign-error - Error genérico');
+        // 🆕 Mensaje genérico según versión web
+        const error = encodeURIComponent('Usuario no encontrado o problemas con la autenticación');
+        const deepLink = 'formssfi://firma-callback?success=false&error=' + error;
+        
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(deepLink);
+        } else {
+          window.location.href = deepLink;
+        }
+      });
+      
+      log('👂 Listeners OK');
+    }, 1000);
+  </script>
 </body>
-</html>
-    `;
+</html>`;
+
+      // Cargar en WebView (como modal, igual que versión web)
+      console.log("📄 HTML generado, length:", htmlPage.length);
+      setWebViewHtml(htmlPage);
+      console.log("✅ WebView modal abierto con componente SFI Facial");
+    } catch (error) {
+      console.error("❌ Error cargando componente:", error);
+      setIsLoading(false);
+      setAuthStatus("error");
+      setAuthMessage("Error al cargar el componente de firma");
+      Alert.alert("Error", "No se pudo cargar la firma: " + error.message);
+    }
+  };
+
+  // Resetear firma (limpiar todos los estados según versión web)
+  const handleReset = () => {
+    Alert.alert("Nueva Firma", "¿Deseas capturar una nueva firma?", [
+      {
+        text: "Sí",
+        onPress: () => {
+          // 🆕 Resetear TODOS los estados (según versión web)
+          setFirmData(null);
+          setFirmCompleted(false);
+          setFirmError(null);
+          setAuthStatus("idle");
+          setAuthMessage("");
+          setProcessStatus("");
+          if (onChange) onChange(null);
+          if (onValueChange) onValueChange(null);
+        },
+      },
+      { text: "No", style: "cancel" },
+    ]);
   };
 
   return (
     <View style={styles.container}>
-      {/* Label */}
       <Text style={styles.label}>
         {label}
         {required && <Text style={styles.required}> *</Text>}
       </Text>
 
-      {/* 🆕 Indicador de modo offline */}
-      {isOffline && (
-        <View style={styles.offlineBadge}>
-          <Text style={styles.offlineBadgeText}>📵 Modo Offline</Text>
+      {!firmCompleted && (
+        <View style={styles.pickerContainer}>
+          <TouchableOpacity
+            style={[styles.picker, disabled && styles.pickerDisabled]}
+            onPress={() => {
+              const allOptions = [...options, ...registeredUsers].filter(
+                (opt) => opt && opt.id && opt.name
+              );
+
+              if (disabled || allOptions.length === 0) {
+                if (allOptions.length === 0) {
+                  Alert.alert("Sin Usuarios", "No hay usuarios registrados.");
+                }
+                return;
+              }
+
+              // Abrir modal con ScrollView
+              setShowUserPickerModal(true);
+            }}
+            disabled={disabled}
+          >
+            <Text style={styles.pickerText}>
+              {loadingUsers
+                ? "Cargando..."
+                : selectedUser
+                  ? `${selectedUser.name} (${selectedUser.num_document || selectedUser.id})`
+                  : "Seleccionar firmante..."}
+            </Text>
+          </TouchableOpacity>
         </View>
       )}
 
-      {/* Selector de Usuario + Botón Firmar */}
-      <View style={styles.inputRow}>
-        <View style={[styles.pickerContainer, error && styles.pickerError]}>
-          <Picker
-            selectedValue={value || ""}
-            onValueChange={(itemValue) => {
-              console.log(
-                "🔄 Picker onChange - valor seleccionado:",
-                itemValue
-              );
-              if (onChange) {
-                onChange({ target: { value: itemValue } });
-              }
-            }}
-            enabled={!disabled && options.length > 0} // 🆕 Deshabilitar si no hay opciones
-            // Evitar crash nativo en Android con el modo dialog
-            mode={Platform.OS === "android" ? "dropdown" : "dialog"}
-            style={styles.picker}
-          >
-            <Picker.Item
-              label={
-                options.length === 0
-                  ? "No hay usuarios disponibles - Verifica tu conexión"
-                  : "Seleccionar usuario para firmar..."
-              }
-              value=""
-            />
-            {options.map((user) => (
-              <Picker.Item
-                key={user.id}
-                label={`${user.name} - ${user.num_document}`}
-                value={user.id}
-              />
-            ))}
-          </Picker>
-        </View>
-
+      {!firmCompleted && (
         <TouchableOpacity
           style={[
             styles.firmButton,
-            (!value || value === "" || disabled || isSigning) &&
-              styles.firmButtonDisabled,
-            firmCompleted && styles.firmButtonSuccess,
+            (!selectedUserId || disabled) && styles.firmButtonDisabled,
           ]}
-          disabled={!value || value === "" || disabled || isSigning}
-          onPress={handleFirmar}
-          activeOpacity={0.7}
+          disabled={!selectedUserId || disabled}
+          onPress={handleOpenFirm}
         >
-          <Text style={styles.firmButtonText}>
-            {firmCompleted
-              ? isOffline
-                ? "✅ Firma Offline"
-                : "✅ Firmado"
-              : "🖊️ Firmar"}
-          </Text>
+          <Text style={styles.firmButtonText}>🖊️ Firmar</Text>
         </TouchableOpacity>
-      </View>
+      )}
 
-      {/* Error de validación */}
-      {error && (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>Este campo es obligatorio</Text>
+      {/* 🆕 Estado de autenticación con colores según el tipo */}
+      {authStatus && authStatus !== "idle" && (
+        <View
+          style={[
+            styles.statusContainer,
+            authStatus === "error" && styles.statusError,
+            authStatus === "success" && styles.statusSuccess,
+            authStatus === "loading" && styles.statusLoading,
+          ]}
+        >
+          <Text style={styles.statusText}>
+            {authStatus === "success" && "🎉 "}
+            {authStatus === "error" && "❌ "}
+            {authStatus === "loading" && "🔄 "}
+            {authMessage}
+          </Text>
         </View>
       )}
 
-      {/* Error de firma */}
-      {firmError && (
-        <View style={styles.firmErrorContainer}>
-          <Text style={styles.firmErrorText}>❌ {firmError}</Text>
+      {/* 🆕 Estado del proceso (opcional, para más detalle) */}
+      {processStatus && (
+        <View style={styles.processContainer}>
+          <Text style={styles.processText}>{processStatus}</Text>
         </View>
       )}
 
-      {/* Estado de firma exitosa */}
       {firmCompleted && firmData && (
         <View style={styles.successContainer}>
           <View style={styles.successHeader}>
             <Text style={styles.successIcon}>✅</Text>
-            <View style={styles.successTextContainer}>
-              <Text style={styles.successTitle}>
-                {isOffline
-                  ? "Firma cargada (offline)"
-                  : "Firma completada exitosamente"}
-              </Text>
-              <Text style={styles.successSubtitle}>
-                Usuario: {firmData.person_name || "Sin nombre"}
-              </Text>
+            <View style={styles.successContent}>
+              <Text style={styles.successTitle}>Firma Completada</Text>
+              <Text style={styles.successSubtitle}>{firmData.person_name}</Text>
               <Text style={styles.successDetails}>
-                ID: {firmData.person_id || "Sin ID"}
+                Confianza: {((firmData.confidence_score || 0) * 100).toFixed(1)}
+                %
               </Text>
             </View>
           </View>
+          <TouchableOpacity style={styles.resetButton} onPress={handleReset}>
+            <Text style={styles.resetButtonText}>🔄 Nueva Firma</Text>
+          </TouchableOpacity>
         </View>
       )}
 
-      {/* Modal de Firma */}
       <Modal
         visible={showModal}
         animationType="slide"
-        transparent={true}
-        onRequestClose={handleCloseModal}
+        onRequestClose={() => setShowModal(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <View>
-                <Text style={styles.modalTitle}>🖊️ Firma Digital</Text>
-                {selectedUser && (
-                  <Text style={styles.modalSubtitle}>
-                    Usuario: {selectedUser.name} - {selectedUser.num_document}
-                  </Text>
-                )}
-              </View>
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>
+              Firma Digital - {selectedUser?.name}
+            </Text>
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={() => {
+                setShowModal(false);
+                setWebViewHtml(null);
+              }}
+            >
+              <Text style={styles.closeButtonText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          {isLoading && (
+            <View style={styles.loadingOverlay}>
+              <ActivityIndicator size="large" color="#667eea" />
+              <Text style={styles.loadingText}>Cargando...</Text>
+            </View>
+          )}
+
+          {webViewHtml && (
+            <WebView
+              ref={webViewRef}
+              source={{
+                html: webViewHtml,
+                baseUrl:
+                  "https://reconocimiento-facial-safe.service.saferut.com",
+              }}
+              originWhitelist={["*"]}
+              onMessage={handleWebViewMessage}
+              onLoad={() => {
+                console.log("✅ WebView cargado");
+              }}
+              onLoadStart={() => {
+                console.log("🔄 WebView iniciando carga...");
+                setIsLoading(true);
+              }}
+              onLoadEnd={() => {
+                console.log(
+                  "✅ WebView carga completada - esperando scripts..."
+                );
+                // Ocultar loading después de 3 segundos para dar tiempo a que los scripts externos carguen
+                setTimeout(() => {
+                  setIsLoading(false);
+                  console.log("✅ Loading overlay removido");
+                }, 3000);
+              }}
+              onError={(syntheticEvent) => {
+                const { nativeEvent } = syntheticEvent;
+                console.error("❌ WebView error:", nativeEvent);
+                setIsLoading(false);
+                setAuthStatus("error");
+                setAuthMessage("Error cargando el componente");
+              }}
+              onHttpError={(syntheticEvent) => {
+                const { nativeEvent } = syntheticEvent;
+                console.error("❌ WebView HTTP error:", nativeEvent);
+              }}
+              // Configuraciones avanzadas para soportar scripts externos
+              javaScriptEnabled={true}
+              domStorageEnabled={true}
+              thirdPartyCookiesEnabled={true}
+              sharedCookiesEnabled={true}
+              cacheEnabled={true}
+              cacheMode="LOAD_DEFAULT"
+              mediaPlaybackRequiresUserAction={false}
+              allowsInlineMediaPlayback={true}
+              allowsFullscreenVideo={false}
+              geolocationEnabled={false}
+              allowFileAccess={true}
+              allowUniversalAccessFromFileURLs={true}
+              mixedContentMode="always"
+              // Inyectar JavaScript después de la carga
+              injectedJavaScript={`
+                console.log('🎯 JavaScript inyectado ejecutado');
+                window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'log', message: '🎯 JavaScript inyectado ejecutado' }));
+                true; // note: this is required, or you'll sometimes get silent failures
+              `}
+              // Ejecutar JS cuando el contenido carga
+              injectedJavaScriptBeforeContentLoaded={`
+                console.log('⚡ JavaScript pre-carga ejecutado');
+                true;
+              `}
+              style={{ flex: 1, backgroundColor: "transparent" }}
+            />
+          )}
+
+          {!webViewHtml && showModal && (
+            <View
+              style={{
+                flex: 1,
+                justifyContent: "center",
+                alignItems: "center",
+              }}
+            >
+              <Text style={{ fontSize: 16, color: "#666" }}>
+                Preparando componente...
+              </Text>
+            </View>
+          )}
+        </View>
+      </Modal>
+
+      {/* Modal para seleccionar usuario */}
+      <Modal
+        visible={showUserPickerModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowUserPickerModal(false)}
+      >
+        <View style={styles.userPickerOverlay}>
+          <View style={styles.userPickerContainer}>
+            <View style={styles.userPickerHeader}>
+              <Text style={styles.userPickerTitle}>Seleccionar Firmante</Text>
               <TouchableOpacity
-                onPress={handleCloseModal}
-                style={styles.closeButton}
-                activeOpacity={0.7}
+                style={styles.userPickerCloseButton}
+                onPress={() => setShowUserPickerModal(false)}
               >
                 <Text style={styles.closeButtonText}>✕</Text>
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={styles.modalContent}>
-              {authDisplay && (
-                <View
-                  style={[
-                    styles.authStatusContainer,
-                    {
-                      backgroundColor: authDisplay.bgColor,
-                      borderColor: authDisplay.borderColor,
-                    },
-                  ]}
-                >
-                  <View style={styles.authStatusContent}>
-                    <Text style={styles.authIcon}>{authDisplay.icon}</Text>
-                    <View style={styles.authTextContainer}>
-                      <Text
-                        style={[
-                          styles.authMessage,
-                          { color: authDisplay.textColor },
-                        ]}
-                      >
-                        {authDisplay.message}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.authSubMessage,
-                          { color: authDisplay.textColor },
-                        ]}
-                      >
-                        {authDisplay.subMessage}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              )}
+            <Text style={styles.userPickerSubtitle}>
+              {
+                [...options, ...registeredUsers].filter(
+                  (opt) => opt && opt.id && opt.name
+                ).length
+              }{" "}
+              usuario(s) disponibles
+            </Text>
 
-              {processStatus && (
-                <View style={styles.processStatusContainer}>
-                  <Text style={styles.processStatusText}>
-                    Estado: {processStatus}
-                  </Text>
-                </View>
-              )}
-
-              {showModal ? (
-                <View style={styles.webViewContainer}>
-                  <WebView
-                    source={{
-                      html: getWebViewHTML(),
-                      baseUrl:
-                        "https://reconocimiento-facial-safe.service.saferut.com/",
-                    }}
-                    originWhitelist={["*"]}
-                    javaScriptEnabled={true}
-                    domStorageEnabled={true}
-                    mediaPlaybackRequiresUserAction={false}
-                    allowsInlineMediaPlayback={true}
-                    mixedContentMode="always"
-                    allowUniversalAccessFromFileURLs={true}
-                    allowFileAccessFromFileURLs={true}
-                    startInLoadingState={true}
-                    cacheEnabled={false}
-                    thirdPartyCookiesEnabled={true}
-                    sharedCookiesEnabled={true}
-                    mediaCapturePermissionGrantType="grant"
-                    onMessage={handleWebViewMessage}
-                    onError={(e) => {
-                      console.error("WebView error:", e.nativeEvent || e);
-                      setFirmError("Error cargando componente de firma");
-                    }}
-                    // Manejar caída del proceso de render (Android) sin crashear la app
-                    onRenderProcessGone={(e) => {
-                      try {
-                        const crashed = e?.nativeEvent?.didCrash;
-                        console.warn(
-                          "WebView render process gone. didCrash=",
-                          crashed
-                        );
-                      } catch {}
-                      setFirmError(
-                        "El componente de firma se reinició. Intenta nuevamente."
+            <ScrollView style={styles.userPickerScroll}>
+              {[...options, ...registeredUsers]
+                .filter((opt) => opt && opt.id && opt.name)
+                .map((opt, index) => (
+                  <TouchableOpacity
+                    key={opt.id || index}
+                    style={[
+                      styles.userPickerItem,
+                      selectedUserId === opt.id &&
+                        styles.userPickerItemSelected,
+                      !opt.has_face_images && styles.userPickerItemWarning,
+                    ]}
+                    onPress={() => {
+                      console.log(
+                        "👤 [FirmField] Usuario seleccionado:",
+                        opt.name,
+                        opt.id
                       );
-                      handleCloseModal();
+                      setSelectedUserId(opt.id);
+                      setSelectedUser(opt); // ✅ IMPORTANTE: Guardar el objeto completo del usuario
+                      // ❌ NO llamar onChange aquí - solo cuando se complete la firma
+                      setShowUserPickerModal(false);
                     }}
-                    style={styles.webView}
-                  />
-                </View>
-              ) : (
-                <View style={styles.loadingWebViewContainer}>
-                  <ActivityIndicator size="large" color="#0F8593" />
-                  <Text style={styles.loadingWebViewText}>
-                    Preparando componente de firma...
-                  </Text>
-                </View>
-              )}
-
-              {countdown > 0 && (
-                <View style={styles.countdownContainer}>
-                  <Text style={styles.countdownText}>
-                    Cerrando automáticamente en {countdown}s
-                  </Text>
-                </View>
-              )}
+                  >
+                    <View style={styles.userPickerItemContent}>
+                      <View
+                        style={{ flexDirection: "row", alignItems: "center" }}
+                      >
+                        <Text style={styles.userPickerItemName}>
+                          {opt.name}
+                        </Text>
+                        
+                          <Text
+                            style={{
+                              marginLeft: 8,
+                              color: "#4CAF50",
+                              fontSize: 12,
+                            }}
+                          >
+                            ✓ Registrado
+                          </Text>
+                      </View>
+                      <Text style={styles.userPickerItemDoc}>
+                        Doc: {opt.num_document || opt.id}
+                      </Text>
+                      {opt.email && (
+                        <Text style={styles.userPickerItemEmail}>
+                          {opt.email}
+                        </Text>
+                      )}
+                    </View>
+                    {selectedUserId === opt.id && (
+                      <Text style={styles.userPickerItemCheck}>✓</Text>
+                    )}
+                  </TouchableOpacity>
+                ))}
             </ScrollView>
+
+            <TouchableOpacity
+              style={styles.userPickerCancelButton}
+              onPress={() => setShowUserPickerModal(false)}
+            >
+              <Text style={styles.userPickerCancelText}>Cancelar</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -868,250 +1260,184 @@ const FirmField = ({
 };
 
 const styles = StyleSheet.create({
-  container: {
-    marginBottom: 16,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#2D3748",
-    marginBottom: 8,
-  },
-  required: {
-    color: "#F56565",
-  },
-  offlineBadge: {
-    backgroundColor: "#FEF3C7",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    marginBottom: 8,
-    alignSelf: "flex-start",
-  },
-  offlineBadgeText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#92400E",
-  },
-  inputRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  pickerContainer: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    borderRadius: 8,
-    backgroundColor: "#FFFFFF",
-    overflow: "hidden",
-  },
-  pickerError: {
-    borderColor: "#F56565",
-  },
+  container: { marginBottom: 20 },
+  label: { fontSize: 16, fontWeight: "600", marginBottom: 8, color: "#333" },
+  required: { color: "#ef4444" },
+  pickerContainer: { marginBottom: 12 },
   picker: {
-    height: 48,
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    borderRadius: 8,
+    padding: 12,
+    backgroundColor: "#fff",
   },
+  pickerDisabled: { backgroundColor: "#f3f4f6", opacity: 0.6 },
+  pickerText: { fontSize: 14, color: "#374151" },
   firmButton: {
-    backgroundColor: "#0F8593",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    backgroundColor: "#667eea",
+    padding: 14,
     borderRadius: 8,
-    justifyContent: "center",
     alignItems: "center",
-    minWidth: 100,
+    marginBottom: 12,
   },
-  firmButtonDisabled: {
-    backgroundColor: "#CBD5E1",
-  },
-  firmButtonSuccess: {
-    backgroundColor: "#10B981",
-  },
-  firmButtonText: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  errorContainer: {
-    marginTop: 4,
-    backgroundColor: "#FEE2E2",
-    padding: 8,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: "#FECACA",
-  },
-  errorText: {
-    fontSize: 12,
-    color: "#991B1B",
-  },
-  firmErrorContainer: {
-    marginTop: 8,
-    backgroundColor: "#FEE2E2",
-    padding: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#FECACA",
-  },
-  firmErrorText: {
-    fontSize: 12,
-    color: "#991B1B",
-  },
-  successContainer: {
-    marginTop: 8,
-    backgroundColor: "#D1FAE5",
+  firmButtonDisabled: { backgroundColor: "#d1d5db", opacity: 0.6 },
+  firmButtonText: { color: "#fff", fontSize: 16, fontWeight: "600" },
+  statusContainer: {
+    backgroundColor: "#d1fae5",
     padding: 12,
     borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#A7F3D0",
+    marginBottom: 12,
+  },
+  statusSuccess: { backgroundColor: "#d1fae5" }, // Verde
+  statusError: { backgroundColor: "#fee2e2" }, // Rojo
+  statusLoading: { backgroundColor: "#dbeafe" }, // Azul
+  statusText: { color: "#065f46", fontSize: 14 },
+  processContainer: {
+    backgroundColor: "#f0f4ff",
+    padding: 10,
+    borderRadius: 6,
+    marginBottom: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: "#667eea",
+  },
+  processText: { color: "#374151", fontSize: 13 },
+  successContainer: {
+    backgroundColor: "#d1fae5",
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 12,
   },
   successHeader: {
     flexDirection: "row",
     alignItems: "center",
+    marginBottom: 12,
   },
-  successIcon: {
-    fontSize: 24,
-    marginRight: 12,
-  },
-  successTextContainer: {
-    flex: 1,
-  },
-  successTitle: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#065F46",
-    marginBottom: 4,
-  },
-  successSubtitle: {
-    fontSize: 12,
-    color: "#047857",
-    marginBottom: 2,
-  },
-  successDetails: {
-    fontSize: 11,
-    color: "#059669",
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "flex-end",
-  },
-  modalContainer: {
-    backgroundColor: "#FFFFFF",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    height: "90%",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E2E8F0",
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#1A202C",
-  },
-  modalSubtitle: {
-    fontSize: 13,
-    color: "#718096",
-    marginTop: 4,
-  },
-  closeButton: {
-    width: 32,
-    height: 32,
-    justifyContent: "center",
-    alignItems: "center",
-    borderRadius: 16,
-    backgroundColor: "#F7FAFC",
-  },
-  closeButtonText: {
-    fontSize: 20,
-    color: "#4A5568",
-  },
-  modalContent: {
-    flex: 1,
-    padding: 20,
-  },
-  authStatusContainer: {
-    borderRadius: 8,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-  },
-  authStatusContent: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  authIcon: {
-    fontSize: 24,
-    marginRight: 12,
-  },
-  authTextContainer: {
-    flex: 1,
-  },
-  authMessage: {
-    fontSize: 16,
-    fontWeight: "600",
-    marginBottom: 4,
-  },
-  authSubMessage: {
-    fontSize: 14,
-    opacity: 0.8,
-  },
-  processStatusContainer: {
-    backgroundColor: "#DBEAFE",
+  successIcon: { fontSize: 32, marginRight: 12 },
+  successContent: { flex: 1 },
+  successTitle: { fontSize: 16, fontWeight: "600", color: "#065f46" },
+  successSubtitle: { fontSize: 14, color: "#047857", marginTop: 4 },
+  successDetails: { fontSize: 12, color: "#059669", marginTop: 4 },
+  resetButton: {
+    backgroundColor: "#667eea",
     padding: 12,
     borderRadius: 8,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: "#BFDBFE",
+    alignItems: "center",
   },
-  processStatusText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#1E40AF",
+  resetButtonText: { color: "#fff", fontSize: 14, fontWeight: "600" },
+  modalContainer: { flex: 1, backgroundColor: "#fff" },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e5e7eb",
   },
-  webViewContainer: {
-    height: 400,
-    borderRadius: 8,
-    overflow: "hidden",
-    backgroundColor: "#F7FAFC",
-    marginBottom: 16,
-  },
-  webView: {
-    flex: 1,
-  },
-  loadingWebViewContainer: {
-    height: 400,
+  modalTitle: { fontSize: 18, fontWeight: "600", flex: 1 },
+  closeButton: { padding: 8 },
+  closeButtonText: { fontSize: 24, color: "#6b7280" },
+  loadingOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(255,255,255,0.9)",
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#F7FAFC",
-    borderRadius: 8,
-    marginBottom: 16,
+    zIndex: 999,
   },
-  loadingWebViewText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: "#4A5568",
+  loadingText: { marginTop: 12, fontSize: 14, color: "#667eea" },
+  // Estilos del modal de selección de usuarios
+  userPickerOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
   },
-  countdownContainer: {
-    backgroundColor: "#FEF3C7",
-    padding: 10,
-    borderRadius: 8,
-    marginTop: 16,
+  userPickerContainer: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    width: "100%",
+    maxHeight: "80%",
+    overflow: "hidden",
   },
-  countdownText: {
-    fontSize: 13,
-    color: "#92400E",
-    textAlign: "center",
+  userPickerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e5e7eb",
+  },
+  userPickerTitle: {
+    fontSize: 18,
     fontWeight: "600",
+    color: "#333",
+    flex: 1,
+  },
+  userPickerCloseButton: {
+    padding: 4,
+  },
+  userPickerSubtitle: {
+    padding: 12,
+    paddingTop: 8,
+    fontSize: 14,
+    color: "#6b7280",
+    backgroundColor: "#f9fafb",
+  },
+  userPickerScroll: {
+    maxHeight: 400,
+  },
+  userPickerItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f3f4f6",
+  },
+  userPickerItemSelected: {
+    backgroundColor: "#f0f4ff",
+  },
+  userPickerItemWarning: {
+    backgroundColor: "#fff8f0",
+    borderLeftWidth: 3,
+    borderLeftColor: "#FFA500",
+  },
+  userPickerItemContent: {
+    flex: 1,
+  },
+  userPickerItemName: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#333",
+    marginBottom: 4,
+  },
+  userPickerItemDoc: {
+    fontSize: 14,
+    color: "#6b7280",
+  },
+  userPickerItemEmail: {
+    fontSize: 12,
+    color: "#9ca3af",
+    marginTop: 2,
+  },
+  userPickerItemCheck: {
+    fontSize: 24,
+    color: "#667eea",
+    marginLeft: 8,
+  },
+  userPickerCancelButton: {
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: "#e5e7eb",
+    alignItems: "center",
+  },
+  userPickerCancelText: {
+    fontSize: 16,
+    color: "#6b7280",
+    fontWeight: "500",
   },
 });
 

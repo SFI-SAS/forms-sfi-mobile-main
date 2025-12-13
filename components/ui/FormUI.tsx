@@ -14,7 +14,7 @@ import {
     TextStyle,
     TextInputProps,
 } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
+import { SimplePicker } from './SimplePicker';
 
 // ============================================
 // INTERFACES
@@ -152,6 +152,8 @@ export const Textarea: React.FC<InputFieldProps & { rows?: number }> = ({
 /**
  * Select - Equivalente a .select.select-bordered de DaisyUI
  * Campo de selección dropdown
+ * ✅ ACTUALIZADO: Usa SimplePicker en lugar de @react-native-picker/picker
+ * ✅ SOLUCIÓN: Evita crashes por ShadowNodes en React Native 0.81.5
  */
 export const Select: React.FC<SelectFieldProps> = ({
     label,
@@ -162,27 +164,43 @@ export const Select: React.FC<SelectFieldProps> = ({
     value,
     onValueChange,
     disabled = false,
-}) => (
-    <FormControl>
-        {label && <Label required={required}>{label}</Label>}
-        <View style={[styles.selectContainer, error && styles.inputError]}>
-            <Picker
-                selectedValue={value || ''}
-                onValueChange={onValueChange}
-                enabled={!disabled}
-                style={styles.picker}
-            >
-                <Picker.Item label="Seleccionar..." value="" />
-                {options.map((option, index) => (
-                    <Picker.Item key={index} label={option} value={option} />
-                ))}
-            </Picker>
-        </View>
-        {error && errorMessage && (
-            <ErrorText>{errorMessage}</ErrorText>
-        )}
-    </FormControl>
-);
+}) => {
+    // DEBUG: Ver qué opciones recibe Select
+    React.useEffect(() => {
+        console.log('🎯 FormUI.Select recibió:', {
+            label,
+            optionsLength: options.length,
+            optionsType: typeof options,
+            isArray: Array.isArray(options),
+            firstOptions: options.slice(0, 3),
+            value
+        });
+    }, [options, label, value]);
+
+    // Convertir array de strings a formato { label, value }
+    const pickerOptions = [
+        { label: 'Seleccionar...', value: '' },
+        ...options.map(opt => ({ label: opt, value: opt }))
+    ];
+
+    return (
+        <FormControl>
+            {label && <Label required={required}>{label}</Label>}
+            <View style={[styles.selectContainer, error && styles.inputError]}>
+                <SimplePicker
+                    selectedValue={value || ''}
+                    onValueChange={onValueChange || (() => { })}
+                    enabled={!disabled}
+                    options={pickerOptions}
+                    style={styles.picker}
+                />
+            </View>
+            {error && errorMessage && (
+                <ErrorText>{errorMessage}</ErrorText>
+            )}
+        </FormControl>
+    );
+};
 
 // ============================================
 // ESTILOS (Basados en DaisyUI + Tailwind)

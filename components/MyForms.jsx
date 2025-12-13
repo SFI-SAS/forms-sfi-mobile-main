@@ -52,6 +52,10 @@ export default function MyForms() {
   const [loadingMore, setLoadingMore] = useState(false);
   const PAGE_SIZE = 15;
 
+  // 🔍 BÚSQUEDA
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filteredForms, setFilteredForms] = useState([]);
+
   useFocusEffect(
     React.useCallback(() => {
       const disableBack = () => true;
@@ -124,6 +128,39 @@ export default function MyForms() {
   useEffect(() => {
     handleViewForms();
   }, []);
+
+  // 🔍 Filtrar formularios cuando cambia la búsqueda o los formularios
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setFilteredForms(forms);
+    } else {
+      const query = searchQuery.toLowerCase();
+      const filtered = forms.filter((form) => {
+        // Buscar en título
+        if (form.form_title?.toLowerCase().includes(query)) return true;
+        // Buscar en descripción
+        if (form.form_description?.toLowerCase().includes(query)) return true;
+        // Buscar en respuestas
+        const responses = responsesByForm[form.id] || [];
+        return responses.some((resp) => {
+          // Buscar en respuestas individuales
+          if (
+            resp.answers?.some(
+              (ans) =>
+                ans.question_text?.toLowerCase().includes(query) ||
+                ans.answer_text?.toLowerCase().includes(query)
+            )
+          )
+            return true;
+          // Buscar en usuario
+          if (resp.submitted_by?.name?.toLowerCase().includes(query))
+            return true;
+          return false;
+        });
+      });
+      setFilteredForms(filtered);
+    }
+  }, [searchQuery, forms, responsesByForm]);
 
   const handleViewForms = async (page = 1, append = false) => {
     if (!append) {
@@ -430,6 +467,21 @@ export default function MyForms() {
     }
   };
 
+  const formatDate = (dateString) => {
+    if (!dateString) return "Unknown";
+    try {
+      const date = new Date(dateString);
+      const day = String(date.getDate()).padStart(2, "0");
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const year = date.getFullYear();
+      const hours = String(date.getHours()).padStart(2, "0");
+      const minutes = String(date.getMinutes()).padStart(2, "0");
+      return `${day}/${month}/${year} ${hours}:${minutes}`;
+    } catch (e) {
+      return dateString;
+    }
+  };
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#1E3A8A" />
@@ -441,13 +493,52 @@ export default function MyForms() {
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
       >
-        <View style={styles.headerContent}>
-          <Text style={styles.headerTitle}>Submitted Forms</Text>
-          <Text style={styles.headerSubtitle}>
-            Review and Manage Submissions
-          </Text>
+        <View style={styles.headerWithBack}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => router.back()}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.backButtonText}>←</Text>
+          </TouchableOpacity>
+          <View style={styles.headerContent}>
+            <Text style={styles.headerTitle}>Submitted Forms</Text>
+            <Text style={styles.headerSubtitle}>
+              Review and Manage Submissions
+            </Text>
+          </View>
         </View>
       </LinearGradient>
+
+      {/* 🔍 Buscador estilo Google */}
+      <View style={styles.searchContainer}>
+        <View style={styles.searchBar}>
+          <Text style={styles.searchIcon}>🔍</Text>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search forms, responses, or users..."
+            placeholderTextColor="#9CA3AF"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity
+              onPress={() => setSearchQuery("")}
+              style={styles.clearButton}
+            >
+              <Text style={styles.clearButtonText}>✕</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+        {searchQuery.length > 0 && (
+          <Text style={styles.searchResults}>
+            {filteredForms.length}{" "}
+            {filteredForms.length === 1 ? "result" : "results"} found
+          </Text>
+        )}
+      </View>
 
       {/* Contenido principal */}
       <View style={styles.mainContent}>
@@ -477,275 +568,276 @@ export default function MyForms() {
                 layoutMeasurement.height + contentOffset.y >=
                 contentSize.height - paddingToBottom;
 
-              if (isCloseToBottom && hasMore && !loadingMore) {
+              if (isCloseToBottom && hasMore && !loadingMore && !searchQuery) {
                 loadMoreForms();
               }
             }}
             scrollEventThrottle={400}
           >
-            {forms.map((form, index) => (
-              <View key={form.id} style={styles.formCard}>
-                {/* Header del formulario */}
-                <View style={styles.formHeader}>
-                  <View style={styles.formIdBadge}>
-                    <Text style={styles.formIdText}>ID: {form.id}</Text>
-                  </View>
-                </View>
-
-                {/* Contenido del formulario */}
-                <View style={styles.formContent}>
-                  <Text style={styles.formTitle} numberOfLines={2}>
-                    {form.form_title || "Untitled Form"}
-                  </Text>
-
-                  {form.form_description ? (
-                    <Text style={styles.formDescription} numberOfLines={3}>
-                      {form.form_description}
-                    </Text>
-                  ) : null}
-
-                  <View style={styles.formMeta}>
-                    <View style={styles.metaItem}>
-                      <Text style={styles.metaLabel}>Submitted by:</Text>
-                      <Text style={styles.metaValue}>
-                        {form.submitted_by?.name || "Unknown"}
-                      </Text>
+            {filteredForms.length === 0 && searchQuery ? (
+              <View style={styles.emptySearchContainer}>
+                <Text style={styles.emptySearchIcon}>🔍</Text>
+                <Text style={styles.emptySearchTitle}>No results found</Text>
+                <Text style={styles.emptySearchText}>
+                  Try searching with different keywords
+                </Text>
+              </View>
+            ) : (
+              filteredForms.map((form, index) => (
+                <View key={form.id} style={styles.formCard}>
+                  {/* Header del formulario */}
+                  <View style={styles.formHeader}>
+                    <View style={styles.formIdBadge}>
+                      <Text style={styles.formIdText}>ID: 00{form.id}</Text>
                     </View>
                   </View>
-                </View>
 
-                {/* Botón para expandir respuestas */}
-                <TouchableOpacity
-                  style={styles.expandButton}
-                  onPress={() => toggleExpand(form.id)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.expandButtonText}>
-                    {expandedForms[form.id]
-                      ? "Hide Responses"
-                      : "View Responses"}
-                  </Text>
-                  <Text style={styles.expandButtonIcon}>
-                    {expandedForms[form.id] ? "▲" : "▼"}
-                  </Text>
-                </TouchableOpacity>
+                  {/* Contenido del formulario */}
+                  <View style={styles.formContent}>
+                    <Text style={styles.formTitle} numberOfLines={2}>
+                      {form.form_title || "Untitled Form"}
+                    </Text>
 
-                {/* Respuestas expandidas */}
-                {expandedForms[form.id] && (
-                  <View style={styles.responsesSection}>
-                    <View style={styles.responsesDivider} />
-                    <ScrollView
-                      style={styles.responsesScroll}
-                      nestedScrollEnabled
-                      showsVerticalScrollIndicator={false}
-                    >
-                      {Array.isArray(responsesByForm[form.id]) &&
-                      responsesByForm[form.id].length > 0 ? (
-                        responsesByForm[form.id].map((resp, idx) => (
-                          <View
-                            key={resp.response_id || idx}
-                            style={styles.responseCard}
-                          >
-                            {/* Header de respuesta */}
-                            <View style={styles.responseHeader}>
-                              <Text style={styles.responseNumber}>
-                                Submission #{idx + 1}
-                              </Text>
-                              <View
-                                style={[
-                                  styles.statusBadge,
-                                  {
-                                    backgroundColor: getStatusColor(
-                                      resp.approval_status
-                                    ),
-                                  },
-                                ]}
-                              >
-                                <Text style={styles.statusBadgeText}>
-                                  {getStatusLabel(resp.approval_status)}
+                    {form.form_description ? (
+                      <Text style={styles.formDescription} numberOfLines={3}>
+                        {form.form_description}
+                      </Text>
+                    ) : null}
+
+                    <View style={styles.formMeta}></View>
+                  </View>
+
+                  {/* Botón para expandir respuestas */}
+                  <TouchableOpacity
+                    style={styles.expandButton}
+                    onPress={() => toggleExpand(form.id)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.expandButtonText}>
+                      {expandedForms[form.id]
+                        ? "Hide Responses"
+                        : "View Responses"}
+                    </Text>
+                    <Text style={styles.expandButtonIcon}>
+                      {expandedForms[form.id] ? "▲" : "▼"}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {/* Respuestas expandidas */}
+                  {expandedForms[form.id] && (
+                    <View style={styles.responsesSection}>
+                      <View style={styles.responsesDivider} />
+                      <ScrollView
+                        style={styles.responsesScroll}
+                        nestedScrollEnabled
+                      >
+                        {Array.isArray(responsesByForm[form.id]) &&
+                        responsesByForm[form.id].length > 0 ? (
+                          responsesByForm[form.id].map((resp, idx) => (
+                            <View
+                              key={resp.response_id || idx}
+                              style={styles.responseCard}
+                            >
+                              {/* Header de respuesta */}
+                              <View style={styles.responseHeader}>
+                                <Text style={styles.responseNumber}>
+                                  Submission #{idx + 1}
                                 </Text>
-                              </View>
-                            </View>
-
-                            {/* Información de la respuesta */}
-                            <View style={styles.responseInfo}>
-                              <View style={styles.infoRow}>
-                                <Text style={styles.infoLabel}>Date:</Text>
-                                <Text style={styles.infoValue}>
-                                  {resp.submitted_at || "Unknown"}
-                                </Text>
-                              </View>
-
-                              <View style={styles.infoRow}>
-                                <Text style={styles.infoLabel}>Mode:</Text>
                                 <View
                                   style={[
-                                    styles.modeBadge,
+                                    styles.statusBadge,
                                     {
-                                      backgroundColor:
-                                        resp.mode === "offline"
-                                          ? "#FEE2E2"
-                                          : "#D1FAE5",
+                                      backgroundColor: getStatusColor(
+                                        resp.approval_status
+                                      ),
                                     },
                                   ]}
                                 >
-                                  <Text
+                                  <Text style={styles.statusBadgeText}>
+                                    {getStatusLabel(resp.approval_status)}
+                                  </Text>
+                                </View>
+                              </View>
+
+                              {/* Información de la respuesta */}
+                              <View style={styles.responseInfo}>
+                                <View style={styles.infoRow}>
+                                  <Text style={styles.infoLabel}>Date:</Text>
+                                  <Text style={styles.infoValue}>
+                                    {formatDate(resp.submitted_at)}
+                                  </Text>
+                                </View>
+
+                                <View style={styles.infoRow}>
+                                  <Text style={styles.infoLabel}>Mode:</Text>
+                                  <View
                                     style={[
-                                      styles.modeText,
+                                      styles.modeBadge,
                                       {
-                                        color:
+                                        backgroundColor:
                                           resp.mode === "offline"
-                                            ? "#DC2626"
-                                            : "#059669",
+                                            ? "#FEE2E2"
+                                            : "#D1FAE5",
                                       },
                                     ]}
                                   >
-                                    {resp.mode === "offline"
-                                      ? "● Offline"
-                                      : "● Online"}
-                                  </Text>
+                                    <Text
+                                      style={[
+                                        styles.modeText,
+                                        {
+                                          color:
+                                            resp.mode === "offline"
+                                              ? "#DC2626"
+                                              : "#059669",
+                                        },
+                                      ]}
+                                    >
+                                      {resp.mode === "offline"
+                                        ? "● Offline"
+                                        : "● Online"}
+                                    </Text>
+                                  </View>
                                 </View>
+                                {resp.message ? (
+                                  <View style={styles.messageContainer}>
+                                    <Text style={styles.messageLabel}>
+                                      Message:
+                                    </Text>
+                                    <Text style={styles.messageText}>
+                                      {resp.message}
+                                    </Text>
+                                  </View>
+                                ) : null}
                               </View>
-
-                              {resp.message ? (
-                                <View style={styles.messageContainer}>
-                                  <Text style={styles.messageLabel}>
-                                    Message:
-                                  </Text>
-                                  <Text style={styles.messageText}>
-                                    {resp.message}
-                                  </Text>
-                                </View>
-                              ) : null}
-                            </View>
-
-                            {/* Respuestas del formulario */}
-                            {Array.isArray(resp.answers) &&
-                            resp.answers.length > 0 ? (
-                              <View style={styles.answersSection}>
-                                <Text style={styles.sectionTitle}>
-                                  Form Answers
-                                </Text>
-                                <ScrollView
-                                  style={styles.answersScroll}
-                                  nestedScrollEnabled
-                                  showsVerticalScrollIndicator={false}
-                                >
-                                  {resp.answers.map((ans, i) => (
-                                    <View key={i} style={styles.answerItem}>
-                                      <Text style={styles.questionText}>
-                                        {ans.question_text}
-                                      </Text>
-                                      <Text style={styles.answerText}>
-                                        {ans.answer_text ||
-                                          ans.file_path ||
-                                          "-"}
-                                      </Text>
-                                    </View>
-                                  ))}
-                                </ScrollView>
-                              </View>
-                            ) : null}
-
-                            {/* Detalles de aprobación */}
-                            {Array.isArray(resp.approvals) &&
-                              resp.approvals.length > 0 && (
-                                <View style={styles.approvalsSection}>
+                              {/* Respuestas del formulario */}
+                              {Array.isArray(resp.answers) &&
+                              resp.answers.length > 0 ? (
+                                <View style={styles.answersSection}>
                                   <Text style={styles.sectionTitle}>
-                                    Approval Details
+                                    Form Answers
                                   </Text>
                                   <ScrollView
-                                    style={styles.approvalsScroll}
+                                    style={styles.answersScroll}
                                     nestedScrollEnabled
-                                    showsVerticalScrollIndicator={false}
                                   >
-                                    {resp.approvals.map((appr, i) => (
-                                      <View key={i} style={styles.approvalItem}>
-                                        <View style={styles.approvalRow}>
-                                          <Text style={styles.approvalLabel}>
-                                            Sequence:
-                                          </Text>
-                                          <Text style={styles.approvalValue}>
-                                            {appr.sequence_number}
-                                          </Text>
-                                        </View>
-                                        <View style={styles.approvalRow}>
-                                          <Text style={styles.approvalLabel}>
-                                            Status:
-                                          </Text>
-                                          <Text
-                                            style={[
-                                              styles.approvalValue,
-                                              { fontWeight: "600" },
-                                            ]}
-                                          >
-                                            {appr.status}
-                                          </Text>
-                                        </View>
-                                        <View style={styles.approvalRow}>
-                                          <Text style={styles.approvalLabel}>
-                                            User:
-                                          </Text>
-                                          <Text style={styles.approvalValue}>
-                                            {appr.user?.name || "-"}
-                                          </Text>
-                                        </View>
-                                        <View style={styles.approvalRow}>
-                                          <Text style={styles.approvalLabel}>
-                                            Mandatory:
-                                          </Text>
-                                          <Text style={styles.approvalValue}>
-                                            {appr.is_mandatory ? "Yes" : "No"}
-                                          </Text>
-                                        </View>
-                                        {appr.message && (
-                                          <View
-                                            style={styles.approvalMessageBox}
-                                          >
-                                            <Text
-                                              style={styles.approvalMessage}
-                                            >
-                                              {appr.message}
-                                            </Text>
-                                          </View>
-                                        )}
+                                    {resp.answers.map((ans, i) => (
+                                      <View key={i} style={styles.answerItem}>
+                                        <Text style={styles.questionText}>
+                                          {ans.question_text}
+                                        </Text>
+                                        <Text style={styles.answerText}>
+                                          {ans.answer_text ||
+                                            ans.file_path ||
+                                            "-"}
+                                        </Text>
                                       </View>
                                     ))}
                                   </ScrollView>
                                 </View>
-                              )}
+                              ) : null}
 
-                            {/* Botón de reconsideración */}
-                            {resp.approval_status === "rechazado" && (
-                              <TouchableOpacity
-                                style={styles.reconsiderButton}
-                                onPress={() =>
-                                  handleReconsider(resp.response_id)
-                                }
-                                activeOpacity={0.8}
-                              >
-                                <Text style={styles.reconsiderButtonText}>
-                                  Request Reconsideration
-                                </Text>
-                              </TouchableOpacity>
-                            )}
+                              {/* Detalles de aprobación */}
+                              {Array.isArray(resp.approvals) &&
+                                resp.approvals.length > 0 && (
+                                  <View style={styles.approvalsSection}>
+                                    <Text style={styles.sectionTitle}>
+                                      Approval Details
+                                    </Text>
+                                    <ScrollView
+                                      style={styles.approvalsScroll}
+                                      nestedScrollEnabled
+                                    >
+                                      {resp.approvals.map((appr, i) => (
+                                        <View
+                                          key={i}
+                                          style={styles.approvalItem}
+                                        >
+                                          <View style={styles.approvalRow}>
+                                            <Text style={styles.approvalLabel}>
+                                              Sequence:
+                                            </Text>
+                                            <Text style={styles.approvalValue}>
+                                              {appr.sequence_number}
+                                            </Text>
+                                          </View>
+                                          <View style={styles.approvalRow}>
+                                            <Text style={styles.approvalLabel}>
+                                              Status:
+                                            </Text>
+                                            <Text
+                                              style={[
+                                                styles.approvalValue,
+                                                { fontWeight: "600" },
+                                              ]}
+                                            >
+                                              {appr.status}
+                                            </Text>
+                                          </View>
+                                          <View style={styles.approvalRow}>
+                                            <Text style={styles.approvalLabel}>
+                                              User:
+                                            </Text>
+                                            <Text style={styles.approvalValue}>
+                                              {appr.user?.name || "-"}
+                                            </Text>
+                                          </View>
+                                          <View style={styles.approvalRow}>
+                                            <Text style={styles.approvalLabel}>
+                                              Mandatory:
+                                            </Text>
+                                            <Text style={styles.approvalValue}>
+                                              {appr.is_mandatory ? "Yes" : "No"}
+                                            </Text>
+                                          </View>
+                                          {appr.message && (
+                                            <View
+                                              style={styles.approvalMessageBox}
+                                            >
+                                              <Text
+                                                style={styles.approvalMessage}
+                                              >
+                                                {appr.message}
+                                              </Text>
+                                            </View>
+                                          )}
+                                        </View>
+                                      ))}
+                                    </ScrollView>
+                                  </View>
+                                )}
+
+                              {/* Botón de reconsideración */}
+                              {resp.approval_status === "rechazado" && (
+                                <TouchableOpacity
+                                  style={styles.reconsiderButton}
+                                  onPress={() =>
+                                    handleReconsider(resp.response_id)
+                                  }
+                                  activeOpacity={0.8}
+                                >
+                                  <Text style={styles.reconsiderButtonText}>
+                                    Request Reconsideration
+                                  </Text>
+                                </TouchableOpacity>
+                              )}
+                            </View>
+                          ))
+                        ) : (
+                          <View style={styles.noResponsesContainer}>
+                            <Text style={styles.noResponsesText}>
+                              No responses available for this form.
+                            </Text>
                           </View>
-                        ))
-                      ) : (
-                        <View style={styles.noResponsesContainer}>
-                          <Text style={styles.noResponsesText}>
-                            No responses available for this form.
-                          </Text>
-                        </View>
-                      )}
-                    </ScrollView>
-                  </View>
-                )}
-              </View>
-            ))}
+                        )}
+                      </ScrollView>
+                    </View>
+                  )}
+                </View>
+              ))
+            )}
 
             {/* Indicador de carga al final */}
-            {loadingMore && (
+            {loadingMore && !searchQuery && (
               <View style={{ paddingVertical: 20, alignItems: "center" }}>
                 <ActivityIndicator size="large" color="#108C9B" />
                 <Text style={styles.loadingText}>Loading more...</Text>
@@ -892,8 +984,28 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
   },
+  headerWithBack: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 4,
+  },
+  backButtonText: {
+    fontSize: 24,
+    color: "#FFFFFF",
+    fontWeight: "700",
+  },
   headerContent: {
     alignItems: "center",
+    flex: 1,
   },
   headerTitle: {
     fontSize: 28,
@@ -961,58 +1073,58 @@ const styles = StyleSheet.create({
   },
   formCard: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    marginBottom: 16,
+    borderRadius: 12,
+    marginBottom: 10,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 4,
+    shadowRadius: 8,
+    elevation: 3,
     overflow: "hidden",
     borderWidth: 1,
     borderColor: "#E5E7EB",
   },
   formHeader: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 12,
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 8,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
   formIdBadge: {
     backgroundColor: "#EEF2FF",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 5,
   },
   formIdText: {
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: "600",
     color: "#4F46E5",
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
   },
   formContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 16,
+    paddingHorizontal: 14,
+    paddingBottom: 8,
   },
   formTitle: {
-    fontSize: 20,
+    fontSize: 15,
     fontWeight: "700",
     color: "#111827",
-    marginBottom: 8,
-    lineHeight: 28,
+    marginBottom: 3,
+    lineHeight: 20,
   },
   formDescription: {
-    fontSize: 14,
+    fontSize: 12,
     color: "#6B7280",
-    lineHeight: 20,
-    marginBottom: 16,
+    lineHeight: 16,
+    marginBottom: 8,
   },
   formMeta: {
     borderTopWidth: 1,
     borderTopColor: "#F3F4F6",
-    paddingTop: 12,
+    paddingTop: 8,
   },
   metaItem: {
     flexDirection: "row",
@@ -1035,25 +1147,25 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "#108C9B",
-    paddingVertical: 14,
-    marginHorizontal: 20,
-    marginBottom: 16,
-    borderRadius: 10,
+    paddingVertical: 10,
+    marginHorizontal: 14,
+    marginBottom: 10,
+    borderRadius: 8,
     shadowColor: "#108C9B",
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
-    elevation: 3,
+    elevation: 2,
   },
   expandButtonText: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: "600",
     color: "#FFFFFF",
     letterSpacing: 0.3,
-    marginRight: 8,
+    marginRight: 6,
   },
   expandButtonIcon: {
-    fontSize: 12,
+    fontSize: 11,
     color: "#FFFFFF",
     fontWeight: "700",
   },
@@ -1063,19 +1175,19 @@ const styles = StyleSheet.create({
   responsesDivider: {
     height: 1,
     backgroundColor: "#E5E7EB",
-    marginHorizontal: 20,
+    marginHorizontal: 14,
     marginBottom: 12,
   },
   responsesScroll: {
-    maxHeight: height * 0.6,
-    paddingHorizontal: 20,
+    maxHeight: height * 0.7,
+    paddingHorizontal: 14,
     paddingBottom: 16,
   },
   responseCard: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 8,
     borderWidth: 1,
     borderColor: "#E5E7EB",
     shadowColor: "#000",
@@ -1088,171 +1200,183 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 12,
-    paddingBottom: 12,
+    marginBottom: 6,
+    paddingBottom: 6,
     borderBottomWidth: 1,
     borderBottomColor: "#F3F4F6",
   },
   responseNumber: {
-    fontSize: 16,
+    fontSize: 12,
     fontWeight: "700",
     color: "#111827",
   },
   statusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
   },
   statusBadgeText: {
-    fontSize: 12,
+    fontSize: 9,
     fontWeight: "600",
     color: "#FFFFFF",
-    letterSpacing: 0.3,
+    letterSpacing: 0.1,
   },
   responseInfo: {
-    marginBottom: 12,
+    marginBottom: 6,
   },
   infoRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 8,
+    marginBottom: 3,
   },
   infoLabel: {
-    fontSize: 13,
+    fontSize: 10,
     color: "#6B7280",
     fontWeight: "500",
-    marginRight: 8,
-    width: 60,
+    marginRight: 4,
+    width: 40,
   },
   infoValue: {
-    fontSize: 13,
+    fontSize: 10,
     color: "#374151",
     fontWeight: "600",
     flex: 1,
   },
   modeBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 3,
   },
   modeText: {
-    fontSize: 12,
+    fontSize: 9,
     fontWeight: "600",
-    letterSpacing: 0.2,
+    letterSpacing: 0.1,
   },
   messageContainer: {
     backgroundColor: "#FEF3C7",
-    borderLeftWidth: 3,
+    borderLeftWidth: 2,
     borderLeftColor: "#F59E0B",
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 8,
+    padding: 6,
+    borderRadius: 4,
+    marginTop: 4,
   },
   messageLabel: {
-    fontSize: 12,
+    fontSize: 9,
     fontWeight: "600",
     color: "#92400E",
-    marginBottom: 4,
+    marginBottom: 2,
   },
   messageText: {
-    fontSize: 13,
+    fontSize: 10,
     color: "#78350F",
-    lineHeight: 18,
+    lineHeight: 13,
   },
   answersSection: {
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
     borderTopColor: "#F3F4F6",
+    marginTop: 6,
+    paddingTop: 6,
+    borderTopWidth: 1,
   },
   sectionTitle: {
-    fontSize: 14,
+    fontSize: 11,
     fontWeight: "700",
     color: "#1F2937",
-    marginBottom: 10,
+    marginBottom: 5,
+    letterSpacing: 0.1,
   },
   answersScroll: {
-    maxHeight: height * 0.2,
+    maxHeight: height * 0.25,
   },
   answerItem: {
     backgroundColor: "#F9FAFB",
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 8,
-    borderLeftWidth: 3,
+    padding: 6,
+    borderRadius: 6,
+    marginBottom: 4,
+    borderLeftWidth: 2,
     borderLeftColor: "#108C9B",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
   questionText: {
-    fontSize: 13,
-    fontWeight: "600",
+    fontSize: 10,
+    fontWeight: "700",
     color: "#374151",
-    marginBottom: 4,
+    marginBottom: 2,
+    lineHeight: 13,
   },
   answerText: {
-    fontSize: 13,
+    fontSize: 10,
     color: "#6B7280",
-    lineHeight: 18,
+    lineHeight: 13,
   },
   approvalsSection: {
-    marginTop: 12,
-    paddingTop: 12,
+    marginTop: 6,
+    paddingTop: 6,
     borderTopWidth: 1,
     borderTopColor: "#F3F4F6",
   },
   approvalsScroll: {
-    maxHeight: height * 0.18,
+    maxHeight: height * 0.2,
   },
   approvalItem: {
     backgroundColor: "#F0F9FF",
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 8,
-    borderLeftWidth: 3,
+    padding: 6,
+    borderRadius: 6,
+    marginBottom: 4,
+    borderLeftWidth: 2,
     borderLeftColor: "#0EA5E9",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
   approvalRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 6,
+    marginBottom: 3,
   },
   approvalLabel: {
-    fontSize: 12,
+    fontSize: 9,
     fontWeight: "600",
     color: "#0C4A6E",
   },
   approvalValue: {
-    fontSize: 12,
+    fontSize: 9,
     color: "#075985",
   },
   approvalMessageBox: {
     backgroundColor: "#FEE2E2",
-    padding: 8,
-    borderRadius: 6,
-    marginTop: 6,
+    padding: 4,
+    borderRadius: 4,
+    marginTop: 3,
   },
   approvalMessage: {
-    fontSize: 12,
+    fontSize: 9,
     color: "#991B1B",
     fontStyle: "italic",
   },
   reconsiderButton: {
     backgroundColor: "#F59E0B",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 5,
     alignItems: "center",
-    marginTop: 12,
+    marginTop: 6,
     shadowColor: "#F59E0B",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 2,
+    elevation: 1,
   },
   reconsiderButtonText: {
-    fontSize: 14,
+    fontSize: 10,
     fontWeight: "600",
     color: "#FFFFFF",
-    letterSpacing: 0.3,
+    letterSpacing: 0.1,
   },
   noResponsesContainer: {
     paddingVertical: 32,
@@ -1354,5 +1478,77 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#FFFFFF",
     letterSpacing: 0.3,
+  },
+  // 🔍 Estilos del buscador
+  searchContainer: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 12,
+    backgroundColor: "#F3F4F6",
+  },
+  searchBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+  searchIcon: {
+    fontSize: 18,
+    marginRight: 10,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 15,
+    color: "#374151",
+    paddingVertical: 0,
+  },
+  clearButton: {
+    padding: 4,
+    marginLeft: 8,
+  },
+  clearButtonText: {
+    fontSize: 18,
+    color: "#9CA3AF",
+    fontWeight: "600",
+  },
+  searchResults: {
+    marginTop: 8,
+    fontSize: 13,
+    color: "#6B7280",
+    fontWeight: "500",
+  },
+  emptySearchContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingVertical: 80,
+    paddingHorizontal: 40,
+  },
+  emptySearchIcon: {
+    fontSize: 56,
+    marginBottom: 16,
+    opacity: 0.6,
+  },
+  emptySearchTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#374151",
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  emptySearchText: {
+    fontSize: 14,
+    color: "#6B7280",
+    textAlign: "center",
+    lineHeight: 20,
   },
 });

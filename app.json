@@ -39,7 +39,7 @@
         "ACCESS_NETWORK_STATE"
       ],
       "package": "com.mauro_morales.formssfi",
-      "googleServicesFile": "./google-services.json"
+      "googleServicesFile": "./android/app/google-services.json"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -52,7 +52,9 @@
         {
           "enabled": true
         }
-      ]
+      ],
+      "expo-web-browser",
+      "expo-asset"
     ],
     "extra": {
       "router": {
@@ -63,9 +65,7 @@
       }
     },
     "newArchEnabled": true,
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
+    "runtimeVersion": "1.0.1",
     "updates": {
       "url": "https://u.expo.dev/7658a23a-0b9f-41ae-8b1c-eac3c748de11"
     }

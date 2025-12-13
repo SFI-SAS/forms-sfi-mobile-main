@@ -4,6 +4,8 @@
  * Maneja conversión de form_design + questions a formStructure unificada
  */
 
+import { getTableCorrelations } from "../services/api";
+
 export interface FormItem {
   id: string;
   type:
@@ -27,7 +29,8 @@ export interface FormItem {
     | "help-text"
     | "divider"
     | "button"
-    | "image";
+    | "image"
+    | "mathoperations";
   props: {
     label?: string;
     placeholder?: string;
@@ -56,6 +59,9 @@ export interface FormItem {
     questionType?: string; // Tipo de question del backend
     optionsSource?: "endpoint" | "form_design" | "fallback"; // Para debug
     error?: string; // Mensaje de error si falla carga
+    code?: string; // Para mathoperations: expresión matemática con {questionId}
+    descriptionValue?: string; // Para FileField: valor de la descripción (usado por repeater)
+    onDescriptionChange?: (desc: string) => void; // Para FileField: handler del cambio de descripción (usado por repeater)
   };
   children?: FormItem[];
   questionId?: number;
@@ -137,94 +143,126 @@ export async function enrichFormDesign(
     if (questionId && questionsMap[questionId]) {
       const question = questionsMap[questionId];
 
-      // 🔗 Si es tipo "select" y question_type es "table", obtener correlaciones
-      if (item.type === "select" && question.question_type === "table") {
+      // Determinar el tipo efectivo del componente
+      const formDesignType = item.type; // Lo que dice form_design
+      const questionType = question.question_type; // Lo que dice question-table-relation
+
+      console.log(
+        `🔍 [FormDataAdapter] Procesando ${item.id}: form_design="${formDesignType}", question_type="${questionType}"`
+      );
+
+      // 🎯 REGLA DE PRIORIDAD ABSOLUTA:
+      // Si question_type === "table" → SIEMPRE usar endpoint question-table-relation
+      // (sin importar lo que diga form_design)
+      // Si question_type !== "table" → Usar form_design
+
+      if (questionType === "table") {
+        // ✅ PRIORIDAD ABSOLUTA: question_type="table" → SIEMPRE usar endpoint
         console.log(
-          `🌐 [FormDataAdapter] Select ${item.id} es tipo TABLE - Obteniendo opciones desde endpoint...`
+          `🌐 [FormDataAdapter] ⚡ PRIORIDAD ABSOLUTA: question_type="table" → Consultando endpoint question-table-relation...`
         );
 
         try {
-          // Usar función existente de api.js
-          const { getTableCorrelations } = await import("../services/api");
+          // Endpoint: GET /questions/question-table-relation/answers/{question_id}
           const data = await getTableCorrelations(questionId);
 
-          console.log(
-            `📊 [FormDataAdapter] Respuesta del endpoint para questionId ${questionId}:`,
-            data
-          );
+          // 🔥 LOG COMPLETO DE LA RESPUESTA DEL ENDPOINT
+          console.log(`
+═══════════════════════════════════════════════════════════
+📊 RESPUESTA COMPLETA question-table-relation para questionId ${questionId}
+═══════════════════════════════════════════════════════════
+🔹 Campo: ${item.id}
+🔹 Label: ${question.question_text}
+🔹 Data completa del endpoint:
+${JSON.stringify(data, null, 2)}
+═══════════════════════════════════════════════════════════
+          `);
 
-          // Extraer opciones del endpoint
+          // Extraer opciones del endpoint (campo "name" del array "data")
           const respuestas = Array.isArray(data.data) ? data.data : [];
           const options = respuestas.map((r: any) => r.name);
+
+          console.log(`
+📋 OPCIONES EXTRAÍDAS:
+   Total: ${options.length}
+   Opciones: ${JSON.stringify(options, null, 2)}
+          `);
 
           // Guardar correlaciones si existen
           if (data.correlations) {
             Object.assign(correlations, data.correlations);
-            console.log(
-              `🔗 [FormDataAdapter] Correlaciones guardadas para questionId ${questionId}`
-            );
+            console.log(`
+🔗 CORRELACIONES GUARDADAS:
+   Keys: ${JSON.stringify(Object.keys(data.correlations), null, 2)}
+   Correlaciones completas: ${JSON.stringify(data.correlations, null, 2)}
+            `);
           }
 
           console.log(
-            `✅ [FormDataAdapter] Opciones extraídas (TABLE): ${options.join(", ")}`
+            `✅ [FormDataAdapter] ${options.length} opciones extraídas del endpoint: ${options.slice(0, 3).join(", ")}${options.length > 3 ? "..." : ""}`
           );
 
           enrichedProps = {
+            ...item.props, // 👈 Valores viejos PRIMERO
             label: item.props?.label || question.question_text,
             required: item.props?.required ?? question.is_required,
             placeholder: item.props?.placeholder || question.placeholder,
-            options: options, // 👈 Opciones del endpoint
+            options: options, // 👈 SOBREESCRIBE con datos FRESCOS del endpoint (aunque esté vacío)
             relatedAnswers: question.related_answers,
             sourceQuestionId: item.props?.sourceQuestionId || questionId,
-            dataSource: "table_endpoint",
+            dataSource: "table_endpoint", // Indica origen de los datos
             questionType: "table",
             optionsSource: "endpoint", // Para debug
-            ...item.props,
           };
         } catch (error) {
           console.error(
-            `❌ [FormDataAdapter] Error obteniendo datos para questionId ${questionId}:`,
+            `❌ [FormDataAdapter] Error obteniendo datos del endpoint para questionId ${questionId}:`,
             error
           );
-          // Fallback a opciones existentes
+
+          // 🔥 NUNCA usar fallback de form_design para campos tipo "table"
+          // Si falla el endpoint, dejar opciones vacías
+          console.warn(
+            `⚠️ [FormDataAdapter] Tipo "table" - NO se usará fallback de form_design. Opciones: []`
+          );
+
           enrichedProps = {
+            ...item.props, // 👈 Valores viejos PRIMERO
             label: item.props?.label || question.question_text,
             required: item.props?.required ?? question.is_required,
             placeholder: item.props?.placeholder || question.placeholder,
-            options: item.props?.options || question.options, // Fallback a opciones del form_design
+            options: [], // 👈 SOBREESCRIBE con array VACÍO (NO fallback)
             relatedAnswers: question.related_answers,
             sourceQuestionId: item.props?.sourceQuestionId,
-            dataSource: "form_design",
-            questionType: question.question_type,
-            optionsSource: "fallback", // Para debug
+            dataSource: "table_endpoint",
+            questionType: "table",
+            optionsSource: "endpoint_failed", // Para debug
             error: "Error al cargar opciones desde el servidor",
-            ...item.props,
           };
         }
       } else {
-        // ✅ CASO 2: NO es tipo TABLE → Usar opciones del form_design
+        // ✅ NO es tipo "table" → Usar form_design normalmente
         console.log(
-          `📝 [FormDataAdapter] Question tipo "${question.question_type}" - Usando opciones del form_design`
+          `📝 [FormDataAdapter] Question tipo "${questionType}" → Usando form_design`
         );
 
         const formDesignOptions = item.props?.options || question.options || [];
 
         console.log(
-          `✅ [FormDataAdapter] Opciones del form_design: ${formDesignOptions.join(", ")}`
+          `✅ [FormDataAdapter] ${formDesignOptions.length} opciones de form_design`
         );
 
-        // Para otros tipos, lógica normal
         enrichedProps = {
+          ...item.props, // 👈 Valores viejos PRIMERO
           label: item.props?.label || question.question_text,
           required: item.props?.required ?? question.is_required,
           placeholder: item.props?.placeholder || question.placeholder,
-          options: formDesignOptions, // 👈 Opciones del form_design
+          options: formDesignOptions, // 👈 SOBREESCRIBE con datos de form_design
           relatedAnswers: question.related_answers,
           sourceQuestionId: item.props?.sourceQuestionId,
           dataSource: "form_design",
-          questionType: question.question_type,
+          questionType: questionType,
           optionsSource: "form_design", // Para debug
-          ...item.props, // Props de form_design tienen prioridad final
         };
       }
     }
@@ -274,6 +312,7 @@ function mapQuestionTypeToComponent(questionType: string): FormItem["type"] {
     regisfacial: "regisfacial",
     location: "location",
     repeater: "repeater",
+    mathoperations: "mathoperations",
   };
 
   return typeMap[questionType.toLowerCase()] || "input";
@@ -303,6 +342,7 @@ function mapFormDesignTypeToComponent(
     firm: "firm",
     regisfacial: "regisfacial",
     location: "location",
+    mathoperations: "mathoperations",
 
     // Layouts
     repeater: "repeater",

@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Registro Facial - SFI Facial</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 640px;
+            padding: 20px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <!-- El componente SFI Facial se insertará aquí -->
+        <sfi-facial id="sfi-facial-component"></sfi-facial>
+    </div>
+
+    <!-- Cargar el script de SFI Facial -->
+    <script src="https://reconocimiento-facial-safe.service.saferut.com/index.js"></script>
+
+    <script>
+        // Obtener parámetros de la URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const apiUrl = urlParams.get('apiUrl');
+        const redirectUrl = urlParams.get('redirectUrl');
+        const personId = urlParams.get('personId');
+        const personName = urlParams.get('personName');
+        const personEmail = urlParams.get('personEmail');
+
+        console.log('📋 Parámetros recibidos:', {
+            apiUrl,
+            redirectUrl,
+            personId,
+            personName,
+            personEmail
+        });
+
+        // Configurar el componente
+        const sfiFacial = document.getElementById('sfi-facial-component');
+        sfiFacial.setAttribute('mode', 'register');
+        sfiFacial.setAttribute('api-url', apiUrl || 'https://api-facialsafe.service.saferut.com');
+
+        if (personId) sfiFacial.setAttribute('person-id', personId);
+        if (personName) sfiFacial.setAttribute('person-name', personName);
+
+        console.log('✅ Componente configurado para registro');
+
+        // Escuchar el evento de registro exitoso
+        sfiFacial.addEventListener('register-success', (event) => {
+            console.log('✅ Registro exitoso:', event.detail);
+            const registerData = event.detail;
+
+            // Preparar datos para enviar a la app
+            const resultData = {
+                success: true,
+                person_id: registerData.person_id || personId,
+                person_name: registerData.person_name || personName,
+                confidence_score: registerData.confidence_score || 0,
+                message: 'Registro facial completado exitosamente'
+            };
+
+            // Codificar los datos para el deep link
+            const encodedData = encodeURIComponent(JSON.stringify(resultData));
+
+            console.log('🔙 Redirigiendo a la app con datos:', resultData);
+
+            // Redirigir a la app con los datos
+            window.location.href = `${redirectUrl}?registerData=${encodedData}`;
+        });
+
+        // Escuchar errores
+        sfiFacial.addEventListener('register-error', (event) => {
+            console.error('❌ Error en registro:', event.detail);
+            const error = event.detail;
+            const errorMsg = encodeURIComponent(error.message || 'Error desconocido');
+
+            // Redirigir con error
+            window.location.href = `${redirectUrl}?error=${errorMsg}`;
+        });
+
+        // También escuchar el evento genérico de error
+        sfiFacial.addEventListener('error', (event) => {
+            console.error('❌ Error genérico:', event.detail);
+            const error = event.detail;
+            const errorMsg = encodeURIComponent(error.message || 'Error en el proceso');
+
+            // Redirigir con error
+            window.location.href = `${redirectUrl}?error=${errorMsg}`;
+        });
+    </script>
+</body>
+
+</html>

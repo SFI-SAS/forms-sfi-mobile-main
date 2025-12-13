@@ -77,15 +77,6 @@ const SelectField: React.FC<SelectFieldProps> = ({
                 disabled={disabled}
             />
 
-            {/* Indicador de debug en desarrollo */}
-            {__DEV__ && dataSource && (
-                <View style={styles.debugContainer}>
-                    <Text style={styles.debugText}>
-                        🔍 {dataSource === 'table_endpoint' ? '📡 Opciones desde endpoint' : '📋 Opciones desde diseño'}
-                        {questionType && ` (tipo: ${questionType})`}
-                    </Text>
-                </View>
-            )}
         </View>
     );
 };

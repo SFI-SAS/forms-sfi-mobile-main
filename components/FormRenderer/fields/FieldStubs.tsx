@@ -1,9 +1,8 @@
 // Stubs para campos que se implementarán completamente después
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Platform, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, StyleSheet, TouchableOpacity, Platform, Alert, ActivityIndicator } from 'react-native';
 import InputField from './InputField';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import FacialRecognitionWebView from '../../FacialRecognitionWebView';
 
 // DateField
 export const DateField: React.FC<any> = ({ label, required, value, onChange, error, disabled, mode = 'date' }) => {
@@ -101,10 +100,40 @@ export const RadioField: React.FC<any> = ({ label, options = [], required, value
     </View>
 );
 
-// FileField - Selector de archivos con DocumentPicker
-export const FileField: React.FC<any> = ({ label, required, value, onChange, error, disabled }) => {
+// FileField - Selector de archivos con DocumentPicker + descripción + serial (como en web)
+export const FileField: React.FC<any> = ({
+    label,
+    required,
+    value,
+    onChange,
+    error,
+    disabled,
+    descriptionValue,
+    onDescriptionChange,
+    questionId
+}) => {
     const [fileName, setFileName] = React.useState(value || '');
     const [uploading, setUploading] = React.useState(false);
+    const [showModal, setShowModal] = React.useState(false);
+    const [generatedSerial, setGeneratedSerial] = React.useState<string | null>(null);
+    const [serialLoading, setSerialLoading] = React.useState(false);
+
+    // ✅ Limpiar serial anterior al montar (siempre generar uno nuevo)
+    React.useEffect(() => {
+        if (questionId) {
+            const clearOldSerial = async () => {
+                try {
+                    const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+                    // Eliminar serial anterior si existe
+                    await AsyncStorage.removeItem(`question-serial-${questionId}`);
+                    console.log(`🗑️ [FileField] Serial anterior eliminado para questionId: ${questionId}`);
+                } catch (err) {
+                    console.error('Error limpiando serial anterior:', err);
+                }
+            };
+            clearOldSerial();
+        }
+    }, [questionId]);
 
     const pickDocument = async () => {
         if (disabled) return;
@@ -122,18 +151,49 @@ export const FileField: React.FC<any> = ({ label, required, value, onChange, err
                 const file = result.assets ? result.assets[0] : result;
                 setFileName(file.name);
 
-                // Aquí podrías subir el archivo al servidor
-                // Por ahora solo guardamos el nombre
+                // Guardar el archivo
                 onChange && onChange({
                     name: file.name,
                     uri: file.uri,
                     size: file.size,
                     mimeType: file.mimeType
                 });
+
+                // Abrir modal para generar serial
+                setShowModal(true);
             }
         } catch (err) {
             console.error('Error al seleccionar archivo:', err);
             Alert.alert('Error', 'No se pudo seleccionar el archivo');
+        }
+    };
+
+    const handleGenerateSerial = async () => {
+        if (!questionId) return;
+
+        try {
+            setSerialLoading(true);
+            // Llamar al endpoint para generar serial
+            const response = await fetch('https://api-forms-sfi.service.saferut.com/responses/file-serials/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ questionId }),
+            });
+
+            const data = await response.json();
+            const serial = data.serial;
+            const idQuestionSerial = `${questionId}-${serial}`;
+
+            // Guardar en AsyncStorage
+            const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+            await AsyncStorage.setItem(`question-serial-${questionId}`, idQuestionSerial);
+
+            setGeneratedSerial(serial);
+        } catch (error) {
+            console.error('Error generando serial:', error);
+            Alert.alert('Error', 'No se pudo generar el serial');
+        } finally {
+            setSerialLoading(false);
         }
     };
 
@@ -151,6 +211,27 @@ export const FileField: React.FC<any> = ({ label, required, value, onChange, err
                 </Text>
             )}
 
+            {/* Campo de descripción */}
+            <View style={styles.descriptionContainer}>
+                <Text style={styles.descriptionLabel}>Descripción *</Text>
+                <TextInput
+                    style={[styles.descriptionInput, error && styles.descriptionInputError]}
+                    placeholder="Ingrese una descripción"
+                    value={descriptionValue || ''}
+                    onChangeText={(text) => {
+                        console.log(`📝 [FileField] Descripción cambiada:`, text);
+                        onDescriptionChange && onDescriptionChange(text);
+                    }}
+                    editable={!disabled}
+                />
+            </View>
+            {descriptionValue && (
+                <Text style={{ fontSize: 10, color: '#666', marginTop: 4 }}>
+                    Descripción actual: {descriptionValue}
+                </Text>
+            )}
+
+            {/* Campo de archivo */}
             {fileName ? (
                 <View style={styles.fileSelected}>
                     <View style={styles.fileInfo}>
@@ -174,7 +255,63 @@ export const FileField: React.FC<any> = ({ label, required, value, onChange, err
                 </TouchableOpacity>
             )}
 
+            {/* Mostrar serial generado si existe */}
+            {generatedSerial && (
+                <View style={styles.serialContainer}>
+                    <Text style={styles.serialLabel}>Serial generado:</Text>
+                    <Text style={styles.serialText}>{generatedSerial}</Text>
+                    <Text style={styles.serialHint}>Escribe este serial en tu archivo</Text>
+                </View>
+            )}
+
             {error && <Text style={styles.errorText}>{error}</Text>}
+
+            {/* Modal para generar serial */}
+            {showModal && (
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        {!generatedSerial ? (
+                            <>
+                                <Text style={styles.modalTitle}>
+                                    ¿Desea generar un serial para este archivo?
+                                </Text>
+                                <View style={styles.modalButtons}>
+                                    <TouchableOpacity
+                                        style={[styles.modalButton, styles.modalButtonYes]}
+                                        onPress={handleGenerateSerial}
+                                        disabled={serialLoading}
+                                    >
+                                        {serialLoading ? (
+                                            <ActivityIndicator size="small" color="#FFFFFF" />
+                                        ) : (
+                                            <Text style={styles.modalButtonText}>Sí</Text>
+                                        )}
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={[styles.modalButton, styles.modalButtonNo]}
+                                        onPress={() => setShowModal(false)}
+                                    >
+                                        <Text style={[styles.modalButtonText, styles.modalButtonNoText]}>No</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </>
+                        ) : (
+                            <>
+                                <Text style={styles.modalTitle}>
+                                    Este serial generado digítalo en tu archivo a subir:
+                                </Text>
+                                <Text style={styles.modalSerial}>{generatedSerial}</Text>
+                                <TouchableOpacity
+                                    style={[styles.modalButton, styles.modalButtonContinue]}
+                                    onPress={() => setShowModal(false)}
+                                >
+                                    <Text style={styles.modalButtonText}>Continuar</Text>
+                                </TouchableOpacity>
+                            </>
+                        )}
+                    </View>
+                </View>
+            )}
         </View>
     );
 };
@@ -295,112 +432,11 @@ export const FirmField: React.FC<any> = (props) => {
     return <ExistingFirmField {...props} />;
 };
 
-// FacialField - Reconocimiento facial biométrico usando WebView (misma librería que PC)
-export const FacialField: React.FC<any> = ({
-    label,
-    required,
-    value,
-    onChange,
-    error,
-    disabled,
-    mode = 'register', // 'register', 'validate', 'sign'
-    personId,
-    personName,
-    documentHash
-}) => {
-    const [showWebView, setShowWebView] = React.useState(false);
-    const [facialData, setFacialData] = React.useState(value || null);
-
-    const handleOpenFacial = () => {
-        console.log('🔓 Abriendo reconocimiento facial:', { mode, personId, personName });
-        if (disabled) return;
-        setShowWebView(true);
-    };
-
-    const handleSuccess = (data: any) => {
-        console.log('✅ Reconocimiento facial exitoso:', data);
-        setFacialData(data);
-        onChange && onChange(data);
-        setShowWebView(false);
-    };
-
-    const handleError = (error: any) => {
-        console.error('❌ Error en reconocimiento facial:', error);
-        Alert.alert(
-            'Error',
-            error?.message || 'No se pudo completar el reconocimiento facial'
-        );
-        setShowWebView(false);
-    };
-
-    const handleCancel = () => {
-        console.log('❌ Reconocimiento facial cancelado');
-        setShowWebView(false);
-    };
-
-    const clearFacialData = () => {
-        setFacialData(null);
-        onChange && onChange(null);
-    };
-
-    return (
-        <View style={styles.container}>
-            {label && (
-                <Text style={styles.label}>
-                    {label}
-                    {required && <Text style={styles.required}> *</Text>}
-                </Text>
-            )}
-
-            {facialData ? (
-                <View style={styles.facialSuccess}>
-                    <Text style={styles.facialSuccessIcon}>✓</Text>
-                    <View style={styles.facialSuccessInfo}>
-                        <Text style={styles.facialSuccessText}>Reconocimiento completado</Text>
-                        <Text style={styles.facialSuccessDetail}>
-                            {facialData.personName && `Usuario: ${facialData.personName}`}
-                            {facialData.timestamp && `\n${new Date(facialData.timestamp).toLocaleString()}`}
-                            {facialData.confidence_score && `\nConfianza: ${(facialData.confidence_score * 100).toFixed(1)}%`}
-                        </Text>
-                    </View>
-                    {!disabled && (
-                        <TouchableOpacity onPress={clearFacialData} style={styles.facialClearButton}>
-                            <Text style={styles.facialClearText}>✕</Text>
-                        </TouchableOpacity>
-                    )}
-                </View>
-            ) : (
-                <TouchableOpacity
-                    style={[styles.facialButton, error && styles.facialButtonError]}
-                    onPress={handleOpenFacial}
-                    disabled={disabled}
-                >
-                    <Text style={styles.facialButtonIcon}>🔒</Text>
-                    <Text style={styles.facialButtonText}>
-                        {mode === 'register' && 'Registrar rostro'}
-                        {mode === 'validate' && 'Validar identidad'}
-                        {mode === 'sign' && 'Firmar con rostro'}
-                    </Text>
-                </TouchableOpacity>
-            )}
-
-            {error && <Text style={styles.errorText}>{error}</Text>}
-
-            {/* WebView Modal para reconocimiento facial */}
-            {showWebView && (
-                <FacialRecognitionWebView
-                    visible={showWebView}
-                    mode={mode}
-                    personId={personId}
-                    personName={personName}
-                    documentHash={documentHash}
-                    onSuccess={handleSuccess}
-                    onError={handleError}
-                    onCancel={handleCancel}
-                />
-            )}
-        </View>
-    );
+// FacialField - Reconocimiento facial biométrico usando WebView Modal
+export const FacialField: React.FC<any> = (props) => {
+    // Usar el componente FacialRegisterField para registro facial
+    const FacialRegisterField = require('../../FacialRegisterField').default;
+    return <FacialRegisterField {...props} />;
 };
 
 // RepeaterField - Renderiza tabla dinámica con filas repetibles (lógica 100% PC)
@@ -530,18 +566,30 @@ export const RepeaterField: React.FC<any> = ({
                     <View style={styles.rowFields}>
                         {children.map((child: any) => {
                             if (!renderItem) return null;
+
+                            // Props base
+                            const baseProps = {
+                                ...child.props,
+                                value: row.values[child.id],
+                                onChange: (val: any) => handleFieldChange(row.id, child.id, val)
+                            };
+
+                            // ✅ Si es un FileField, agregar props de descripción y questionId
+                            if (child.type === 'file') {
+                                baseProps.descriptionValue = row.values[`${child.id}_description`];
+                                baseProps.onDescriptionChange = (desc: string) =>
+                                    handleFieldChange(row.id, `${child.id}_description`, desc);
+                                baseProps.questionId = child.questionId; // ✅ Pasar questionId para serial
+                            }
+
                             // Crear una copia del child con el valor específico de esta fila
                             const childWithRowContext = {
                                 ...child,
                                 // Agregar sufijo al id para hacer único por fila
                                 id: `${child.id}_${row.id}`,
-                                // Props con onChange personalizado para esta fila
-                                props: {
-                                    ...child.props,
-                                    value: row.values[child.id],
-                                    onChange: (val: any) => handleFieldChange(row.id, child.id, val)
-                                }
+                                props: baseProps
                             };
+
                             return (
                                 <View key={`${row.id}-${child.id}`}>
                                     {renderItem(childWithRowContext)}
@@ -560,7 +608,141 @@ export const RepeaterField: React.FC<any> = ({
             </Text>
         </View>
     );
-};// LayoutField - Renderiza hijos en vertical u horizontal
+};// MathOperationsField - Campo de operaciones matemáticas con cálculo en tiempo real
+export const MathOperationsField: React.FC<any> = ({
+    label,
+    value,
+    mathExpression,
+    formValues,
+    formStructure,
+    error
+}) => {
+    const [calculatedResult, setCalculatedResult] = React.useState<number | null>(null);
+
+    // Crear mapa de questionId -> form_design_element_id
+    const questionIdMap = React.useMemo(() => {
+        const map: Record<string, string> = {};
+
+        const buildMap = (items: any[]) => {
+            items.forEach((item) => {
+                if (item.questionId) {
+                    map[item.questionId.toString()] = item.id;
+                }
+                if (item.children) {
+                    buildMap(item.children);
+                }
+            });
+        };
+
+        if (formStructure) {
+            buildMap(formStructure);
+        }
+
+        return map;
+    }, [formStructure]);
+
+    // Calcular resultado en tiempo real cuando cambian los valores del formulario
+    React.useEffect(() => {
+        if (!mathExpression || typeof mathExpression !== 'string') {
+            setCalculatedResult(null);
+            return;
+        }
+
+        try {
+            // Reemplazar {ID} con valores reales de formValues
+            let expression = mathExpression;
+            const idMatches = expression.match(/\{(\d+)\}/g);
+
+            if (!idMatches) {
+                setCalculatedResult(null);
+                return;
+            }
+
+            console.log('🧮 [MathOperations] Expresión original:', mathExpression);
+            console.log('🧮 [MathOperations] IDs encontrados:', idMatches);
+            console.log('🧮 [MathOperations] Mapa questionId:', questionIdMap);
+
+            // Reemplazar cada {ID} con su valor
+            let allValuesFound = true;
+            idMatches.forEach((match) => {
+                const questionId = match.replace(/[{}]/g, '');
+
+                // Buscar el form_design_element_id correspondiente al questionId
+                const elementId = questionIdMap[questionId];
+
+                if (!elementId) {
+                    console.warn(`⚠️ [MathOperations] No se encontró elementId para questionId ${questionId}`);
+                    allValuesFound = false;
+                    return;
+                }
+
+                // Obtener el valor del formulario usando el elementId
+                const fieldValue = formValues[elementId];
+
+                console.log(`🧮 [MathOperations] questionId ${questionId} -> elementId ${elementId} -> valor: ${fieldValue}`);
+
+                if (fieldValue === undefined || fieldValue === null || fieldValue === '') {
+                    console.warn(`⚠️ [MathOperations] Valor vacío para questionId ${questionId}`);
+                    allValuesFound = false;
+                    return;
+                }
+
+                const numValue = parseFloat(fieldValue) || 0;
+                expression = expression.replace(match, numValue.toString());
+            });
+
+            if (!allValuesFound) {
+                console.warn('⚠️ [MathOperations] No todos los valores fueron encontrados, resultado será 0 o incompleto');
+            }
+
+            console.log('🧮 [MathOperations] Expresión con valores:', expression);
+
+            // Evaluar la expresión matemática
+            // IMPORTANTE: eval es peligroso en producción, pero aquí solo procesamos números
+            const result = eval(expression);
+            setCalculatedResult(typeof result === 'number' ? result : null);
+
+            console.log('✅ [MathOperations] Resultado calculado:', result);
+        } catch (err) {
+            console.error('❌ [MathOperations] Error calculando:', err);
+            setCalculatedResult(null);
+        }
+    }, [mathExpression, formValues, questionIdMap]);
+
+    return (
+        <View style={styles.container}>
+            {label && (
+                <Text style={styles.label}>
+                    {label}
+                </Text>
+            )}
+
+            {/* Campo de resultado calculado (solo lectura) */}
+            <View style={[styles.mathResultContainer, error && styles.mathResultError]}>
+                <View style={styles.mathIconContainer}>
+                    <Text style={styles.mathIcon}>🧮</Text>
+                </View>
+                <View style={styles.mathResultContent}>
+                    <Text style={styles.mathResultLabel}>Resultado calculado:</Text>
+                    <Text style={styles.mathResultValue}>
+                        {calculatedResult !== null ? calculatedResult.toFixed(2) : '---'}
+                    </Text>
+                </View>
+            </View>
+
+            {/* Mostrar expresión original */}
+            {mathExpression && (
+                <Text style={styles.mathExpressionText}>
+                    Fórmula: {mathExpression}
+                </Text>
+            )}
+
+            {error && <Text style={styles.errorText}>{error}</Text>}
+        </View>
+    );
+};
+
+// LayoutField - Renderiza hijos en vertical u horizontal
 export const LayoutField: React.FC<any> = ({ type, children, renderItem }) => {
     const isHorizontal = type === 'horizontal-layout';
     return (
@@ -869,7 +1051,186 @@ const styles = StyleSheet.create({
         color: '#DC2626',
         fontSize: 12,
         fontWeight: '600'
-    }, placeholder: { fontSize: 14, color: '#9CA3AF', fontStyle: 'italic', padding: 12 }
+    },
+
+    // File Field - Descripción
+    descriptionContainer: {
+        marginBottom: 12
+    },
+    descriptionLabel: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#374151',
+        marginBottom: 6
+    },
+    descriptionInput: {
+        backgroundColor: '#F9FAFB',
+        borderWidth: 1,
+        borderColor: '#D1D5DB',
+        borderRadius: 8,
+        padding: 12,
+        fontSize: 14,
+        color: '#111827'
+    },
+    descriptionInputError: {
+        borderColor: '#EF4444'
+    },
+
+    // File Field - Serial
+    serialContainer: {
+        marginTop: 12,
+        padding: 12,
+        backgroundColor: '#DBEAFE',
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#93C5FD'
+    },
+    serialLabel: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#1E40AF',
+        marginBottom: 4
+    },
+    serialText: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#1E3A8A',
+        fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+        letterSpacing: 1,
+        marginBottom: 4
+    },
+    serialHint: {
+        fontSize: 11,
+        color: '#1E40AF',
+        fontStyle: 'italic'
+    },
+
+    // Modal
+    modalOverlay: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0, 0, 0, 0.4)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 1000
+    },
+    modalContent: {
+
+        backgroundColor: '#FFF',
+        padding: 24,
+        borderRadius: 12,
+        maxWidth: 340,
+        width: '90%',
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 8
+    },
+    modalTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#111827',
+        textAlign: 'center',
+        marginBottom: 16
+    },
+    modalSerial: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        color: '#2563EB',
+        fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+        letterSpacing: 2,
+        marginBottom: 16,
+        textAlign: 'center'
+    },
+    modalButtons: {
+        flexDirection: 'row',
+        gap: 12,
+        width: '100%'
+    },
+    modalButton: {
+        flex: 0,
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        borderRadius: 8,
+        alignItems: 'center',
+        justifyContent: 'center'
+    },
+    modalButtonYes: {
+        flex: 1,
+        backgroundColor: '#16A34A'
+    },
+    modalButtonNo: {
+        flex: 1,
+        backgroundColor: '#E5E7EB'
+    },
+    modalButtonContinue: {
+        backgroundColor: '#2563EB',
+        width: '100%'
+    },
+    modalButtonText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#FFFFFF'
+    },
+    modalButtonNoText: {
+        color: '#374151'
+    },
+
+    placeholder: { fontSize: 14, color: '#9CA3AF', fontStyle: 'italic', padding: 12 },
+
+    // MathOperations
+    mathResultContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#EFF6FF',
+        borderWidth: 2,
+        borderColor: '#DBEAFE',
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 8
+    },
+    mathResultError: {
+        borderColor: '#FEE2E2',
+        backgroundColor: '#FEF2F2'
+    },
+    mathIconContainer: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: '#3B82F6',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12
+    },
+    mathIcon: {
+        fontSize: 24
+    },
+    mathResultContent: {
+        flex: 1
+    },
+    mathResultLabel: {
+        fontSize: 12,
+        color: '#6B7280',
+        fontWeight: '600',
+        marginBottom: 4
+    },
+    mathResultValue: {
+        fontSize: 24,
+        fontWeight: 'bold',
+        color: '#1E40AF'
+    },
+    mathExpressionText: {
+        fontSize: 11,
+        color: '#9CA3AF',
+        fontStyle: 'italic',
+        marginTop: 4,
+        fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace'
+    }
 });
 
 export default {
@@ -883,5 +1244,6 @@ export default {
     FirmField,
     FacialField,
     RepeaterField,
-    LayoutField
+    LayoutField,
+    MathOperationsField
 };

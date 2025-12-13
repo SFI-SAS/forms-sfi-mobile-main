@@ -7,7 +7,7 @@
  * - ~400 líneas vs 4,400 anteriores
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
     View,
     Text,
@@ -16,7 +16,9 @@ import {
     Alert,
     ScrollView,
     ActivityIndicator,
-    BackHandler
+    BackHandler,
+    KeyboardAvoidingView,
+    Platform
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
@@ -28,7 +30,7 @@ import { syncFormData, getSyncStatus } from '../utils/FormSyncManager';
 import { submitFormResponses } from '../utils/ResponseAdapter';
 import { EnrichedFormData } from '../utils/FormDataAdapter';
 import FormRenderer from './FormRenderer/FormRenderer';
-import { HomeIcon } from './Icons';
+import { CircleInfoIcon, HomeIcon } from './Icons';
 
 export default function FormatScreen() {
     const { id } = useLocalSearchParams();
@@ -187,6 +189,7 @@ export default function FormatScreen() {
 
     /**
      * Envía el formulario (2 pasos como en PC)
+     * Con soporte automático offline/online
      */
     const handleSubmit = useCallback(async (action: 'send' | 'send_and_close' = 'send') => {
         try {
@@ -197,27 +200,47 @@ export default function FormatScreen() {
                 throw new Error('No hay datos del formulario');
             }
 
-            // Enviar usando ResponseAdapter (2 pasos como en PC)
+            // Enviar usando ResponseAdapter (con detección automática offline)
             const result = await submitFormResponses(
                 formId,
                 formValues,
                 formData.formStructure,
-                action
+                action,
+                isOnline
             );
 
-            console.log(`✅ [FormatScreen] Formulario enviado exitosamente`);
-            console.log(`📝 [FormatScreen] Response ID: ${result.response_id}`);
+            if (result.savedOffline) {
+                console.log(`💾 [FormatScreen] Formulario guardado offline`);
 
-            Alert.alert(
-                'Éxito',
-                result.message,
-                [
-                    {
-                        text: 'Aceptar',
-                        onPress: () => router.replace('/home')
-                    }
-                ]
-            );
+                Alert.alert(
+                    'Guardado Offline',
+                    result.message,
+                    [
+                        {
+                            text: 'Ver Pendientes',
+                            onPress: () => router.replace('/pending-forms')
+                        },
+                        {
+                            text: 'Aceptar',
+                            onPress: () => router.replace('/home')
+                        }
+                    ]
+                );
+            } else {
+                console.log(`✅ [FormatScreen] Formulario enviado exitosamente`);
+                console.log(`📝 [FormatScreen] Response ID: ${result.response_id}`);
+
+                Alert.alert(
+                    'Éxito',
+                    result.message,
+                    [
+                        {
+                            text: 'Aceptar',
+                            onPress: () => router.replace('/home')
+                        }
+                    ]
+                );
+            }
 
         } catch (error: any) {
             console.error('❌ [FormatScreen] Error enviando formulario:', error);
@@ -232,7 +255,7 @@ export default function FormatScreen() {
         } finally {
             setSubmitting(false);
         }
-    }, [formId, formData, formValues]);
+    }, [formId, formData, formValues, isOnline, router]);
 
     /**
      * Maneja el botón back de Android
@@ -320,7 +343,9 @@ export default function FormatScreen() {
                         onPress={handleGoBack}
                         style={styles.backButton}
                     >
-                        <HomeIcon width={24} height={24} color="#FFFFFF" />
+                        <CircleInfoIcon width={24} height={24} color="#FFFFFFFF" />
+
+                        <Text style={{ color: '#FFFFFFFF', marginLeft: 0,marginTop: 8, borderColor: 'white' }}>Back</Text>
                     </TouchableOpacity>
 
                     <View style={styles.titleContainer}>
@@ -341,7 +366,7 @@ export default function FormatScreen() {
                         disabled={!isOnline || refreshing}
                     >
                         <Text style={styles.refreshIcon}>
-                            {refreshing ? '⏳' : '↻'}
+                            {refreshing ? '⏳' : '🔄'}
                         </Text>
                     </TouchableOpacity>
 
@@ -364,31 +389,16 @@ export default function FormatScreen() {
                 )}
             </LinearGradient>
 
-            {/* Formulario */}
-            <ScrollView
-                style={styles.scrollView}
-                contentContainerStyle={styles.scrollContent}
-                showsVerticalScrollIndicator={false}
-            >
-                <FormRenderer
-                    formStructure={formData.formStructure}
-                    values={formValues}
-                    onChange={handleFieldChange}
-                    errors={errors}
-                    styleConfig={formData.styleConfig}
-                    correlations={formData.correlations}
-                    disabled={submitting}
-                />
-
-                {/* Información de debug */}
-                {__DEV__ && (
-                    <View style={styles.debugInfo}>
-                        <Text style={styles.debugText}>
-                            🐛 Debug: {formData.formStructure.length} elementos | {Object.keys(formValues).length} valores
-                        </Text>
-                    </View>
-                )}
-            </ScrollView>
+            {/* Formulario con FlatList (NO ScrollView para evitar anidación) */}
+            <FormRenderer
+                formStructure={formData.formStructure}
+                values={formValues}
+                onChange={handleFieldChange}
+                errors={errors}
+                styleConfig={formData.styleConfig}
+                correlations={formData.correlations}
+                disabled={submitting}
+            />
 
             {/* Botones de acción */}
             <View style={styles.actionsContainer}>
@@ -398,7 +408,7 @@ export default function FormatScreen() {
                     disabled={submitting}
                 >
                     <Text style={styles.actionButtonText}>
-                        {submitting ? 'Guardando...' : 'Guardar'}
+                        {submitting ? 'Guardando...' : (isOnline ? 'Guardar' : 'Guardar Offline')}
                     </Text>
                 </TouchableOpacity>
 
@@ -408,7 +418,7 @@ export default function FormatScreen() {
                     disabled={submitting}
                 >
                     <Text style={styles.actionButtonText}>
-                        {submitting ? 'Enviando...' : 'Enviar y Cerrar'}
+                        {submitting ? 'Enviando...' : (isOnline ? 'Enviar y Cerrar' : 'Guardar Offline y Cerrar')}
                     </Text>
                 </TouchableOpacity>
             </View>
@@ -464,7 +474,7 @@ const styles = StyleSheet.create({
     header: {
         paddingTop: 48,
         paddingBottom: 16,
-        paddingHorizontal: 16
+        paddingHorizontal: 15
     },
     headerContent: {
         flexDirection: 'row',
@@ -472,7 +482,7 @@ const styles = StyleSheet.create({
         marginBottom: 8
     },
     backButton: {
-        padding: 8
+        padding: 15
     },
     refreshButton: {
         padding: 8,

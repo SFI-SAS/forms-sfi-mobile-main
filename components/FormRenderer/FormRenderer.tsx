@@ -12,7 +12,7 @@ import {
     TextInput,
     TouchableOpacity,
     StyleSheet,
-    ScrollView,
+    FlatList,
     Platform
 } from 'react-native';
 import { FormItem } from '../../utils/FormDataAdapter';
@@ -30,7 +30,8 @@ import {
     FirmField,
     FacialField,
     RepeaterField,
-    LayoutField
+    LayoutField,
+    MathOperationsField
 } from './fields/FieldStubs';
 
 interface FormRendererProps {
@@ -43,7 +44,7 @@ interface FormRendererProps {
     disabled?: boolean;
 }
 
-const FormRenderer: React.FC<FormRendererProps> = ({
+const FormRenderer: React.FC<FormRendererProps> = React.memo(({
     formStructure,
     values,
     onChange,
@@ -52,6 +53,13 @@ const FormRenderer: React.FC<FormRendererProps> = ({
     correlations = {},
     disabled = false
 }) => {
+    // 🔥 CRITICAL FIX: Limitar items para evitar ShadowNode overflow
+    const MAX_SAFE_ITEMS = 30;
+    const safeFormStructure = useMemo(() =>
+        formStructure.slice(0, MAX_SAFE_ITEMS),
+        [formStructure]
+    );
+
     /**
      * Crear mapa bidireccional de correlaciones (optimizado con useMemo)
      * Basado en FormPreviewRenderer.tsx líneas 1923-1947
@@ -212,21 +220,31 @@ const FormRenderer: React.FC<FormRendererProps> = ({
 
         switch (item.type) {
             case 'input':
-                return <InputField key={item.id} {...commonProps} />;
+                return (
+                    <View collapsable={false}>
+                        <InputField key={item.id} {...commonProps} />
+                    </View>
+                );
 
             case 'textarea':
-                return <TextareaField key={item.id} {...commonProps} />;
+                return (
+                    <View collapsable={false}>
+                        <TextareaField key={item.id} {...commonProps} />
+                    </View>
+                );
 
             case 'select':
                 return (
-                    <SelectField
-                        key={item.id}
-                        {...commonProps}
-                        correlations={correlations}
-                        itemId={item.id}
-                        sourceQuestionId={item.props?.sourceQuestionId}
-                        onCorrelationChange={handleCorrelationAutoComplete}
-                    />
+                    <View collapsable={false}>
+                        <SelectField
+                            key={item.id}
+                            {...commonProps}
+                            correlations={correlations}
+                            itemId={item.id}
+                            sourceQuestionId={item.props?.sourceQuestionId}
+                            onCorrelationChange={handleCorrelationAutoComplete}
+                        />
+                    </View>
                 );
 
             case 'date':
@@ -248,7 +266,16 @@ const FormRenderer: React.FC<FormRendererProps> = ({
                 return <RadioField key={item.id} {...commonProps} />;
 
             case 'file':
-                return <FileField key={item.id} {...commonProps} />;
+                return (
+                    <FileField
+                        key={item.id}
+                        {...commonProps}
+                        // ✅ Si viene de repeater, usar sus props; si no, crear las propias
+                        descriptionValue={item.props?.descriptionValue ?? values[`${item.id}_description`]}
+                        onDescriptionChange={item.props?.onDescriptionChange ?? ((desc: string) => onChange(`${item.id}_description`, desc))}
+                        questionId={item.questionId}
+                    />
+                );
 
             case 'location':
                 return <LocationField key={item.id} {...commonProps} />;
@@ -258,6 +285,17 @@ const FormRenderer: React.FC<FormRendererProps> = ({
 
             case 'regisfacial':
                 return <FacialField key={item.id} {...commonProps} />;
+
+            case 'mathoperations':
+                return (
+                    <MathOperationsField
+                        key={item.id}
+                        {...commonProps}
+                        mathExpression={item.props?.code || ''}
+                        formValues={values}
+                        formStructure={safeFormStructure}
+                    />
+                );
 
             case 'repeater':
                 return (
@@ -330,23 +368,59 @@ const FormRenderer: React.FC<FormRendererProps> = ({
     }, [values, errors, disabled, handleCorrelationAutoComplete, onChange]);
 
     /**
-     * Renderizado optimizado de la lista de campos
-     * ✅ useMemo para evitar recrear array en cada render
+     * Renderizado con FlatList para virtualización (soluciona crashes de ScrollView)
      */
-    const renderedItems = useMemo(() => {
-        return formStructure.map(item => renderItem(item));
-    }, [formStructure, renderItem]);
+    const renderFlatListItem = useCallback(({ item, index }: { item: FormItem; index: number }) => {
+        return (
+            <View style={styles.itemWrapper} collapsable={false}>
+                {renderItem(item)}
+            </View>
+        );
+    }, [renderItem]);
+
+    const keyExtractor = useCallback((item: FormItem, index: number) => {
+        return item.id || `form-item-${index}`;
+    }, []);
+
+    /**
+     * Footer con espacio adicional para los botones de acción
+     */
+    const renderFooter = useCallback(() => {
+        return <View style={styles.footerSpacer} />;
+    }, []);
 
     return (
-        <View style={styles.container}>
-            {renderedItems}
+        <View style={{ flex: 1 }} collapsable={false}>
+            <FlatList
+                data={safeFormStructure}
+                renderItem={renderFlatListItem}
+                keyExtractor={keyExtractor}
+                ListFooterComponent={renderFooter}
+                contentContainerStyle={styles.container}
+                // Optimizaciones de performance (REDUCIDAS para evitar crashes)
+                removeClippedSubviews={true}
+                maxToRenderPerBatch={5}
+                updateCellsBatchingPeriod={100}
+                initialNumToRender={8}
+                windowSize={10}
+                showsVerticalScrollIndicator={true}
+                nestedScrollEnabled={false}
+                disableVirtualization={false}
+            />
         </View>
     );
-};
+});
 
 const styles = StyleSheet.create({
     container: {
-        flex: 1
+        paddingHorizontal: 16,
+        paddingTop: 8
+    },
+    itemWrapper: {
+        marginBottom: 12
+    },
+    footerSpacer: {
+        height: 120 // Espacio para botones flotantes
     },
     labelContainer: {
         marginVertical: 8

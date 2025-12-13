@@ -108,6 +108,15 @@ async function fetchFormDataFromAPI(formId: number): Promise<{
   const designData = await designResponse.json();
   const questionsData = await questionsResponse.json();
 
+  // 🔥 LOG COMPLETO DEL ENDPOINT /forms/{formId}/questions
+  console.log(`
+═══════════════════════════════════════════════════════════
+📊 RESPUESTA COMPLETA DE /forms/${formId}/questions
+═══════════════════════════════════════════════════════════
+${JSON.stringify(questionsData, null, 2)}
+═══════════════════════════════════════════════════════════
+  `);
+
   console.log(
     `✅ [SyncManager] Datos obtenidos: ${questionsData.questions?.length || 0} preguntas`
   );
@@ -132,6 +141,31 @@ async function saveFormDataToStorage(
 ): Promise<void> {
   const key = STORAGE_KEYS.FORM_DATA(formId);
   const serialized = serializeForStorage(data);
+
+  // 🔥 LOG DETALLADO: Qué opciones estamos guardando
+  console.log(`
+═══════════════════════════════════════════════════════════
+🔍 GUARDANDO EN ASYNCSTORAGE - Formulario ${formId}
+═══════════════════════════════════════════════════════════`);
+
+  const logItem = (item: any, level: number = 0) => {
+    const indent = "  ".repeat(level);
+    if (item.type === "select" && item.props?.label) {
+      console.log(`${indent}📌 ${item.props.label}:`);
+      console.log(`${indent}   - Type: ${item.type}`);
+      console.log(
+        `${indent}   - Opciones: ${JSON.stringify(item.props.options)}`
+      );
+      console.log(`${indent}   - dataSource: ${item.props.dataSource}`);
+      console.log(`${indent}   - questionType: ${item.props.questionType}`);
+    }
+    if (item.children && Array.isArray(item.children)) {
+      item.children.forEach((child: any) => logItem(child, level + 1));
+    }
+  };
+
+  data.formStructure.forEach((item) => logItem(item));
+  console.log(`═══════════════════════════════════════════════════════════\n`);
 
   await AsyncStorage.setItem(key, serialized);
   await AsyncStorage.setItem(
@@ -165,14 +199,40 @@ async function getFormDataFromStorage(
     `📂 [SyncManager] Datos cargados desde AsyncStorage (${(data.length / 1024).toFixed(2)} KB)`
   );
 
+  // 🔥 LOG DETALLADO: Qué opciones estamos cargando
+  console.log(`
+═══════════════════════════════════════════════════════════
+🔍 LEYENDO DE ASYNCSTORAGE - Formulario ${formId}
+═══════════════════════════════════════════════════════════`);
+
+  const logItem = (item: any, level: number = 0) => {
+    const indent = "  ".repeat(level);
+    if (item.type === "select" && item.props?.label) {
+      console.log(`${indent}📌 ${item.props.label}:`);
+      console.log(`${indent}   - Type: ${item.type}`);
+      console.log(
+        `${indent}   - Opciones: ${JSON.stringify(item.props.options)}`
+      );
+      console.log(`${indent}   - dataSource: ${item.props.dataSource}`);
+      console.log(`${indent}   - questionType: ${item.props.questionType}`);
+    }
+    if (item.children && Array.isArray(item.children)) {
+      item.children.forEach((child: any) => logItem(child, level + 1));
+    }
+  };
+
+  deserialized.formStructure.forEach((item) => logItem(item));
+  console.log(`═══════════════════════════════════════════════════════════\n`);
+
   return deserialized;
 }
 
 /**
  * Sincroniza un formulario específico
- * 1. Intenta obtener desde API
- * 2. Guarda en AsyncStorage
- * 3. Si falla, usa AsyncStorage como fallback
+ * 🔥 PRIORIDAD: Datos frescos de API cuando está ONLINE
+ * 1. Si ONLINE → SIEMPRE obtiene desde API (datos frescos)
+ * 2. Si OFFLINE → Usa AsyncStorage (datos cacheados)
+ * 3. Si falla API → Fallback a AsyncStorage
  */
 export async function syncFormData(
   formId: number,
@@ -182,7 +242,7 @@ export async function syncFormData(
 
   const isOnline = await getConnectionStatus();
 
-  // Si está offline, usar solo AsyncStorage
+  // ✅ PRIORIDAD 1: Si está OFFLINE → Usar solo AsyncStorage
   if (!isOnline && !forceRefresh) {
     console.log("📡 [SyncManager] Modo OFFLINE - usando AsyncStorage");
     const cachedData = await getFormDataFromStorage(formId);
@@ -194,12 +254,16 @@ export async function syncFormData(
     return cachedData;
   }
 
-  // Está online: intentar obtener desde API
+  // ✅ PRIORIDAD 2: Si está ONLINE → SIEMPRE obtener desde API (datos frescos)
+  console.log(
+    "🌐 [SyncManager] Modo ONLINE - obteniendo datos FRESCOS desde API..."
+  );
+
   try {
     const { formDesign, questions, metadata } =
       await fetchFormDataFromAPI(formId);
 
-    // Procesar datos usando el adaptador
+    // Procesar datos usando el adaptador (esto consulta question-table-relation)
     const enrichedData = await processFormData(
       formDesign,
       questions,
@@ -208,9 +272,10 @@ export async function syncFormData(
       metadata.description
     );
 
-    // Guardar en AsyncStorage para uso offline
+    // Guardar en AsyncStorage para uso offline futuro
     await saveFormDataToStorage(formId, enrichedData);
 
+    console.log("✅ [SyncManager] Datos FRESCOS de API procesados y guardados");
     return enrichedData;
   } catch (error) {
     // ✅ Si es un error de formulario no encontrado (404), no intentar caché
@@ -223,7 +288,10 @@ export async function syncFormData(
 
     console.error("❌ [SyncManager] Error al sincronizar desde API:", error);
 
-    // Fallback a AsyncStorage solo para otros errores (red, timeout, etc.)
+    // ✅ PRIORIDAD 3: Fallback a AsyncStorage solo si falla la API
+    console.warn(
+      "⚠️ [SyncManager] API falló - intentando usar caché como fallback..."
+    );
     const cachedData = await getFormDataFromStorage(formId);
 
     if (!cachedData) {

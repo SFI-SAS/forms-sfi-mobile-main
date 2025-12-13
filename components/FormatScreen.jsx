@@ -767,6 +767,11 @@ export default function FormatScreen(props) {
           person_id: fd.person_id || fd.personId || "",
           person_name: fd.person_name || fd.personName || fd.name || "",
           qr_url: fd.qr_url || fd.qrUrl || fd.signature_url || "",
+          qr_code: fd.qr_code || fd.qrCode || fd.qr || "",
+          qr_link: fd.qr_link || fd.qrLink || "",
+          validation_id: fd.validation_id || fd.validationId || "",
+          confidence_score: fd.confidence_score || fd.confidenceScore || 0,
+          liveness_score: fd.liveness_score || fd.livenessScore || 0,
         },
       };
       buf.push({
@@ -2382,6 +2387,12 @@ export default function FormatScreen(props) {
                 person_id: fd.person_id || fd.personId || "",
                 person_name: fd.person_name || fd.personName || fd.name || "",
                 qr_url: fd.qr_url || fd.qrUrl || fd.signature_url || "",
+                qr_code: fd.qr_code || fd.qrCode || fd.qr || "",
+                qr_link: fd.qr_link || fd.qrLink || "",
+                validation_id: fd.validation_id || fd.validationId || "",
+                confidence_score:
+                  fd.confidence_score || fd.confidenceScore || 0,
+                liveness_score: fd.liveness_score || fd.livenessScore || 0,
               },
             };
             allAnswers.push({
@@ -3236,12 +3247,26 @@ export default function FormatScreen(props) {
                                   fd.qrUrl ||
                                   fd.signature_url ||
                                   "",
+                                qr_code: fd.qr_code || fd.qrCode || fd.qr || "",
+                                qr_link: fd.qr_link || fd.qrLink || "",
+                                validation_id:
+                                  fd.validation_id || fd.validationId || "",
+                                confidence_score:
+                                  fd.confidence_score ||
+                                  fd.confidenceScore ||
+                                  0,
+                                liveness_score:
+                                  fd.liveness_score || fd.livenessScore || 0,
                               },
                             };
                             const serialized = JSON.stringify(filtered);
                             setValue(serialized);
                             handleAnswerChange(item.id, serialized);
-                            const preview = filtered.firmData.qr_url || null;
+                            const preview =
+                              filtered.firmData.qr_url ||
+                              filtered.firmData.qr_link ||
+                              filtered.firmData.qr_code ||
+                              null;
                             if (preview) {
                               setSignatureUris((prev) => ({
                                 ...prev,
@@ -3343,6 +3368,16 @@ export default function FormatScreen(props) {
                                   fd.qrUrl ||
                                   fd.signature_url ||
                                   "",
+                                qr_code: fd.qr_code || fd.qrCode || fd.qr || "",
+                                qr_link: fd.qr_link || fd.qrLink || "",
+                                validation_id:
+                                  fd.validation_id || fd.validationId || "",
+                                confidence_score:
+                                  fd.confidence_score ||
+                                  fd.confidenceScore ||
+                                  0,
+                                liveness_score:
+                                  fd.liveness_score || fd.livenessScore || 0,
                               },
                             };
                             const serialized = JSON.stringify(filtered);
@@ -3354,7 +3389,11 @@ export default function FormatScreen(props) {
                             }));
 
                             // 2) actualizar preview (ui) con la qr_url filtrada
-                            const preview = filtered.firmData.qr_url || null;
+                            const preview =
+                              filtered.firmData.qr_url ||
+                              filtered.firmData.qr_link ||
+                              filtered.firmData.qr_code ||
+                              null;
                             if (preview) {
                               setSignatureUris((prev) => ({
                                 ...prev,
@@ -3870,6 +3909,25 @@ export default function FormatScreen(props) {
                                             fd.qrUrl ||
                                             fd.signature_url ||
                                             "",
+                                          qr_code:
+                                            fd.qr_code ||
+                                            fd.qrCode ||
+                                            fd.qr ||
+                                            "",
+                                          qr_link:
+                                            fd.qr_link || fd.qrLink || "",
+                                          validation_id:
+                                            fd.validation_id ||
+                                            fd.validationId ||
+                                            "",
+                                          confidence_score:
+                                            fd.confidence_score ||
+                                            fd.confidenceScore ||
+                                            0,
+                                          liveness_score:
+                                            fd.liveness_score ||
+                                            fd.livenessScore ||
+                                            0,
                                         },
                                       };
                                       const serialized =
