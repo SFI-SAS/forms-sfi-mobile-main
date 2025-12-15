@@ -108,6 +108,15 @@ async function fetchFormDataFromAPI(formId: number): Promise<{
   const designData = await designResponse.json();
   const questionsData = await questionsResponse.json();
 
+  // 🔥 LOG COMPLETO DEL ENDPOINT /forms/{formId}/form_design
+  console.log(`
+═══════════════════════════════════════════════════════════
+📊 RESPUESTA COMPLETA DE /forms/${formId}/form_design
+═══════════════════════════════════════════════════════════
+${JSON.stringify(designData, null, 2)}
+═══════════════════════════════════════════════════════════
+  `);
+
   // 🔥 LOG COMPLETO DEL ENDPOINT /forms/{formId}/questions
   console.log(`
 ═══════════════════════════════════════════════════════════

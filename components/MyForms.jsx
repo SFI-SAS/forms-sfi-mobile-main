@@ -17,6 +17,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
+import { isOnline } from "../services/offlineManager";
+import ConnectionIndicator from "./ConnectionIndicator";
 
 const { width, height } = Dimensions.get("window");
 const RESPONSES_OFFLINE_KEY = "responses_with_answers_offline";
@@ -170,44 +172,36 @@ export default function MyForms() {
     }
 
     try {
-      const accessToken = await AsyncStorage.getItem("authToken");
-
-      if (!accessToken) {
-        console.log("🔒 No hay token disponible en MyForms");
-        setLoading(false);
-        setLoadingMore(false);
-        return;
-      }
+      // Detectar estado de conexión
+      const online = await isOnline();
+      console.log(`📋 [MyForms] Modo: ${online ? "🌐 ONLINE" : "📵 OFFLINE"}`);
 
       let formsList = [];
       let grouped = {};
 
-      const offlineDataRaw = await AsyncStorage.getItem(MY_FORMS_OFFLINE_KEY);
-      let offlineData = offlineDataRaw ? JSON.parse(offlineDataRaw) : null;
-
-      // Si es offline y no estamos agregando, usar caché
-      if (!accessToken && offlineData && !append) {
-        setForms(offlineData.formsList || []);
-        setResponsesByForm(offlineData.grouped || {});
-        setLoading(false);
-        setLoadingMore(false);
-        return;
-      }
-
-      let onlineOk = false;
-      if (accessToken) {
+      if (online) {
+        // MODO ONLINE: Usar endpoint + actualizar caché
         try {
+          console.log("🌐 [ONLINE] Obteniendo mis formularios desde API...");
+          const accessToken = await AsyncStorage.getItem("authToken");
           const backendUrl = await getBackendUrl();
+
+          if (!accessToken || !backendUrl) {
+            throw new Error("No hay token o URL del backend");
+          }
 
           // ✅ OPTIMIZADO: Carga paginada
           console.log(
             `🌐 Obteniendo respuestas página ${page} (${PAGE_SIZE} items)...`
           );
           const responsesRes = await fetch(
-            `${backendUrl}/responses/get_responses/all`,
+            `${backendUrl}/responses/with-answers`,
             {
               method: "GET",
-              headers: { Authorization: `Bearer ${accessToken}` },
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                "Content-Type": "application/json",
+              },
             }
           );
 
@@ -216,13 +210,12 @@ export default function MyForms() {
           }
 
           const allResponsesData = await responsesRes.json();
-          console.log("✅ Respuestas completas obtenidas");
 
           if (!allResponsesData || !Array.isArray(allResponsesData.forms)) {
             throw new Error("No se pudieron cargar las respuestas.");
           }
 
-          // ✅ PROCESAR datos con paginación simulada
+          // Procesar datos con paginación
           const startIndex = (page - 1) * PAGE_SIZE;
           const endIndex = startIndex + PAGE_SIZE;
           const paginatedForms = allResponsesData.forms.slice(
@@ -230,16 +223,13 @@ export default function MyForms() {
             endIndex
           );
 
-          // Determinar si hay más datos
-          const hasMoreData = endIndex < allResponsesData.forms.length;
-          setHasMore(hasMoreData);
+          setHasMore(endIndex < allResponsesData.forms.length);
 
           grouped = append ? { ...responsesByForm } : {};
           formsList = append ? [...forms] : [];
 
           for (const formData of paginatedForms) {
             if (formData.response_count > 0) {
-              // Agregar formulario a la lista si no existe
               if (!formsList.find((f) => f.id === formData.form_id)) {
                 formsList.push({
                   id: formData.form_id,
@@ -248,8 +238,6 @@ export default function MyForms() {
                   submitted_by: formData.responses[0]?.submitted_by || {},
                 });
               }
-
-              // Organizar respuestas por form_id
               grouped[formData.form_id] = formData.responses;
             }
           }
@@ -257,27 +245,50 @@ export default function MyForms() {
           setResponsesByForm(grouped);
           setForms(formsList);
 
-          // ✅ GUARDAR solo primera página en cache
+          // Actualizar caché (solo primera página)
           if (page === 1) {
             await AsyncStorage.setItem(
               MY_FORMS_OFFLINE_KEY,
               JSON.stringify({ formsList, grouped })
             );
-            console.log("✅ Cache actualizado");
+            console.log("✅ [ONLINE] Mis formularios + caché actualizado");
           }
-
-          onlineOk = true;
         } catch (err) {
-          console.error("❌ Error obteniendo respuestas:", err);
-          onlineOk = false;
+          console.error("❌ [ONLINE] Error obteniendo mis formularios:", err);
+          // Fallback a caché
+          if (page === 1) {
+            const stored = await AsyncStorage.getItem(MY_FORMS_OFFLINE_KEY);
+            if (stored) {
+              const cached = JSON.parse(stored);
+              formsList = cached.formsList || [];
+              grouped = cached.grouped || {};
+              console.log("⚠️ [ONLINE] Usando caché por error en API");
+            }
+          }
+        }
+      } else {
+        // MODO OFFLINE: Solo usar caché
+        console.log("📵 [OFFLINE] Obteniendo mis formularios desde caché...");
+        try {
+          const stored = await AsyncStorage.getItem(MY_FORMS_OFFLINE_KEY);
+          if (stored) {
+            const cached = JSON.parse(stored);
+            formsList = cached.formsList || [];
+            grouped = cached.grouped || {};
+            setHasMore(false);
+            console.log(
+              `✅ [OFFLINE] ${formsList.length} formularios desde caché`
+            );
+          } else {
+            console.warn("⚠️ [OFFLINE] No hay formularios en caché");
+          }
+        } catch (err) {
+          console.error("❌ [OFFLINE] Error leyendo caché:", err);
         }
       }
 
-      // ✅ FALLBACK a cache offline si la consulta online falla
-      if (!onlineOk && offlineData && !append) {
-        setForms(offlineData.formsList || []);
-        setResponsesByForm(offlineData.grouped || {});
-      }
+      setResponsesByForm(grouped);
+      setForms(formsList);
     } catch (error) {
       console.error("❌ Error al cargar formularios enviados:", error);
 
@@ -485,6 +496,9 @@ export default function MyForms() {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#1E3A8A" />
+
+      {/* Indicador de conexión */}
+      <ConnectionIndicator />
 
       {/* Header corporativo */}
       <LinearGradient

@@ -531,3 +531,159 @@ export const getFormToAPI = async (form_id, accessToken) => {
     throw error;
   }
 };
+
+/**
+ * 🆕 Obtiene los instructivos (archivos de ayuda) de un formulario
+ * GET /forms/{formId}/instructivos
+ */
+export const getFormInstructivos = async (formId) => {
+  const backendUrl = await getBackendUrl();
+  const token = await getAuthToken();
+
+  try {
+    const response = await fetch(`${backendUrl}/forms/${formId}/instructivos`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Error ${response.status}: ${response.statusText}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error("❌ Error obteniendo instructivos:", error);
+    throw error;
+  }
+};
+
+/**
+ * 🆕 Obtiene el mensaje de alerta de un formulario
+ * GET /forms/{formId}/alert-message
+ */
+export const getFormAlertMessage = async (formId) => {
+  const backendUrl = await getBackendUrl();
+  const token = await getAuthToken();
+
+  try {
+    const response = await fetch(
+      `${backendUrl}/forms/${formId}/alert-message`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Error ${response.status}: ${response.statusText}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error("❌ Error obteniendo mensaje de alerta:", error);
+    throw error;
+  }
+};
+
+/**
+ * 🆕 Obtiene operaciones matemáticas por IDs de preguntas
+ * GET /forms/{form_id}/math-operations/by-questions?question_ids=1,2,3
+ */
+export const getMathOperationsByQuestions = async (formId, questionIds) => {
+  const backendUrl = await getBackendUrl();
+  const token = await getAuthToken();
+
+  try {
+    // Convertir array a string separado por comas
+    const idsString = Array.isArray(questionIds)
+      ? questionIds.join(",")
+      : questionIds;
+
+    const url = `${backendUrl}/responses/${formId}/math-operations/by-questions?question_ids=${idsString}`;
+
+    console.log(
+      `📐 [API] Obteniendo operaciones matemáticas para preguntas: ${idsString}`
+    );
+    console.log(`🔗 [API] URL completa: ${url}`);
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    console.log(
+      `📊 [API] Response status: ${response.status} ${response.statusText}`
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`❌ [API] Error response body:`, errorText);
+      throw new Error(`Error ${response.status}: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    console.log(`✅ [API] Operaciones matemáticas obtenidas:`, data);
+    return data;
+  } catch (error) {
+    console.error("❌ Error obteniendo operaciones matemáticas:", error);
+    throw error;
+  }
+};
+
+/**
+ * 🆕 Descarga un archivo de instructivo
+ * GET /forms/files/download-instructivo?file_path=...
+ *
+ * IMPORTANTE: Envía la ruta exactamente como viene de la BD
+ * El backend se encarga de normalizar y resolver la ruta
+ */
+export const downloadInstructivo = async (filePath) => {
+  const backendUrl = await getBackendUrl();
+  const token = await getAuthToken();
+
+  try {
+    console.log("📥 [API] Descargando instructivo:", filePath);
+
+    // Enviar la ruta SIN modificar - el backend la normalizará
+    const url = `${backendUrl}/forms/files/download-instructivo?file_path=${encodeURIComponent(filePath)}`;
+
+    console.log("🔗 [API] URL de descarga:", url);
+    console.log("🔑 [API] Token presente:", token ? "Sí" : "No");
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    console.log(
+      "📡 [API] Respuesta del servidor:",
+      response.status,
+      response.statusText
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("❌ [API] Error del servidor:", errorText);
+      throw new Error(
+        `HTTP ${response.status}: ${response.statusText} - ${errorText}`
+      );
+    }
+
+    console.log("✅ [API] Archivo listo para descargar");
+    return response;
+  } catch (error) {
+    console.error("❌ [API] Error descargando instructivo:", error);
+    throw error;
+  }
+};

@@ -15,6 +15,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
+import { isOnline } from "../services/offlineManager";
+import ConnectionIndicator from "./ConnectionIndicator";
 // import { HomeIcon } from "./Icons"; // Se asume que este ícono ya no es necesario en esta pantalla.
 // import { LinearGradient } from "expo-linear-gradient"; // Se elimina, usando un fondo plano.
 
@@ -143,33 +145,92 @@ export default function PendingForms() {
   useEffect(() => {
     const fetchPendingForms = async () => {
       try {
-        // Verificar token antes de cargar formularios
+        // Detectar estado de conexión
+        const online = await isOnline();
+        console.log(
+          `📋 [PendingForms] Modo: ${online ? "🌐 ONLINE" : "📵 OFFLINE"}`
+        );
+
+        // Verificar token
         const token = await AsyncStorage.getItem("authToken");
         if (!token) {
           console.log("🔒 No hay token disponible");
           return;
         }
 
-        // Unifica formularios pendientes desde la cola unificada y las claves legacy
-        const storedPendingForms = await AsyncStorage.getItem("pending_forms");
-        const unifiedQueue = storedPendingForms
-          ? JSON.parse(storedPendingForms)
-          : [];
-        const storedPendingSaveResponse = await AsyncStorage.getItem(
-          PENDING_SAVE_RESPONSE_KEY
-        );
-        const pendingSaveResponse = storedPendingSaveResponse
-          ? JSON.parse(storedPendingSaveResponse)
-          : [];
+        let unified = [];
 
-        // Construir listado único {id, title, description}
-        const idsUnified = (unifiedQueue || []).map((f) => f.id);
+        if (online) {
+          // MODO ONLINE: Obtener desde API + actualizar caché
+          console.log(
+            "🌐 [ONLINE] Obteniendo formularios pendientes desde API..."
+          );
+          try {
+            const backendUrl = await getBackendUrl();
+            const response = await fetch(`${backendUrl}/responses/pending`, {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+            });
 
-        // Intenta obtener title y description de metadata offline
+            if (response.ok) {
+              const data = await response.json();
+              unified = (data.forms || []).map((f) => ({
+                id: f.id,
+                title: f.title || "",
+                description: f.description || "",
+              }));
+
+              // Actualizar caché
+              await AsyncStorage.setItem(
+                "pending_forms_offline",
+                JSON.stringify(unified)
+              );
+              console.log(
+                `✅ [ONLINE] ${unified.length} pendientes + caché actualizado`
+              );
+            } else {
+              throw new Error("Error en respuesta del servidor");
+            }
+          } catch (err) {
+            console.error("❌ [ONLINE] Error obteniendo pendientes:", err);
+            // Fallback a caché
+            const stored = await AsyncStorage.getItem("pending_forms_offline");
+            if (stored) {
+              unified = JSON.parse(stored);
+              console.log("⚠️ [ONLINE] Usando caché por error en API");
+            }
+          }
+        } else {
+          // MODO OFFLINE: Solo usar caché
+          console.log(
+            "📵 [OFFLINE] Obteniendo formularios pendientes desde caché..."
+          );
+          try {
+            const stored = await AsyncStorage.getItem("pending_forms_offline");
+            if (stored) {
+              unified = JSON.parse(stored);
+              console.log(
+                `✅ [OFFLINE] ${unified.length} pendientes desde caché`
+              );
+            } else {
+              console.warn(
+                "⚠️ [OFFLINE] No hay formularios pendientes en caché"
+              );
+            }
+          } catch (err) {
+            console.error("❌ [OFFLINE] Error leyendo caché:", err);
+          }
+        }
+
+        // También incluir formularios guardados localmente (legacy)
         const storedMeta = await AsyncStorage.getItem("offline_forms_metadata");
         const metaObj = storedMeta ? JSON.parse(storedMeta) : {};
 
-        const unified = [
+        // Combinar con datos legacy de pendingSaveResponse
+        unified = [
+          ...unified,
           ...(unifiedQueue || []).map((f) => ({
             id: f.id,
             title: (metaObj && metaObj[f.id] && metaObj[f.id].title) || "",
@@ -464,6 +525,9 @@ export default function PendingForms() {
   return (
     // Se elimina LinearGradient y se usa un fondo corporativo (blanco/gris claro)
     <View style={styles.baseContainer}>
+      {/* Indicador de conexión */}
+      <ConnectionIndicator />
+
       <View style={styles.contentWrapper}>
         <View style={styles.headerBar}>
           {/* Se usa el color primario para el encabezado */}

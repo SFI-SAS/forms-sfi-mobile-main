@@ -13,15 +13,17 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { initializeLogger } from "./utils/errorLogger";
 import { initializeErrorHandlers } from "./utils/globalErrorHandler";
 import crashlyticsService from "./services/crashlytics";
+// ✅ NUEVO: Importar sistema offline/online
+import { initializeOfflineManager } from "./services/offlineManager";
 
 const Stack = createStackNavigator();
 
 export default function App() {
   useEffect(() => {
-    // ✅ Inicializar sistema de logs al arrancar la app
-    const initializeErrorSystem = async () => {
+    // ✅ Inicializar sistema de logs y offline manager al arrancar la app
+    const initializeApp = async () => {
       try {
-        console.log("🚀 Inicializando sistema de errores...");
+        console.log("🚀 Inicializando aplicación...");
 
         // ✅ Inicializar Firebase Crashlytics
         await crashlyticsService.initialize();
@@ -32,14 +34,17 @@ export default function App() {
         // Instalar handlers globales de errores
         initializeErrorHandlers();
 
-        console.log("✅ Sistema de errores inicializado correctamente");
+        // ✅ Inicializar gestor offline/online
+        initializeOfflineManager();
+
+        console.log("✅ Aplicación inicializada correctamente");
       } catch (error) {
-        console.error("❌ Error inicializando sistema de errores:", error);
-        crashlyticsService.recordError(error, "App.js - initializeErrorSystem");
+        console.error("❌ Error inicializando aplicación:", error);
+        crashlyticsService.recordError(error, "App.js - initializeApp");
       }
     };
 
-    initializeErrorSystem();
+    initializeApp();
   }, []);
 
   return (

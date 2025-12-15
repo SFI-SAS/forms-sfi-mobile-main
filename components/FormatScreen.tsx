@@ -18,12 +18,15 @@ import {
     ActivityIndicator,
     BackHandler,
     KeyboardAvoidingView,
-    Platform
+    Platform,
+    Dimensions
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import NetInfo from '@react-native-community/netinfo';
+import { isOnline as checkOnlineStatus } from '../services/offlineManager';
+import ConnectionIndicator from './ConnectionIndicator';
 
 // Nuevos imports
 import { syncFormData, getSyncStatus } from '../utils/FormSyncManager';
@@ -31,6 +34,9 @@ import { submitFormResponses } from '../utils/ResponseAdapter';
 import { EnrichedFormData } from '../utils/FormDataAdapter';
 import FormRenderer from './FormRenderer/FormRenderer';
 import { CircleInfoIcon, HomeIcon } from './Icons';
+import { AlertMessageModal } from './AlertMessageModal';
+import { InstructivosSection } from './InstructivosSection';
+import { getFormAlertMessage, getFormInstructivos } from '../services/api';
 
 export default function FormatScreen() {
     const { id } = useLocalSearchParams();
@@ -47,6 +53,12 @@ export default function FormatScreen() {
     const [lastSync, setLastSync] = useState<Date | null>(null);
     const [refreshing, setRefreshing] = useState(false);
 
+    // 🆕 Estados para alertas e instructivos
+    const [alertMessage, setAlertMessage] = useState<string | null>(null);
+    const [showAlertModal, setShowAlertModal] = useState(false);
+    const [alertAccepted, setAlertAccepted] = useState(false);
+    const [instructivos, setInstructivos] = useState<any[]>([]);
+
     /**
      * Carga datos del formulario (online/offline automático)
      */
@@ -55,16 +67,28 @@ export default function FormatScreen() {
             setLoading(true);
             console.log(`📋 [FormatScreen] Cargando formulario ${formId}...`);
 
+            // Detectar conexión usando offlineManager
+            const online = await checkOnlineStatus();
+            setIsOnline(online);
+            console.log(
+                `📋 [FormatScreen] Modo: ${online ? '🌐 ONLINE' : '📵 OFFLINE'}`
+            );
+
             // Obtener estado de sincronización
             const syncStatus = await getSyncStatus(formId);
-            setIsOnline(syncStatus.isOnline);
             setLastSync(syncStatus.lastSync);
 
-            console.log(`📡 [FormatScreen] Estado: ${syncStatus.isOnline ? 'ONLINE' : 'OFFLINE'}`);
             console.log(`💾 [FormatScreen] Datos locales: ${syncStatus.hasLocalData ? 'SÍ' : 'NO'}`);
 
             // Sincronizar datos (usa AsyncStorage si está offline)
             const enrichedData = await syncFormData(formId);
+
+            // 🔍 LOG COMPLETO DE LA ESTRUCTURA DEL FORMULARIO
+            console.log('═══════════════════════════════════════════════════════════');
+            console.log(`📦 [FormatScreen] ESTRUCTURA COMPLETA DEL FORMULARIO`);
+            console.log('═══════════════════════════════════════════════════════════');
+            console.log(JSON.stringify(enrichedData.formStructure, null, 2));
+            console.log('═══════════════════════════════════════════════════════════');
 
             setFormData(enrichedData);
             setFormValues({});
@@ -72,6 +96,37 @@ export default function FormatScreen() {
 
             console.log(`✅ [FormatScreen] Formulario cargado: ${enrichedData.metadata.title}`);
             console.log(`📊 [FormatScreen] ${enrichedData.formStructure.length} elementos en estructura`);
+
+            // 🆕 Cargar mensaje de alerta e instructivos (solo si está online)
+            if (syncStatus.isOnline) {
+                try {
+                    // Obtener mensaje de alerta
+                    const alertData = await getFormAlertMessage(formId);
+                    console.log('📥 [FormatScreen] Datos de alerta recibidos:', JSON.stringify(alertData, null, 2));
+                    if (alertData.has_alert && alertData.alert_message) {
+                        console.log(`⚠️ [FormatScreen] Mensaje de alerta: "${alertData.alert_message}"`);
+                        setAlertMessage(alertData.alert_message);
+                        setShowAlertModal(true);
+                    } else {
+                        console.log('ℹ️ [FormatScreen] No hay mensaje de alerta para este formulario');
+                    }
+                } catch (error) {
+                    console.error('⚠️ Error cargando mensaje de alerta:', error);
+                    // No bloquear si falla la carga de alerta
+                }
+
+                try {
+                    // Obtener instructivos
+                    const instructivosData = await getFormInstructivos(formId);
+                    if (instructivosData.instructivos && instructivosData.instructivos.length > 0) {
+                        setInstructivos(instructivosData.instructivos);
+                        console.log(`📚 [FormatScreen] ${instructivosData.count} instructivos cargados`);
+                    }
+                } catch (error) {
+                    console.error('⚠️ Error cargando instructivos:', error);
+                    // No bloquear si falla la carga de instructivos
+                }
+            }
 
         } catch (error: any) {
             console.error('❌ [FormatScreen] Error cargando formulario:', error);
@@ -150,21 +205,31 @@ export default function FormatScreen() {
      * Maneja el botón de volver con confirmación
      */
     const handleGoBack = useCallback(() => {
+        console.log('🔙 [FormatScreen] Botón volver presionado');
+
         if (Object.keys(formValues).length > 0) {
+            console.log('⚠️ [FormatScreen] Hay cambios sin guardar, mostrando confirmación');
             Alert.alert(
                 'Descartar cambios',
                 '¿Estás seguro de que quieres salir? Los cambios no guardados se perderán.',
                 [
-                    { text: 'Cancelar', style: 'cancel' },
+                    {
+                        text: 'Cancelar',
+                        style: 'cancel'
+                    },
                     {
                         text: 'Salir',
                         style: 'destructive',
-                        onPress: () => router.replace('/home')
+                        onPress: () => {
+                            console.log('✅ [FormatScreen] Navegando inmediatamente...');
+                            setImmediate(() => router.replace('/home'));
+                        }
                     }
                 ]
             );
         } else {
-            router.replace('/home');
+            console.log('✅ [FormatScreen] No hay cambios, navegando inmediatamente...');
+            setImmediate(() => router.replace('/home'));
         }
     }, [formValues, router]);
 
@@ -272,12 +337,13 @@ export default function FormatScreen() {
                             {
                                 text: 'Salir',
                                 style: 'destructive',
-                                onPress: () => router.replace('/home')
+                                onPress: () => setImmediate(() => router.replace('/home'))
                             }
                         ]
                     );
                     return true;
                 }
+                // Si no hay cambios, permitir navegación nativa
                 return false;
             };
 
@@ -331,52 +397,60 @@ export default function FormatScreen() {
 
     return (
         <View style={styles.container}>
-            {/* Header */}
+            {/* Indicador de conexión */}
+            <ConnectionIndicator />
+
+            {/* Header con título prominente y responsive */}
             <LinearGradient
                 colors={['#1e3a8a', '#3b82f6', '#60a5fa']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.header}
             >
-                <View style={styles.headerContent}>
+                {/* Barra superior con botones */}
+                <View style={styles.topBar}>
                     <TouchableOpacity
                         onPress={handleGoBack}
                         style={styles.backButton}
+                        activeOpacity={0.7}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     >
-                        <CircleInfoIcon width={24} height={24} color="#FFFFFFFF" />
-
-                        <Text style={{ color: '#FFFFFFFF', marginLeft: 0,marginTop: 8, borderColor: 'white' }}>Back</Text>
+                        <HomeIcon size={24} color="white" />
+                        <Text style={styles.backButtonText}>Volver</Text>
                     </TouchableOpacity>
 
-                    <View style={styles.titleContainer}>
-                        <Text style={styles.headerTitle} numberOfLines={2}>
-                            {formData.metadata.title}
-                        </Text>
-                        {formData.metadata.description && (
-                            <Text style={styles.headerSubtitle} numberOfLines={1}>
-                                {formData.metadata.description}
+                    <View style={styles.actionsBar}>
+                        {/* Botón de actualizar */}
+                        <TouchableOpacity
+                            onPress={handleRefresh}
+                            style={[styles.refreshButton, (!isOnline || refreshing) && styles.refreshButtonDisabled]}
+                            disabled={!isOnline || refreshing}
+                        >
+                            <Text style={styles.refreshIcon}>
+                                {refreshing ? '⏳' : '🔄'}
                             </Text>
-                        )}
-                    </View>
+                        </TouchableOpacity>
 
-                    {/* Botón de actualizar */}
-                    <TouchableOpacity
-                        onPress={handleRefresh}
-                        style={[styles.refreshButton, (!isOnline || refreshing) && styles.refreshButtonDisabled]}
-                        disabled={!isOnline || refreshing}
-                    >
-                        <Text style={styles.refreshIcon}>
-                            {refreshing ? '⏳' : '🔄'}
-                        </Text>
-                    </TouchableOpacity>
-
-                    {/* Indicador de estado */}
-                    <View style={styles.statusContainer}>
-                        <View style={[styles.statusDot, isOnline ? styles.statusOnline : styles.statusOffline]} />
-                        <Text style={styles.statusText}>
-                            {isOnline ? 'Online' : 'Offline'}
-                        </Text>
+                        {/* Indicador de estado */}
+                        <View style={styles.statusContainer}>
+                            <View style={[styles.statusDot, isOnline ? styles.statusOnline : styles.statusOffline]} />
+                            <Text style={styles.statusText}>
+                                {isOnline ? 'Online' : 'Offline'}
+                            </Text>
+                        </View>
                     </View>
+                </View>
+
+                {/* Título y descripción - Arriba de todo, responsive */}
+                <View style={styles.titleSection}>
+                    <Text style={styles.headerTitle}>
+                        {formData.metadata.title}
+                    </Text>
+                    {formData.metadata.description && (
+                        <Text style={styles.headerSubtitle}>
+                            {formData.metadata.description}
+                        </Text>
+                    )}
                 </View>
 
                 {/* Última sincronización */}
@@ -389,16 +463,39 @@ export default function FormatScreen() {
                 )}
             </LinearGradient>
 
-            {/* Formulario con FlatList (NO ScrollView para evitar anidación) */}
-            <FormRenderer
-                formStructure={formData.formStructure}
-                values={formValues}
-                onChange={handleFieldChange}
-                errors={errors}
-                styleConfig={formData.styleConfig}
-                correlations={formData.correlations}
-                disabled={submitting}
-            />
+            {/* 🆕 Sección de instructivos (solo si hay archivos y alerta fue aceptada o no hay alerta) */}
+            {instructivos.length > 0 && (alertMessage ? alertAccepted : true) && (
+                <InstructivosSection instructivos={instructivos} />
+            )}
+
+            {/* Formulario (solo si alerta fue aceptada o no hay alerta) */}
+            {(alertMessage ? alertAccepted : true) && (
+                <FormRenderer
+                    formStructure={formData.formStructure}
+                    values={formValues}
+                    onChange={handleFieldChange}
+                    errors={errors}
+                    styleConfig={formData.styleConfig}
+                    correlations={formData.correlations}
+                    disabled={submitting}
+                />
+            )}
+
+            {/* 🆕 Modal de alerta (se muestra antes de permitir diligenciar) */}
+            {alertMessage && (
+                <AlertMessageModal
+                    visible={showAlertModal}
+                    message={alertMessage}
+                    onAccept={() => {
+                        setShowAlertModal(false);
+                        setAlertAccepted(true);
+                    }}
+                    onCancel={() => {
+                        setShowAlertModal(false);
+                        router.replace('/home');
+                    }}
+                />
+            )}
 
             {/* Botones de acción */}
             <View style={styles.actionsContainer}>
@@ -425,6 +522,10 @@ export default function FormatScreen() {
         </View>
     );
 }
+
+const { width: screenWidth } = Dimensions.get('window');
+const isSmallScreen = screenWidth < 375;
+const isMediumScreen = screenWidth >= 375 && screenWidth < 768;
 
 const styles = StyleSheet.create({
     container: {
@@ -472,23 +573,44 @@ const styles = StyleSheet.create({
         fontWeight: '600'
     },
     header: {
-        paddingTop: 48,
-        paddingBottom: 16,
-        paddingHorizontal: 15
+        paddingTop: isSmallScreen ? 44 : 48,
+        paddingBottom: 20,
+        paddingHorizontal: isSmallScreen ? 12 : 16
     },
-    headerContent: {
+    topBar: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 16,
+        zIndex: 999
+    },
+    actionsBar: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 8
+        gap: 8
     },
     backButton: {
-        padding: 15
+        flexDirection: 'row',
+        padding: 8,
+        backgroundColor: 'rgba(255, 255, 255, 0.25)',
+        borderRadius: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+        elevation: 5
+    },
+    backButtonText: {
+        color: '#FFFFFF',
+        marginLeft: 8,
+        fontSize: 14,
+        fontWeight: '600'
     },
     refreshButton: {
         padding: 8,
-        marginRight: 8,
-        backgroundColor: 'rgba(255, 255, 255, 0.2)',
-        borderRadius: 8
+        backgroundColor: 'rgba(255, 255, 255, 0.25)',
+        borderRadius: 8,
+        minWidth: 40,
+        alignItems: 'center',
+        justifyContent: 'center'
     },
     refreshButtonDisabled: {
         opacity: 0.4
@@ -496,26 +618,33 @@ const styles = StyleSheet.create({
     refreshIcon: {
         fontSize: 20
     },
-    titleContainer: {
-        flex: 1,
-        marginLeft: 12
+    titleSection: {
+        width: '100%',
+        paddingVertical: 12,
+        paddingHorizontal: 4
     },
     headerTitle: {
-        fontSize: 20,
+        fontSize: isSmallScreen ? 20 : isMediumScreen ? 24 : 28,
         fontWeight: 'bold',
-        color: '#FFFFFF'
+        color: '#FFFFFF',
+        marginBottom: 6,
+        lineHeight: isSmallScreen ? 26 : isMediumScreen ? 32 : 36,
+        flexWrap: 'wrap',
+        textAlign: 'left'
     },
     headerSubtitle: {
-        fontSize: 14,
-        color: 'rgba(255, 255, 255, 0.8)',
-        marginTop: 2
+        fontSize: isSmallScreen ? 13 : 15,
+        color: 'rgba(255, 255, 255, 0.9)',
+        lineHeight: isSmallScreen ? 18 : 22,
+        flexWrap: 'wrap',
+        textAlign: 'left'
     },
     statusContainer: {
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: 'rgba(255, 255, 255, 0.2)',
-        paddingHorizontal: 8,
-        paddingVertical: 4,
+        paddingHorizontal: 10,
+        paddingVertical: 5,
         borderRadius: 12
     },
     statusDot: {

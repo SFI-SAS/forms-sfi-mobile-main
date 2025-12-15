@@ -40,6 +40,7 @@ interface InputFieldProps extends TextInputProps {
     required?: boolean;
     error?: boolean;
     errorMessage?: string;
+    keyboardType?: 'default' | 'numeric' | 'email-address' | 'phone-pad';
 }
 
 interface SelectFieldProps {
@@ -96,6 +97,7 @@ export const Input: React.FC<InputFieldProps> = ({
     required,
     error,
     errorMessage,
+    keyboardType = 'default',
     style,
     ...props
 }) => (
@@ -107,6 +109,7 @@ export const Input: React.FC<InputFieldProps> = ({
                 error && styles.inputError,
                 style
             ]}
+            keyboardType={keyboardType}
             placeholderTextColor="#9CA3AF"
             {...props}
         />
@@ -244,10 +247,16 @@ const styles = StyleSheet.create({
         color: '#1F2937', // gray-800
     },
 
-    // Input con error
+    // Input con error - Resaltado más visible
     inputError: {
         borderColor: '#EF4444', // red-500
         borderWidth: 2,
+        backgroundColor: '#FEF2F2', // red-50 - Fondo ligeramente rojo
+        shadowColor: '#EF4444',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+        elevation: 3,
     },
 
     // Textarea
@@ -263,12 +272,14 @@ const styles = StyleSheet.create({
         color: '#1F2937',
     },
 
-    // ErrorText
+    // ErrorText - Más visible y destacado
     errorText: {
-        fontSize: 12,
-        color: '#EF4444', // red-500
-        marginTop: 4,
-        lineHeight: 16,
+        fontSize: 13,
+        color: '#DC2626', // red-600
+        marginTop: 6,
+        lineHeight: 18,
+        fontWeight: '600',
+        paddingHorizontal: 4,
     },
 
     // Select - Campo de selección (equivalente a DaisyUI select + select-bordered)

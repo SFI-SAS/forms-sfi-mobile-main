@@ -25,6 +25,9 @@ import {
   getFormsToApprove,
   validateToken,
 } from "../services/api";
+// ✅ NUEVO: Sistema offline/online
+import { isOnline } from "../services/offlineManager";
+import ConnectionIndicator from "./ConnectionIndicator";
 
 const { width, height } = Dimensions.get("window");
 
@@ -218,6 +221,7 @@ export default function Dashboard() {
   const [myFormsApprovalStatus, setMyFormsApprovalStatus] = useState([]);
   const [userInfo, setUserInfo] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [isOffline, setIsOffline] = useState(false);
 
   // ✅ OPTIMIZACIÓN: Calcular formsPending de forma inteligente
   const formsPending = useMemo(() => {
@@ -298,79 +302,151 @@ export default function Dashboard() {
       ]).start();
 
       try {
+        // ✅ DETECTAR ESTADO DE CONEXIÓN
+        const online = await isOnline();
+        setIsOffline(!online);
+
         console.log(
-          "📊 [Dashboard] Cargando estadísticas desde endpoints PC..."
+          `📊 [Dashboard] Modo: ${online ? "🌐 ONLINE" : "📵 OFFLINE"}`
         );
 
-        // ✅ NUEVO: Validar token y obtener info de usuario
         let userInfoData = null;
-        try {
-          const userResponse = await validateToken();
-          if (userResponse && userResponse.user) {
-            userInfoData = {
-              name: userResponse.user.name,
-              user_type: userResponse.user.user_type,
-              email: userResponse.user.email,
-            };
-            // Guardar en AsyncStorage para uso offline
-            await AsyncStorage.setItem(
-              "user_info_offline",
-              JSON.stringify(userInfoData)
-            );
-          }
-        } catch (err) {
-          console.warn("⚠️ Error validando token, usando datos offline:", err);
-          const userInfoStored =
-            await AsyncStorage.getItem("user_info_offline");
-          if (userInfoStored) {
-            userInfoData = JSON.parse(userInfoStored);
-          }
-        }
-
-        // ✅ NUEVO: Obtener formularios completados con respuestas (endpoint PC)
         let completedForms = [];
-        try {
-          const data = await getCompletedFormsWithResponses();
-          completedForms = data || [];
-          console.log(
-            `✅ [Dashboard] ${completedForms.length} formularios completados`
-          );
-        } catch (err) {
-          console.error("❌ Error obteniendo formularios completados:", err);
-        }
-
-        // ✅ NUEVO: Obtener formularios asignados (endpoint PC)
         let assignedForms = [];
-        try {
-          const data = await getAssignedFormsSummary();
-          assignedForms = data || [];
-          console.log(
-            `✅ [Dashboard] ${assignedForms.length} formularios asignados`
-          );
-        } catch (err) {
-          console.error("❌ Error obteniendo formularios asignados:", err);
-        }
-
-        // ✅ NUEVO: Obtener formularios por aprobar (endpoint PC)
         let approvalForms = [];
-        try {
-          const data = await getFormsToApprove();
-          approvalForms = data || [];
-          console.log(
-            `✅ [Dashboard] ${approvalForms.length} formularios por aprobar`
-          );
-        } catch (err) {
-          console.error("❌ Error obteniendo formularios por aprobar:", err);
+
+        if (online) {
+          // ============================================
+          // MODO ONLINE: Solo endpoints + actualizar caché
+          // ============================================
+          console.log("🌐 [ONLINE] Obteniendo datos desde API...");
+
+          // Validar token
+          try {
+            const userResponse = await validateToken();
+            if (userResponse && userResponse.user) {
+              userInfoData = {
+                name: userResponse.user.name,
+                user_type: userResponse.user.user_type,
+                email: userResponse.user.email,
+              };
+              await AsyncStorage.setItem(
+                "user_info_offline",
+                JSON.stringify(userInfoData)
+              );
+            }
+          } catch (err) {
+            console.error("❌ [ONLINE] Error validando token:", err);
+          }
+
+          // Formularios completados
+          try {
+            completedForms = await getCompletedFormsWithResponses();
+            await AsyncStorage.setItem(
+              "completed_forms_offline",
+              JSON.stringify(completedForms)
+            );
+            console.log(
+              `✅ [ONLINE] ${completedForms.length} completados + caché actualizado`
+            );
+          } catch (err) {
+            console.error("❌ [ONLINE] Error formularios completados:", err);
+          }
+
+          // Formularios asignados
+          try {
+            assignedForms = await getAssignedFormsSummary();
+            await AsyncStorage.setItem(
+              "assigned_forms_offline",
+              JSON.stringify(assignedForms)
+            );
+            console.log(
+              `✅ [ONLINE] ${assignedForms.length} asignados + caché actualizado`
+            );
+          } catch (err) {
+            console.error("❌ [ONLINE] Error formularios asignados:", err);
+          }
+
+          // Formularios por aprobar
+          try {
+            approvalForms = await getFormsToApprove();
+            await AsyncStorage.setItem(
+              "approval_forms_offline",
+              JSON.stringify(approvalForms)
+            );
+            console.log(
+              `✅ [ONLINE] ${approvalForms.length} por aprobar + caché actualizado`
+            );
+          } catch (err) {
+            console.error("❌ [ONLINE] Error formularios por aprobar:", err);
+          }
+        } else {
+          // ============================================
+          // MODO OFFLINE: Solo AsyncStorage
+          // ============================================
+          console.log("📵 [OFFLINE] Obteniendo datos desde caché...");
+
+          // Info de usuario
+          try {
+            const stored = await AsyncStorage.getItem("user_info_offline");
+            if (stored) {
+              userInfoData = JSON.parse(stored);
+              console.log("✅ [OFFLINE] Info de usuario desde caché");
+            }
+          } catch (err) {
+            console.error("❌ [OFFLINE] Error info usuario:", err);
+          }
+
+          // Formularios completados
+          try {
+            const stored = await AsyncStorage.getItem(
+              "completed_forms_offline"
+            );
+            if (stored) {
+              completedForms = JSON.parse(stored);
+              console.log(
+                `✅ [OFFLINE] ${completedForms.length} completados desde caché`
+              );
+            }
+          } catch (err) {
+            console.error("❌ [OFFLINE] Error completados:", err);
+          }
+
+          // Formularios asignados
+          try {
+            const stored = await AsyncStorage.getItem("assigned_forms_offline");
+            if (stored) {
+              assignedForms = JSON.parse(stored);
+              console.log(
+                `✅ [OFFLINE] ${assignedForms.length} asignados desde caché`
+              );
+            }
+          } catch (err) {
+            console.error("❌ [OFFLINE] Error asignados:", err);
+          }
+
+          // Formularios por aprobar
+          try {
+            const stored = await AsyncStorage.getItem("approval_forms_offline");
+            if (stored) {
+              approvalForms = JSON.parse(stored);
+              console.log(
+                `✅ [OFFLINE] ${approvalForms.length} por aprobar desde caché`
+              );
+            }
+          } catch (err) {
+            console.error("❌ [OFFLINE] Error por aprobar:", err);
+          }
         }
 
-        // ✅ BATCH UPDATE: Un solo setState para evitar re-renders múltiples
+        // Actualizar estado
         setUserInfo(userInfoData);
         setFormsCompleted(completedForms);
         setFormsAssigned(assignedForms);
         setFormsToApprove(approvalForms);
         setLoading(false);
       } catch (error) {
-        console.error("Error cargando datos del dashboard:", error);
+        console.error("❌ [Dashboard] Error cargando datos:", error);
         setLoading(false);
       }
     };
@@ -383,6 +459,9 @@ export default function Dashboard() {
       colors={["#4B34C7", "#4B34C7"]}
       style={styles.fullBackground}
     >
+      {/* Indicador de conexión */}
+      <ConnectionIndicator />
+
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.contentContainer}
@@ -648,12 +727,12 @@ export default function Dashboard() {
                 nestedScrollEnabled={true}
                 showsVerticalScrollIndicator={true}
               >
-                {formsCompleted.map((item) => {
+                {formsCompleted.map((item, index) => {
                   // ✅ Nueva estructura: { form: {...}, responses: [...] }
                   const form = item.form || item;
                   return (
                     <TouchableOpacity
-                      key={form.id}
+                      key={`completed-${form.id}-${index}`}
                       style={styles.listItem}
                       onPress={() => handleNavigateToForm(form)}
                       activeOpacity={0.7}
@@ -719,9 +798,9 @@ export default function Dashboard() {
                 nestedScrollEnabled={true}
                 showsVerticalScrollIndicator={true}
               >
-                {formsPending.map((form) => (
+                {formsPending.map((form, index) => (
                   <TouchableOpacity
-                    key={form.id}
+                    key={`pending-${form.id}-${index}`}
                     style={styles.listItem}
                     onPress={() => handleNavigateToForm(form)}
                     activeOpacity={0.7}
@@ -786,9 +865,9 @@ export default function Dashboard() {
                 nestedScrollEnabled={true}
                 showsVerticalScrollIndicator={true}
               >
-                {pendingApprovals.map((form) => (
+                {pendingApprovals.map((form, index) => (
                   <TouchableOpacity
-                    key={`${form.form_id}-${form.response_id}`}
+                    key={`approval-${form.form_id}-${form.response_id}-${index}`}
                     style={styles.listItem}
                     onPress={() =>
                       router.push(

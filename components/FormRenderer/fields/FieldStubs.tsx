@@ -54,7 +54,7 @@ export const TimeField: React.FC<any> = (props) => <DateField {...props} mode="t
 
 // NumberField
 export const NumberField: React.FC<any> = (props) => (
-    <InputField {...props} keyboardType="numeric" />
+    <InputField {...props} keyboardType="numeric" fieldType="number" />
 );
 
 // CheckboxField
@@ -609,15 +609,36 @@ export const RepeaterField: React.FC<any> = ({
         </View>
     );
 };// MathOperationsField - Campo de operaciones matemáticas con cálculo en tiempo real
-export const MathOperationsField: React.FC<any> = ({
+export const MathOperationsField: React.FC<any> = React.memo(({
     label,
     value,
     mathExpression,
     formValues,
     formStructure,
-    error
+    error,
+    onChange,
+    id
 }) => {
     const [calculatedResult, setCalculatedResult] = React.useState<number | null>(null);
+    const [lastCalculatedValue, setLastCalculatedValue] = React.useState<number | null>(null);
+
+    // Sincronizar con el valor inicial/guardado
+    React.useEffect(() => {
+        if (value !== undefined && value !== null && value !== '') {
+            const numValue = parseFloat(value);
+            if (!isNaN(numValue)) {
+                setCalculatedResult(numValue);
+                setLastCalculatedValue(numValue);
+                console.log(`🔄 [MathOperations] Valor inicial cargado: ${numValue}`);
+            } else {
+                // Si el valor no es un número válido (ej: un ID), limpiarlo
+                console.warn(`⚠️ [MathOperations] Valor inicial inválido (no es número): ${value}, limpiando...`);
+                if (onChange && id) {
+                    onChange(id, null);
+                }
+            }
+        }
+    }, [value, onChange, id]);
 
     // Crear mapa de questionId -> form_design_element_id
     const questionIdMap = React.useMemo(() => {
@@ -643,7 +664,14 @@ export const MathOperationsField: React.FC<any> = ({
 
     // Calcular resultado en tiempo real cuando cambian los valores del formulario
     React.useEffect(() => {
+        console.log('\n🔄 [MathOperations] useEffect ejecutándose...');
+        console.log('🧮 [MathOperations] Campo ID:', id);
+        console.log('🧮 [MathOperations] Label:', label);
+        console.log('🧮 [MathOperations] Value actual:', value);
+        console.log('🧮 [MathOperations] formValues:', JSON.stringify(formValues, null, 2));
+
         if (!mathExpression || typeof mathExpression !== 'string') {
+            console.log('⚠️ [MathOperations] No hay mathExpression válida');
             setCalculatedResult(null);
             return;
         }
@@ -654,6 +682,7 @@ export const MathOperationsField: React.FC<any> = ({
             const idMatches = expression.match(/\{(\d+)\}/g);
 
             if (!idMatches) {
+                console.log('⚠️ [MathOperations] No se encontraron IDs en la expresión');
                 setCalculatedResult(null);
                 return;
             }
@@ -681,13 +710,15 @@ export const MathOperationsField: React.FC<any> = ({
 
                 console.log(`🧮 [MathOperations] questionId ${questionId} -> elementId ${elementId} -> valor: ${fieldValue}`);
 
+                // Si el valor está vacío, usar 0
+                let numValue = 0;
                 if (fieldValue === undefined || fieldValue === null || fieldValue === '') {
-                    console.warn(`⚠️ [MathOperations] Valor vacío para questionId ${questionId}`);
+                    console.warn(`⚠️ [MathOperations] Valor vacío para questionId ${questionId}, usando 0`);
                     allValuesFound = false;
-                    return;
+                } else {
+                    numValue = parseFloat(fieldValue) || 0;
                 }
 
-                const numValue = parseFloat(fieldValue) || 0;
                 expression = expression.replace(match, numValue.toString());
             });
 
@@ -697,17 +728,57 @@ export const MathOperationsField: React.FC<any> = ({
 
             console.log('🧮 [MathOperations] Expresión con valores:', expression);
 
+            // 🔧 Agregar multiplicación implícita en todas las situaciones posibles
+            // Casos: (a+b)c, c(a+b), )(, número(, )número, etc.
+
+            // 1. )( -> )*(   ej: (2+3)(4+5) -> (2+3)*(4+5)
+            expression = expression.replace(/\)\s*\(/g, ')*(');
+
+            // 2. )número -> )*número   ej: (2+3)5 -> (2+3)*5
+            expression = expression.replace(/\)\s*(\d)/g, ')*$1');
+
+            // 3. número( -> número*(   ej: 5(2+3) -> 5*(2+3)
+            expression = expression.replace(/(\d)\s*\(/g, '$1*(');
+
+            // 4. Casos más complejos: después de operadores no insertar *
+            // Ya están cubiertos porque solo afectamos ) o número seguido de ( o número
+
+            console.log('🧮 [MathOperations] Expresión normalizada:', expression);
+
+            // Validar que la expresión solo contenga números y operadores matemáticos
+            const safeExpressionRegex = /^[\d\s+\-*/.()]+$/;
+            if (!safeExpressionRegex.test(expression)) {
+                console.error('❌ [MathOperations] Expresión contiene caracteres no válidos:', expression);
+                setCalculatedResult(null);
+                return;
+            }
+
             // Evaluar la expresión matemática
             // IMPORTANTE: eval es peligroso en producción, pero aquí solo procesamos números
             const result = eval(expression);
-            setCalculatedResult(typeof result === 'number' ? result : null);
+            const finalResult = typeof result === 'number' && !isNaN(result) ? result : null;
+            setCalculatedResult(finalResult);
 
-            console.log('✅ [MathOperations] Resultado calculado:', result);
+            console.log('✅ [MathOperations] Resultado calculado:', finalResult);
+
+            // 🔥 IMPORTANTE: Actualizar el valor del campo en formValues solo si cambió
+            // Asegurar que el resultado sea un número válido antes de guardar
+            if (onChange && id && finalResult !== null && !isNaN(finalResult) && finalResult !== lastCalculatedValue) {
+                // Redondear a 2 decimales para evitar problemas de precisión flotante
+                const roundedResult = Math.round(finalResult * 100) / 100;
+                setLastCalculatedValue(roundedResult);
+                onChange(id, roundedResult);
+                console.log(`✅ [MathOperations] Valor actualizado en formValues[${id}]: ${roundedResult} (tipo: ${typeof roundedResult})`);
+            }
         } catch (err) {
             console.error('❌ [MathOperations] Error calculando:', err);
             setCalculatedResult(null);
+            // Limpiar el valor en caso de error
+            if (onChange && id) {
+                onChange(id, null);
+            }
         }
-    }, [mathExpression, formValues, questionIdMap]);
+    }, [mathExpression, formValues, questionIdMap, onChange, id]);
 
     return (
         <View style={styles.container}>
@@ -740,7 +811,15 @@ export const MathOperationsField: React.FC<any> = ({
             {error && <Text style={styles.errorText}>{error}</Text>}
         </View>
     );
-};
+}, (prevProps, nextProps) => {
+    // Solo re-renderizar si cambian props relevantes
+    return (
+        prevProps.value === nextProps.value &&
+        prevProps.mathExpression === nextProps.mathExpression &&
+        prevProps.error === nextProps.error &&
+        JSON.stringify(prevProps.formValues) === JSON.stringify(nextProps.formValues)
+    );
+});
 
 // LayoutField - Renderiza hijos en vertical u horizontal
 export const LayoutField: React.FC<any> = ({ type, children, renderItem }) => {

@@ -18,6 +18,8 @@ import NetInfo from "@react-native-community/netinfo";
 import { useRouter } from "expo-router";
 import ModalFormResponses from "./ModalFormResponses";
 import { getMultipleItems } from "../utils/asyncStorageHelper";
+import { isOnline } from "../services/offlineManager";
+import ConnectionIndicator from "./ConnectionIndicator";
 
 const { width, height } = Dimensions.get("window");
 const APPROVALS_OFFLINE_KEY = "approvals_offline";
@@ -81,7 +83,8 @@ const ApprovalRequirements = React.memo(({ requirements, onFillForm }) => {
                     {requirement.fulfillment_status
                       .fulfilling_response_submitted_at
                       ? new Date(
-                          requirement.fulfillment_status.fulfilling_response_submitted_at
+                          requirement.fulfillment_status
+                            .fulfilling_response_submitted_at
                         ).toLocaleDateString()
                       : "Fecha no disponible"}
                   </Text>
@@ -163,61 +166,74 @@ export default function Approvals() {
     if (showLoading) setLoading(true);
 
     try {
-      const net = await NetInfo.fetch();
-      setIsOffline(!net.isConnected);
+      // Detectar estado de conexión
+      const online = await isOnline();
+      setIsOffline(!online);
+      console.log(
+        `📋 [Approvals] Modo: ${online ? "🌐 ONLINE" : "📵 OFFLINE"}`
+      );
 
-      if (net.isConnected) {
-        const token = await AsyncStorage.getItem("authToken");
-        if (!token) throw new Error("No authentication token found");
-        const backendUrl = await getBackendUrl();
+      let data = [];
 
-        const res = await fetch(
-          `${backendUrl}/forms/user/assigned-forms-with-responses`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
+      if (online) {
+        // MODO ONLINE: Usar endpoint + actualizar caché
+        try {
+          console.log("🌐 [ONLINE] Obteniendo aprobaciones desde API...");
+          const token = await AsyncStorage.getItem("authToken");
+          if (!token) throw new Error("No authentication token found");
+          const backendUrl = await getBackendUrl();
+
+          const res = await fetch(
+            `${backendUrl}/forms/user/assigned-forms-with-responses`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+            }
+          );
+
+          if (!res.ok) throw new Error("Error al cargar aprobaciones");
+
+          data = await res.json();
+
+          // Actualizar caché
+          await AsyncStorage.setItem(
+            APPROVALS_OFFLINE_KEY,
+            JSON.stringify(data)
+          );
+          console.log(
+            `✅ [ONLINE] ${data.length} aprobaciones + caché actualizado`
+          );
+        } catch (err) {
+          console.error("❌ [ONLINE] Error obteniendo aprobaciones:", err);
+          // Fallback a caché
+          const stored = await AsyncStorage.getItem(APPROVALS_OFFLINE_KEY);
+          if (stored) {
+            data = JSON.parse(stored);
+            console.log("⚠️ [ONLINE] Usando caché por error en API");
           }
-        );
-
-        if (!res.ok) throw new Error("Error al cargar aprobaciones");
-
-        const data = await res.json();
-        console.log("🟢 Aprobaciones recibidas:", data);
-        setForms(data || []);
-        await AsyncStorage.setItem(APPROVALS_OFFLINE_KEY, JSON.stringify(data));
-
-        // Procesar grupos de formularios
-        const pendingForms = data.filter(
-          (form) => form.your_approval_status?.status === "pendiente"
-        );
-        processFormGroups(pendingForms);
+        }
       } else {
+        // MODO OFFLINE: Solo usar caché
+        console.log("📵 [OFFLINE] Obteniendo aprobaciones desde caché...");
         const stored = await AsyncStorage.getItem(APPROVALS_OFFLINE_KEY);
         if (stored) {
-          const offlineData = JSON.parse(stored);
-          setForms(offlineData);
-          const pendingForms = offlineData.filter(
-            (form) => form.your_approval_status?.status === "pendiente"
-          );
-          processFormGroups(pendingForms);
+          data = JSON.parse(stored);
+          console.log(`✅ [OFFLINE] ${data.length} aprobaciones desde caché`);
         } else {
-          setForms([]);
-          setFormGroups([]);
+          console.warn("⚠️ [OFFLINE] No hay aprobaciones en caché");
         }
       }
+
+      setForms(data || []);
+
+      // Procesar grupos de formularios pendientes
+      const pendingForms = data.filter(
+        (form) => form.your_approval_status?.status === "pendiente"
+      );
+      processFormGroups(pendingForms);
     } catch (e) {
-      console.error("❌ Error cargando aprobaciones:", e);
-      const stored = await AsyncStorage.getItem(APPROVALS_OFFLINE_KEY);
-      if (stored) {
-        const offlineData = JSON.parse(stored);
-        setForms(offlineData);
-        const pendingForms = offlineData.filter(
-          (form) => form.your_approval_status?.status === "pendiente"
-        );
-        processFormGroups(pendingForms);
-      } else {
-        setForms([]);
-        setFormGroups([]);
-      }
+      console.error("❌ [Approvals] Error general:", e);
+      setForms([]);
+      setFormGroups([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -462,6 +478,9 @@ export default function Approvals() {
 
   return (
     <View style={styles.container}>
+      {/* Indicador de conexión */}
+      <ConnectionIndicator />
+
       <ScrollView
         refreshControl={
           <RefreshControl

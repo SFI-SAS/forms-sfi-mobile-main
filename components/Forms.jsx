@@ -21,6 +21,8 @@ import { SvgXml } from "react-native-svg";
 import { LinearGradient } from "expo-linear-gradient";
 import { getFormsByUser } from "../services/api";
 import CategoryExplorerSimple from "./CategoryExplorerSimple";
+import { isOnline } from "../services/offlineManager";
+import ConnectionIndicator from "./ConnectionIndicator";
 
 const { width, height } = Dimensions.get("window");
 
@@ -93,50 +95,122 @@ export default function Forms() {
     });
   };
 
-  // 🔥 CARGAR FORMULARIOS CON PAGINACIÓN - Como versión PC
+  // 🔥 CARGAR FORMULARIOS CON PAGINACIÓN - Sistema offline/online
   const loadForms = async (pageNumber = 1) => {
     try {
       setLoading(true);
-      console.log(`🌐 [Forms] Cargando página ${pageNumber}...`);
 
-      const result = await getFormsByUser(pageNumber, PAGE_SIZE);
+      // Detectar estado de conexión
+      const online = await isOnline();
+      setIsOffline(!online);
+      console.log(
+        `📋 [Forms] Modo: ${online ? "🌐 ONLINE" : "📵 OFFLINE"} - Página ${pageNumber}`
+      );
 
-      if (result && result.items) {
-        setUserForms(result.items);
-        setTotalItems(result.total);
-        setTotalPages(result.totalPages);
-        setCurrentPage(pageNumber);
+      let formsData = [];
 
-        // Guardar en AsyncStorage solo la primera página para uso offline
-        if (pageNumber === 1) {
-          await AsyncStorage.setItem(
-            "offline_forms_page_1",
-            JSON.stringify(result.items)
-          );
-          console.log(`💾 Primera página guardada en AsyncStorage`);
+      if (online) {
+        // MODO ONLINE: Usar endpoint + actualizar caché
+        try {
+          console.log("🌐 [ONLINE] Obteniendo formularios desde API...");
+
+          const result = await getFormsByUser(pageNumber, PAGE_SIZE);
+
+          if (result && result.items) {
+            formsData = result.items;
+            setTotalItems(result.total);
+            setTotalPages(result.totalPages);
+            setCurrentPage(pageNumber);
+
+            // 💾 Guardar TODAS las páginas vistas en caché acumulativo
+            const cacheKey = `offline_forms_all_pages`;
+            const storedPages = await AsyncStorage.getItem(cacheKey);
+            let allPages = storedPages ? JSON.parse(storedPages) : {};
+
+            // Guardar esta página específica
+            allPages[`page_${pageNumber}`] = result.items;
+            await AsyncStorage.setItem(cacheKey, JSON.stringify(allPages));
+
+            // También mantener compatibilidad con caché simple (página 1)
+            if (pageNumber === 1) {
+              await AsyncStorage.setItem(
+                "offline_forms",
+                JSON.stringify(result.items)
+              );
+            }
+
+            console.log(
+              `✅ [ONLINE] ${result.items.length} formularios página ${pageNumber} + caché actualizado`
+            );
+          }
+        } catch (error) {
+          console.error("❌ [ONLINE] Error obteniendo formularios:", error);
+          // Fallback a caché si falla
+          const cacheKey = `offline_forms_all_pages`;
+          const storedPages = await AsyncStorage.getItem(cacheKey);
+          if (storedPages) {
+            const allPages = JSON.parse(storedPages);
+            formsData = allPages[`page_${pageNumber}`] || [];
+            console.log("⚠️ [ONLINE] Usando caché por error en API");
+          }
         }
+      } else {
+        // MODO OFFLINE: Cargar todas las páginas guardadas con paginación local
+        console.log("📵 [OFFLINE] Obteniendo formularios desde caché...");
+        try {
+          const cacheKey = `offline_forms_all_pages`;
+          const storedPages = await AsyncStorage.getItem(cacheKey);
 
-        console.log(
-          `✅ [Forms] ${result.items.length} formularios cargados (${result.total} totales)`
-        );
+          if (storedPages) {
+            const allPages = JSON.parse(storedPages);
+            const pageData = allPages[`page_${pageNumber}`];
+
+            if (pageData) {
+              formsData = pageData;
+
+              // Calcular total de páginas disponibles offline
+              const availablePages = Object.keys(allPages).length;
+              setTotalPages(availablePages);
+
+              // Calcular total aproximado de items
+              const totalOfflineItems = Object.values(allPages).reduce(
+                (sum, items) => sum + items.length,
+                0
+              );
+              setTotalItems(totalOfflineItems);
+              setCurrentPage(pageNumber);
+
+              console.log(
+                `✅ [OFFLINE] ${formsData.length} formularios página ${pageNumber}/${availablePages} desde caché`
+              );
+            } else {
+              console.warn(
+                `⚠️ [OFFLINE] Página ${pageNumber} no disponible en caché`
+              );
+            }
+          } else {
+            // Fallback al caché simple (solo página 1)
+            const stored = await AsyncStorage.getItem("offline_forms");
+            if (stored && pageNumber === 1) {
+              formsData = JSON.parse(stored);
+              setTotalItems(formsData.length);
+              setTotalPages(1);
+              setCurrentPage(1);
+              console.log(
+                `✅ [OFFLINE] ${formsData.length} formularios desde caché simple`
+              );
+            } else {
+              console.warn("⚠️ [OFFLINE] No hay formularios en caché");
+            }
+          }
+        } catch (error) {
+          console.error("❌ [OFFLINE] Error leyendo caché:", error);
+        }
       }
+
+      setUserForms(formsData);
     } catch (error) {
-      console.error("❌ Error cargando formularios:", error);
-
-      // Fallback a AsyncStorage si estamos offline o hay error
-      if (pageNumber === 1) {
-        const stored = await AsyncStorage.getItem("offline_forms_page_1");
-        if (stored) {
-          const forms = JSON.parse(stored);
-          setUserForms(forms);
-          setTotalItems(forms.length);
-          setTotalPages(1);
-          setCurrentPage(1);
-          console.log(
-            `📴 [Forms] ${forms.length} formularios cargados desde AsyncStorage`
-          );
-        }
-      }
+      console.error("❌ [Forms] Error general:", error);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -224,6 +298,9 @@ export default function Forms() {
       colors={["#4B34C7", "#4B34C7"]}
       style={styles.fullBackground}
     >
+      {/* Indicador de conexión */}
+      <ConnectionIndicator />
+
       <View style={styles.container}>
         {/* Apartado de búsqueda - Solo en vista de lista */}
         {!useCategoryExplorer && (

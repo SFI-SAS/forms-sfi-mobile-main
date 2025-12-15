@@ -4,7 +4,10 @@
  * Maneja conversión de form_design + questions a formStructure unificada
  */
 
-import { getTableCorrelations } from "../services/api";
+import {
+  getTableCorrelations,
+  getMathOperationsByQuestions,
+} from "../services/api";
 
 export interface FormItem {
   id: string;
@@ -60,8 +63,11 @@ export interface FormItem {
     optionsSource?: "endpoint" | "form_design" | "fallback"; // Para debug
     error?: string; // Mensaje de error si falla carga
     code?: string; // Para mathoperations: expresión matemática con {questionId}
+    mathExpression?: string; // Para mathoperations: alias de code
     descriptionValue?: string; // Para FileField: valor de la descripción (usado por repeater)
     onDescriptionChange?: (desc: string) => void; // Para FileField: handler del cambio de descripción (usado por repeater)
+    fieldType?: string; // Tipo de validación del campo (number, email, phone, etc)
+    type?: string; // Alias para fieldType
   };
   children?: FormItem[];
   questionId?: number;
@@ -446,6 +452,90 @@ export async function processFormData(
   );
 
   console.log(`✅ [FormDataAdapter] Procesados ${formStructure.length} items`);
+
+  // 5. 🆕 Enriquecer campos mathoperations con sus expresiones matemáticas
+  try {
+    // Identificar questionIds de campos mathoperations
+    const mathOperationQuestionIds: number[] = [];
+    const traverseForMathOps = (items: typeof formStructure) => {
+      items.forEach((item) => {
+        if (item.type === "mathoperations" && item.questionId) {
+          mathOperationQuestionIds.push(item.questionId);
+        }
+        if (item.children) {
+          traverseForMathOps(item.children);
+        }
+      });
+    };
+    traverseForMathOps(formStructure);
+
+    if (mathOperationQuestionIds.length > 0) {
+      console.log(
+        `📐 [FormDataAdapter] Obteniendo operaciones para ${mathOperationQuestionIds.length} campos: ${mathOperationQuestionIds.join(", ")}`
+      );
+
+      const mathOpsData = await getMathOperationsByQuestions(
+        formId,
+        mathOperationQuestionIds
+      );
+
+      if (
+        mathOpsData.found &&
+        mathOpsData.operations &&
+        mathOpsData.operations.length > 0
+      ) {
+        console.log(
+          `✅ [FormDataAdapter] ${mathOpsData.operations.length} operaciones matemáticas encontradas`
+        );
+        console.log(
+          "📊 [FormDataAdapter] Operaciones:",
+          JSON.stringify(mathOpsData.operations, null, 2)
+        );
+
+        // Crear mapa de questionId -> operation
+        const operationsMap: Record<number, string> = {};
+        mathOpsData.operations.forEach((op: any) => {
+          // Cada operación puede tener múltiples id_questions
+          // La operación se aplica a todas esas preguntas
+          if (Array.isArray(op.id_questions) && op.operations) {
+            op.id_questions.forEach((qId: number) => {
+              operationsMap[qId] = op.operations;
+            });
+          }
+        });
+
+        // Aplicar operaciones a los campos mathoperations
+        const applyMathOps = (items: typeof formStructure) => {
+          items.forEach((item) => {
+            if (
+              item.type === "mathoperations" &&
+              item.questionId &&
+              operationsMap[item.questionId]
+            ) {
+              item.props.code = operationsMap[item.questionId];
+              console.log(
+                `✅ [FormDataAdapter] Operación aplicada a campo ${item.id} (question ${item.questionId}): ${item.props.code}`
+              );
+            }
+            if (item.children) {
+              applyMathOps(item.children);
+            }
+          });
+        };
+        applyMathOps(formStructure);
+      } else {
+        console.warn(
+          "⚠️ [FormDataAdapter] No se encontraron operaciones matemáticas en el backend"
+        );
+      }
+    }
+  } catch (error) {
+    console.error(
+      "❌ [FormDataAdapter] Error obteniendo operaciones matemáticas:",
+      error
+    );
+    // No bloquear si falla - continuar sin las operaciones
+  }
 
   return {
     formStructure,

@@ -210,19 +210,67 @@ const FormRenderer: React.FC<FormRendererProps> = React.memo(({
     const renderItem = useCallback((item: FormItem): React.ReactNode => {
         const value = values[item.id];
         const error = errors[item.id];
+
+        // Crear onChange específico para este campo
+        const handleChange = (val: any) => {
+            console.log(`📝 [FormRenderer onChange] Campo: ${item.id}, Tipo: ${item.type}, Valor: ${val}`);
+            onChange(item.id, val);
+        };
+
         const commonProps = {
+            id: item.id,
+            label: item.props?.label,
             value,
-            onChange: (val: any) => onChange(item.id, val),
+            onChange: handleChange,
             error,
             disabled,
             ...item.props
+        };
+
+        // Detectar tipo de campo del backend y mapear a tipo de validación
+        const getFieldType = (): any => {
+            const props = item.props as any;
+            const backendType = props?.fieldType || props?.type;
+
+            // Mapeo de tipos del backend a tipos de validación
+            const typeMap: Record<string, string> = {
+                'number': 'number',
+                'numeric': 'number',
+                'email': 'email',
+                'phone': 'phone',
+                'tel': 'phone',
+                'url': 'url',
+                'alphanumeric': 'alphanumeric',
+                'text': 'text',
+            };
+
+            return typeMap[backendType?.toLowerCase()] || 'text';
+        };
+
+        // Detectar keyboardType apropiado basado en fieldType
+        const getKeyboardType = (): any => {
+            const fieldType = getFieldType();
+            const keyboardMap: Record<string, string> = {
+                'number': 'numeric',
+                'email': 'email-address',
+                'phone': 'phone-pad',
+                'url': 'url',
+                'text': 'default',
+                'alphanumeric': 'default',
+            };
+            return keyboardMap[fieldType] || 'default';
         };
 
         switch (item.type) {
             case 'input':
                 return (
                     <View collapsable={false}>
-                        <InputField key={item.id} {...commonProps} />
+                        <InputField
+                            key={item.id}
+                            {...commonProps}
+                            fieldType={getFieldType()}
+                            keyboardType={getKeyboardType()}
+                        />
                     </View>
                 );
 
@@ -287,11 +335,16 @@ const FormRenderer: React.FC<FormRendererProps> = React.memo(({
                 return <FacialField key={item.id} {...commonProps} />;
 
             case 'mathoperations':
+                const mathProps = item.props as any;
+                console.log('🔍 [FormRenderer] MathOperations item completo:', JSON.stringify(item, null, 2));
+                console.log('🔍 [FormRenderer] item.props:', item.props);
+                console.log('🔍 [FormRenderer] item.props?.code:', mathProps?.code);
+                console.log('🔍 [FormRenderer] item.props?.mathExpression:', mathProps?.mathExpression);
                 return (
                     <MathOperationsField
                         key={item.id}
                         {...commonProps}
-                        mathExpression={item.props?.code || ''}
+                        mathExpression={mathProps?.code || mathProps?.mathExpression || ''}
                         formValues={values}
                         formStructure={safeFormStructure}
                     />
@@ -365,7 +418,7 @@ const FormRenderer: React.FC<FormRendererProps> = React.memo(({
                 console.warn(`⚠️ Tipo de campo no soportado: ${item.type}`);
                 return null;
         }
-    }, [values, errors, disabled, handleCorrelationAutoComplete, onChange]);
+    }, [values, errors, disabled, handleCorrelationAutoComplete, onChange, safeFormStructure]);
 
     /**
      * Renderizado con FlatList para virtualización (soluciona crashes de ScrollView)
